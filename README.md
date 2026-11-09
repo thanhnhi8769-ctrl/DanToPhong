@@ -21,7 +21,7 @@ Xe sẽ **tự động tăng tốc chạy về phía trước** mà không cần
 
 ## 🗺️ 2. Hệ Thống Bản Đồ Thu Nhỏ (Minimap)
 
-- **Kích hoạt tự động:** Khung Minimap tự động xuất hiện ở góc màn hình ngay sau khi người chơi nhấn **Play** (bắt đầu chơi) từ màn hình Hướng dẫn.
+- **Kích hoạt tự động:** Khung Minimap tự động xuất hiện ở góc màn hình ngay sau khi người chơi nhấn **Play** .
 - **Góc nhìn camera đi theo xe:** Camera Minimap chiếu trực diện từ trên xuống (Orthographic) và di chuyển đi theo sát chiếc xe scooter, giúp người chơi dễ dàng quan sát cung đường phía trước quanh vị trí xe đang chạy.
 
 ---
