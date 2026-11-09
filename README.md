@@ -1,4 +1,4 @@
-<h1 align="center"># 🛵 DÂN TỔ PHÓNG - HƯỚNG DẪN CHƠI GAME</h1>
+<h1 align="center"> 🛵 DÂN TỔ PHÓNG - HƯỚNG DẪN CHƠI GAME</h1>
 
 **Dân Tổ Phóng** là tựa game đua xe scooter 3D tốc độ cao! Nhiệm vụ của bạn là làm chủ tay lái, thu thập các đồng xu check-point để duy trì thời gian và vượt qua cổng chiến thắng trước khi hết giờ.
 
@@ -40,3 +40,10 @@ Xe sẽ **tự động tăng tốc chạy về phía trước** mà không cần
 Bạn có thể tải gói cài đặt/chạy thử game (dung lượng ~160 MB) trực tiếp qua đường dẫn Google Drive của nhóm:
 
 👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/19yD3hVmTsLrwTkeZ62ubmaOBwO1awUto?usp=sharing)
+
+---
+<p align="center">
+  <b> ĐỒ ÁN MÔN HỌC - LẬP TRÌNH MẠNG CĂN BẢN </b>
+  <br>
+  <em> NHÓM 4 </em>
+</p>
