@@ -46,8 +46,7 @@ Xe sẽ **tự động tăng tốc chạy về phía trước** mà không cần
 
 ## 📦 5. Tải Bản Build Game (BuildGame.zip)
 
-👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/1gAcQP6cickEs-6g9OnmrHQMr8ov0Vwrq?usp=sharing)
->>>>>>> 04d7fe4e56efab9137fb5fb70517cc324e808bb6
+👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/1gAcQP6cickEs-6g9OnmrHQMr8ov0Vwrq?usp=drive_link)
 
 ---
 
