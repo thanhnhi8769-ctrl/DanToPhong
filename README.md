@@ -1,4 +1,4 @@
-# 🛵 DÂN TỔ PHÓNG - HƯỚNG DẪN CHƠI GAME
+<h1 align="center"> 🛵 DÂN TỔ PHÓNG - HƯỚNG DẪN CHƠI GAME</h1>
 
 **Dân Tổ Phóng** là tựa game đua xe scooter 3D tốc độ cao! Nhiệm vụ của bạn là làm chủ tay lái, thu thập các đồng xu checkpoint để duy trì thời gian và vượt qua cổng chiến thắng trước khi hết giờ.
 
