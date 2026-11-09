@@ -43,7 +43,7 @@ Bạn có thể tải gói cài đặt/chạy thử game (dung lượng ~160 MB)
 
 ---
 <p align="center">
-  <b> ĐỒ ÁN MÔN HỌC - LẬP TRÌNH MẠNG CĂN BẢN #</b>
+  <b> ĐỒ ÁN MÔN HỌC - LẬP TRÌNH MẠNG CĂN BẢN </b>
   <br>
   <em> NHÓM 4 </em>
 </p>
