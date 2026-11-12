@@ -92,7 +92,7 @@ public class scooter : MonoBehaviour
         mrIcon.material = new Material(unlitShader);
 
         CapNhatMauMuiTen();
-        Invoke(nameof(CapNhatMauMuiTen), 0.25f); // Cập nhật lại lần nữa sau khi Photon đồng bộ xong chủ xe
+        Invoke(nameof(CapNhatMauMuiTen), 0.25f);
 
         bool laXeCuaMinh = !PhotonNetwork.IsConnected || (pv != null && pv.IsMine);
 
@@ -126,7 +126,6 @@ public class scooter : MonoBehaviour
     {
         if (mrIcon == null) return;
 
-        // Khi chơi Online: chỉ xe có pv.IsMine == true mới là màu Xanh Lá, xe còn lại chắc chắn màu Đỏ
         bool laXeCuaMinh = PhotonNetwork.IsConnected
             ? (pv != null && pv.IsMine)
             : true;
@@ -134,6 +133,35 @@ public class scooter : MonoBehaviour
         Color mauDanhDau = laXeCuaMinh ? Color.green : Color.red;
         mrIcon.material.SetColor("_BaseColor", mauDanhDau);
         mrIcon.material.color = mauDanhDau;
+    }
+
+    // Xử lý ăn đồng xu Tag "CheckPoint": biến mất đồng xu trên cả 2 máy & cộng +5s cho người ăn
+    private void XuLyAnDongXu(GameObject objVaCham)
+    {
+        if (objVaCham == null || !objVaCham.activeSelf) return;
+
+        if (objVaCham.CompareTag("CheckPoint"))
+        {
+            if (!PhotonNetwork.IsConnected || (pv != null && pv.IsMine))
+            {
+                if (GameManager.Instance != null)
+                {
+                    GameManager.Instance.QuaCheckPoint();
+                }
+            }
+
+            objVaCham.SetActive(false);
+        }
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        XuLyAnDongXu(other.gameObject);
+    }
+
+    private void OnCollisionEnter(Collision collision)
+    {
+        XuLyAnDongXu(collision.gameObject);
     }
 
     private void OnCollisionStay(Collision collision)
