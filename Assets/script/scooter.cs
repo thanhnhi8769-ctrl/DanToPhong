@@ -135,7 +135,7 @@ public class scooter : MonoBehaviour
         mrIcon.material.color = mauDanhDau;
     }
 
-    // Xử lý ăn đồng xu Tag "CheckPoint": biến mất đồng xu trên cả 2 máy & cộng +5s cho người ăn
+    // Xử lý ăn đồng xu Tag "CheckPoint": biến mất đồng xu & cộng +5s cho người ăn
     private void XuLyAnDongXu(GameObject objVaCham)
     {
         if (objVaCham == null || !objVaCham.activeSelf) return;
@@ -159,6 +159,19 @@ public class scooter : MonoBehaviour
         XuLyAnDongXu(other.gameObject);
     }
 
+    private void OnTriggerStay(Collider other)
+    {
+        if (pv != null && !pv.IsMine) return;
+
+        if (other.gameObject.name.Contains("Sea_Plane") || other.gameObject.CompareTag("Sea_Plane") || other.gameObject.CompareTag("Water"))
+        {
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.ChamNuocTruThoiGian();
+            }
+        }
+    }
+
     private void OnCollisionEnter(Collision collision)
     {
         XuLyAnDongXu(collision.gameObject);
@@ -167,6 +180,14 @@ public class scooter : MonoBehaviour
     private void OnCollisionStay(Collision collision)
     {
         if (pv != null && !pv.IsMine) return;
+
+        if (collision.gameObject.name.Contains("Sea_Plane") || collision.gameObject.CompareTag("Sea_Plane") || collision.gameObject.CompareTag("Water"))
+        {
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.ChamNuocTruThoiGian();
+            }
+        }
 
         for (int i = 0; i < collision.contactCount; i++)
         {
