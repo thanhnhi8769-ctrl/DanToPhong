@@ -71,7 +71,7 @@ Sau khi cuộc đua bắt đầu, chỉ cần nhấn phím tăng tốc lần đ�
 
 ## 📦 7. Tải Bản Build Game (BuildGame.zip)
 
-👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/1gAcQP6cickEs-6g9OnmrHQMr8ov0Vwrq?usp=drive_link)
+👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/19mJVw_RUIEru4CHCZbzZtJtPiwsEHSFR?usp=sharing)
 
 ---
 
