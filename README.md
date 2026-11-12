@@ -1,6 +1,6 @@
 <h1 align="center">🛵 DÂN TỔ PHÓNG - MULTIPLAYER RACING GAME</h1>
 
-**Dân Tổ Phóng** là tựa game đua xe scooter 3D tốc độ cao hỗ trợ chế độ **Chơi mạng nhiều người (Multiplayer)** thời gian thực thông qua **Photon PUN 2**! Nhiệm vụ của bạn là làm chủ tay lái, thu thập các đồng xu checkpoint để duy trì quỹ thời gian và vượt qua cổng chiến thắng trước đối thủ cũng như trước khi đồng hồ đếm về 0.
+**Dân Tổ Phóng** là tựa game đua xe scooter 3D tốc độ cao hỗ trợ chế độ **Chơi mạng nhiều người (Multiplayer)** thời gian thực thông qua **Photon PUN 2**! Nhiệm vụ của bạn là làm chủ tay lái, thu thập các đồng xu checkpoint để duy trì quỹ thời gian, tránh rơi xuống vùng nước biển và vượt qua cổng chiến thắng trước đối thủ cũng như trước khi đồng hồ đếm về `0`.
 
 ---
 
@@ -28,8 +28,8 @@ Sau khi cuộc đua bắt đầu, chỉ cần nhấn phím tăng tốc lần đ�
 | `S` hoặc `↓` | **Phanh / Lùi xe:** Hãm tốc độ khi vào cua gắt hoặc lùi xe khi bị vướng chướng ngại vật |
 | `A` hoặc `←` | **Rẽ trái:** Bẻ lái xe sang bên trái |
 | `D` hoặc `→` | **Rẽ phải:** Bẻ lái xe sang bên phải |
-| `Space` (Dấu cách) | **Nhảy:** Nhảy qua các chướng ngại vật trên đường đua |
-| `ESC` | **Tạm dừng / Rời phòng:** Mở bảng tùy chọn (`Resume` để tiếp tục hoặc `Quit` để rời phòng về sảnh chờ) |
+| `Space` (Dấu cách) | **Nhảy:** Nhảy qua các chướng ngại vật hoặc nhảy thoát khỏi vùng nước |
+| `ESC` | **Tạm dừng / Thoát trận:** Mở bảng tùy chọn (`Resume` để tiếp tục hoặc `Quit` để rời phòng quay về màn hình Menu chính) |
 
 ---
 
@@ -42,34 +42,43 @@ Sau khi cuộc đua bắt đầu, chỉ cần nhấn phím tăng tốc lần đ�
 
 ---
 
-## ⏱️ 4. Luật Chơi & Cơ Chế Checkpoint (Rules)
+## ⏱️ 4. Luật Chơi, Checkpoint & Vùng Nước Phạt (Rules)
 
 - **Thời gian ban đầu:** Mỗi tay đua có sẵn **30 giây** đếm ngược khi bắt đầu lượt chạy.
-- **Đồng xu Checkpoint:** Trên đường đua xuất hiện các **Đồng xu (Coins)**. Mỗi khi ăn được 1 đồng xu checkpoint, bạn sẽ được **cộng thêm +5 giây** vào quỹ thời gian của mình.
+- **Đồng xu Checkpoint xoay tròn:** Trên đường đua xuất hiện các **Đồng xu (Coins)** tự động xoay tròn tại chỗ. Mỗi khi ăn được 1 đồng xu checkpoint, bạn sẽ được **cộng thêm +5 giây** vào quỹ thời gian kèm thông báo và hiệu ứng âm thanh.
+- **Vùng nước biển (`Sea_Plane`) trừ thời gian:** Nếu lái xe trượt hoặc nhảy rơi xuống vùng nước biển bao quanh đường đua, hệ thống sẽ hiện cảnh báo và **trừ thêm 1 giây mỗi giây** tương ứng với thời gian xe ở dưới nước cho đến khi bạn nhảy thoát lên bờ.
 - **Cổng Checkwin:** Vượt qua các chướng ngại vật, thu thập checkpoint và cán đích tại **Cổng Checkwin** (biển hiệu **Billboard Finish**) sớm nhất để giành chiến thắng.
 - **Điều kiện thua cuộc:** Thời gian đếm ngược của bạn về `0` trước khi chạm đích, hoặc có đối thủ khác về đích trước bạn.
 
 ---
 
-## 💡 5. Mẹo Đua Xe (Pro Tips)
+## 🔊 5. Hệ Thống Âm Thanh & Giao Diện Trực Quan (Audio & UI)
+
+- **Nhạc nền xuyên suốt:** Nhạc nền tự động phát từ màn hình **Menu** sang **Phòng chờ (Lobby)** và chuyển sang nhạc đường đua sôi động khi vào trận (tự động tạm dừng khi mở bảng `ESC` và dừng khi kết thúc ván).
+- **Hiệu ứng âm thanh (SFX):** Tích hợp âm thanh phản hồi riêng khi ăn đồng xu Checkpoint, Chiến thắng (Win) và Thua cuộc (Game Over).
+- **Thông báo sự kiện nổi bật:** Hiển thị cảnh báo chữ trắng viền đen sắc nét giữa màn hình khi nhận thưởng thời gian, rơi xuống nước hoặc có người chơi chạm đích / thoát phòng.
+
+---
+
+## 💡 6. Mẹo Đua Xe (Pro Tips)
 
 - **Theo dõi mũi tên Đỏ trên Minimap:** Quan sát khoảng cách và hướng rẽ của đối thủ để chủ động bứt tốc ở các đoạn đường thẳng.
-- **Căn thời gian nhảy (`Space`):** Tận dụng phím nhảy để vượt qua chướng ngại vật hoặc nhảy cắt góc lề đường rút ngắn quãng đường.
-- **Tăng tốc thông minh (`W` / `↑`):** Giữ tăng tốc trên các đoạn đường thẳng dài và nhả phím trước khi vào cua gấp để tránh văng khỏi đường đua.
+- **Căn thời gian nhảy (`Space`):** Tận dụng phím nhảy để vượt qua chướng ngại vật, nhảy cắt góc lề đường hoặc nhảy thoát nhanh nếu chẳng may rơi xuống nước `Sea_Plane`.
+- **Tăng tốc thông minh (`W` / `↑`):** Giữ tăng tốc trên các đoạn đường thẳng dài và nhả phím trước khi vào cua gấp để tránh văng khỏi đường đua xuống biển.
 - **Xử lý khi bị kẹt:** Nếu xe va chạm vào mép đường hoặc vật cản, giữ phím `S` (hoặc `↓`) để lùi xe ra nhanh chóng.
 
 ---
 
-## 🛠️ 6. Công Nghệ Sử Dụng
+## 🛠️ 7. Công Nghệ Sử Dụng
 
 - **Game Engine:** Unity 6 (Universal Render Pipeline - URP)
 - **Networking:** Photon PUN 2 (Photon Unity Networking)
 - **Camera System:** Unity Cinemachine & Orthographic Minimap Camera
-- **UI:** TextMeshPro (TMP)
+- **UI & Audio:** TextMeshPro (TMP) & Multi-channel AudioSource
 
 ---
 
-## 📦 7. Tải Bản Build Game (BuildGame.zip)
+## 📦 8. Tải Bản Build Game (BuildGame.zip)
 
 👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/19mJVw_RUIEru4CHCZbzZtJtPiwsEHSFR?usp=sharing)
 
