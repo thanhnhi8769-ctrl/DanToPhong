@@ -6,8 +6,8 @@ public class MenuController : MonoBehaviour
     // Hàm gọi khi bấm nút PLAY
     public void ChoiGame()
     {
-        // Điền chính xác tên Scene màn chơi game của bạn vào đây (ví dụ: "game" hoặc "SampleScene")
-        SceneManager.LoadScene("game");
+        // Chuyển sang màn hình sảnh chờ để tạo/vào phòng trước khi đua
+        SceneManager.LoadScene("LobbyScene");
     }
 
     // Hàm gọi khi bấm nút QUIT

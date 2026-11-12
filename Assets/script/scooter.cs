@@ -1,4 +1,6 @@
 using UnityEngine;
+using Photon.Pun; // Thư viện Photon
+using Unity.Cinemachine; // Thư viện Cinemachine cho Unity 6
 
 public class scooter : MonoBehaviour
 {
@@ -21,7 +23,7 @@ public class scooter : MonoBehaviour
     private bool xeDangBat = false;
     private bool dangPhanh = false;
     private bool dangTangToc = false;
-    private bool dangLui = false; // Thêm biến nhận diện đang lùi
+    private bool dangLui = false;
     private float dauVaoRe;
     private float tocDoDangChay = 0f;
 
@@ -29,20 +31,115 @@ public class scooter : MonoBehaviour
     private float thoiDiemBamNhay = -10f;
 
     private Rigidbody rb;
+    private PhotonView pv;
+    private MeshRenderer mrIcon;
 
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
-        rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        pv = GetComponent<PhotonView>();
 
         if (hieuUngPhanh != null)
         {
             hieuUngPhanh.SetActive(false);
         }
+
+        // Xóa MinimapIcon cũ (nếu có) để tạo mới dạng Mũi Tên định hướng GPS
+        foreach (Transform con in GetComponentsInChildren<Transform>(true))
+        {
+            if (con.name.Trim() == "MinimapIcon")
+            {
+                Destroy(con.gameObject);
+            }
+        }
+
+        // Tạo hình Mũi Tên bằng Mesh phẳng hướng thẳng theo đầu xe (trục +X của scooter)
+        GameObject muiTenObj = new GameObject("MinimapIcon");
+        muiTenObj.transform.SetParent(this.transform);
+        muiTenObj.transform.localPosition = new Vector3(0f, 3.5f, 0f);
+        muiTenObj.transform.localRotation = Quaternion.identity;
+        muiTenObj.transform.localScale = new Vector3(4.5f, 1f, 4.5f);
+
+        int layerMinimap = LayerMask.NameToLayer("Minimap");
+        if (layerMinimap != -1)
+        {
+            muiTenObj.layer = layerMinimap;
+        }
+
+        MeshFilter mf = muiTenObj.AddComponent<MeshFilter>();
+        mrIcon = muiTenObj.AddComponent<MeshRenderer>();
+
+        // Dựng hình mũi tên GPS (mũi nhọn hướng về +X, đuôi khoét chữ V)
+        Mesh meshMuiTen = new Mesh();
+        meshMuiTen.vertices = new Vector3[]
+        {
+            new Vector3( 1.2f, 0f,  0.0f), // 0: Đỉnh nhọn phía trước đầu xe
+            new Vector3(-0.9f, 0f,  0.85f),// 1: Cánh trái
+            new Vector3(-0.4f, 0f,  0.0f), // 2: Điểm lõm ở đuôi
+            new Vector3(-0.9f, 0f, -0.85f) // 3: Cánh phải
+        };
+        meshMuiTen.triangles = new int[]
+        {
+            0, 2, 1, // Nửa trái mũi tên (mặt hướng lên trời +Y)
+            0, 3, 2  // Nửa phải mũi tên (mặt hướng lên trời +Y)
+        };
+        meshMuiTen.RecalculateNormals();
+        mf.mesh = meshMuiTen;
+
+        // Cấp phát Material độc lập cho từng xe và tô màu chuẩn URP
+        Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (unlitShader == null) unlitShader = Shader.Find("Unlit/Color");
+        mrIcon.material = new Material(unlitShader);
+
+        CapNhatMauMuiTen();
+        Invoke(nameof(CapNhatMauMuiTen), 0.25f); // Cập nhật lại lần nữa sau khi Photon đồng bộ xong chủ xe
+
+        bool laXeCuaMinh = !PhotonNetwork.IsConnected || (pv != null && pv.IsMine);
+
+        if (laXeCuaMinh)
+        {
+            rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+
+            // 1. Gắn CinemachineCamera chính bám theo xe
+            CinemachineCamera cam = FindFirstObjectByType<CinemachineCamera>();
+            if (cam != null)
+            {
+                Transform diemBamCam = transform.Find("pointFollowTarget");
+                cam.Target.TrackingTarget = (diemBamCam != null) ? diemBamCam : this.transform;
+            }
+
+            // 2. Gắn Camera Minimap bám theo xe của mình
+            MinimapController minimap = FindFirstObjectByType<MinimapController>();
+            if (minimap != null)
+            {
+                minimap.targetXeCuaMinh = this.transform;
+            }
+        }
+        else
+        {
+            // Nếu là xe của người chơi khác: Tắt vật lý cục bộ để nhận tọa độ mượt từ PhotonTransformView
+            rb.isKinematic = true;
+        }
+    }
+
+    private void CapNhatMauMuiTen()
+    {
+        if (mrIcon == null) return;
+
+        // Khi chơi Online: chỉ xe có pv.IsMine == true mới là màu Xanh Lá, xe còn lại chắc chắn màu Đỏ
+        bool laXeCuaMinh = PhotonNetwork.IsConnected
+            ? (pv != null && pv.IsMine)
+            : true;
+
+        Color mauDanhDau = laXeCuaMinh ? Color.green : Color.red;
+        mrIcon.material.SetColor("_BaseColor", mauDanhDau);
+        mrIcon.material.color = mauDanhDau;
     }
 
     private void OnCollisionStay(Collision collision)
     {
+        if (pv != null && !pv.IsMine) return;
+
         for (int i = 0; i < collision.contactCount; i++)
         {
             if (collision.GetContact(i).normal.y > 0.5f)
@@ -55,6 +152,18 @@ public class scooter : MonoBehaviour
 
     private void Update()
     {
+        // Chặn nhận phím bấm nếu chiếc xe này không phải của mình
+        if (pv != null && !pv.IsMine) return;
+
+        // Khóa điều khiển xe cho đến khi TẤT CẢ người chơi trong phòng đều bấm Bắt Đầu Đua
+        if (GameManager.Instance != null && !GameManager.Instance.daBatDauDua)
+        {
+            dangTangToc = false;
+            dangLui = false;
+            dauVaoRe = 0f;
+            return;
+        }
+
         // Mũi tên lên hoặc W: tiến tới + tăng tốc
         dangTangToc = Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.W);
         if (dangTangToc)
@@ -79,6 +188,9 @@ public class scooter : MonoBehaviour
 
     private void FixedUpdate()
     {
+        // Chặn tính toán vật lý nếu chiếc xe này không phải của mình
+        if (pv != null && !pv.IsMine) return;
+
         rb.angularVelocity = Vector3.zero;
 
         DiChuyenXe();
@@ -97,7 +209,6 @@ public class scooter : MonoBehaviour
         }
         else if (dangLui)
         {
-            // Cho phép chạy lùi với tốc độ bằng một nửa tốc độ tiến
             tocDoMucTieu = -tocDoXe * 0.5f;
         }
         else if (xeDangBat)
@@ -115,10 +226,8 @@ public class scooter : MonoBehaviour
     {
         if (Mathf.Abs(tocDoDangChay) < 0.1f || dauVaoRe == 0f) return;
 
-        // Nếu đang lùi, đảo chiều hướng rẽ lại cho tự nhiên
         float huongReThucTe = (tocDoDangChay < 0) ? -dauVaoRe : dauVaoRe;
 
-        // Đã sửa lại lỗi dính chữ và thiếu dấu * ở đây
         Quaternion re = Quaternion.Euler(0f, huongReThucTe * lucReXe * Time.fixedDeltaTime, 0f);
         rb.MoveRotation(rb.rotation * re);
     }
