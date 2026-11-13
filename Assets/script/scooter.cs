@@ -1,30 +1,30 @@
 using UnityEngine;
-using Photon.Pun; // Thư viện Photon
-using Unity.Cinemachine; // Thư viện Cinemachine cho Unity 6
+using Photon.Pun;
+using Unity.Cinemachine;
 
+[RequireComponent(typeof(Rigidbody))]
 public class scooter : MonoBehaviour
 {
     [Header("Di chuyển")]
     [SerializeField] private float tocDoXe = 15f;
     [SerializeField] private float heSoTangToc = 1.6f;
-    [SerializeField] private float lucReXe = 50f;
-    [SerializeField] private float giaToc = 5f;
+    [SerializeField] private float lucReXe = 85f;
+    [SerializeField] private float giaToc = 6f;
+    [SerializeField] private float doMuotLai = 10f;
 
     [Header("Phanh & Lùi")]
-    [SerializeField] private float doGatPhanh = 5f;
     [SerializeField] private GameObject hieuUngPhanh;
 
     [Header("Nhảy")]
     [SerializeField] private float lucNhay = 8f;
     [SerializeField] private float thoiGianCoyote = 0.15f;
     [SerializeField] private float thoiGianDemNhay = 0.15f;
-    [SerializeField] private bool hienLogDebug = false;
 
     private bool xeDangBat = false;
-    private bool dangPhanh = false;
-    private bool dangTangToc = false;
     private bool dangLui = false;
+    private bool dangTangToc = false;
     private float dauVaoRe;
+    private float gocReHienTai = 0f;
     private float tocDoDangChay = 0f;
 
     private float thoiDiemChamDat = -10f;
@@ -33,161 +33,126 @@ public class scooter : MonoBehaviour
     private Rigidbody rb;
     private PhotonView pv;
     private MeshRenderer mrIcon;
+    private Mesh meshMuiTen;
+    private Material matMuiTen;
+
+    private bool LaXeCuaMinh
+    {
+        get { return !PhotonNetwork.IsConnected || pv == null || pv.IsMine; }
+    }
 
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
         pv = GetComponent<PhotonView>();
 
-        if (hieuUngPhanh != null)
-        {
-            hieuUngPhanh.SetActive(false);
-        }
+        if (hieuUngPhanh != null) hieuUngPhanh.SetActive(false);
 
-        // Xóa MinimapIcon cũ (nếu có) để tạo mới dạng Mũi Tên định hướng GPS
+        TaoMuiTenMinimap();
+
+        if (LaXeCuaMinh)
+        {
+            rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+
+            CinemachineCamera cam = FindFirstObjectByType<CinemachineCamera>();
+            if (cam != null)
+            {
+                Transform diemBamCam = transform.Find("pointFollowTarget");
+                cam.Target.TrackingTarget = (diemBamCam != null) ? diemBamCam : transform;
+            }
+
+            MinimapController minimap = FindFirstObjectByType<MinimapController>();
+            if (minimap != null) minimap.targetXeCuaMinh = transform;
+        }
+        else
+        {
+            // Xe người khác: tắt vật lý cục bộ, nhận toạ độ từ PhotonTransformView
+            rb.isKinematic = true;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (matMuiTen != null) Destroy(matMuiTen);
+        if (meshMuiTen != null) Destroy(meshMuiTen);
+    }
+
+    // =========================================================================
+    // MŨI TÊN MINIMAP
+    // =========================================================================
+    private void TaoMuiTenMinimap()
+    {
         foreach (Transform con in GetComponentsInChildren<Transform>(true))
         {
-            if (con.name.Trim() == "MinimapIcon")
-            {
-                Destroy(con.gameObject);
-            }
+            if (con != transform && con.name.Trim() == "MinimapIcon") Destroy(con.gameObject);
         }
 
-        // Tạo hình Mũi Tên bằng Mesh phẳng hướng thẳng theo đầu xe (trục +X của scooter)
         GameObject muiTenObj = new GameObject("MinimapIcon");
-        muiTenObj.transform.SetParent(this.transform);
+        muiTenObj.transform.SetParent(transform);
         muiTenObj.transform.localPosition = new Vector3(0f, 3.5f, 0f);
         muiTenObj.transform.localRotation = Quaternion.identity;
         muiTenObj.transform.localScale = new Vector3(4.5f, 1f, 4.5f);
 
         int layerMinimap = LayerMask.NameToLayer("Minimap");
-        if (layerMinimap != -1)
-        {
-            muiTenObj.layer = layerMinimap;
-        }
+        if (layerMinimap != -1) muiTenObj.layer = layerMinimap;
 
         MeshFilter mf = muiTenObj.AddComponent<MeshFilter>();
         mrIcon = muiTenObj.AddComponent<MeshRenderer>();
 
-        // Dựng hình mũi tên GPS (mũi nhọn hướng về +X, đuôi khoét chữ V)
-        Mesh meshMuiTen = new Mesh();
+        meshMuiTen = new Mesh();
         meshMuiTen.vertices = new Vector3[]
         {
-            new Vector3( 1.2f, 0f,  0.0f), // 0: Đỉnh nhọn phía trước đầu xe
-            new Vector3(-0.9f, 0f,  0.85f),// 1: Cánh trái
-            new Vector3(-0.4f, 0f,  0.0f), // 2: Điểm lõm ở đuôi
-            new Vector3(-0.9f, 0f, -0.85f) // 3: Cánh phải
+            new Vector3( 1.2f, 0f,  0.0f),
+            new Vector3(-0.9f, 0f,  0.85f),
+            new Vector3(-0.4f, 0f,  0.0f),
+            new Vector3(-0.9f, 0f, -0.85f)
         };
-        meshMuiTen.triangles = new int[]
-        {
-            0, 2, 1, // Nửa trái mũi tên (mặt hướng lên trời +Y)
-            0, 3, 2  // Nửa phải mũi tên (mặt hướng lên trời +Y)
-        };
+        meshMuiTen.triangles = new int[] { 0, 2, 1, 0, 3, 2 };
         meshMuiTen.RecalculateNormals();
-        mf.mesh = meshMuiTen;
+        mf.sharedMesh = meshMuiTen;
 
-        // Cấp phát Material độc lập cho từng xe và tô màu chuẩn URP
-        Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
-        if (unlitShader == null) unlitShader = Shader.Find("Unlit/Color");
-        mrIcon.material = new Material(unlitShader);
+        Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
+        if (unlit == null) unlit = Shader.Find("Unlit/Color");
+        matMuiTen = new Material(unlit);
+        mrIcon.sharedMaterial = matMuiTen;
 
         CapNhatMauMuiTen();
+        // PhotonView có thể chưa gán chủ sở hữu ngay -> cập nhật lại 1 lần
         Invoke(nameof(CapNhatMauMuiTen), 0.25f);
-
-        bool laXeCuaMinh = !PhotonNetwork.IsConnected || (pv != null && pv.IsMine);
-
-        if (laXeCuaMinh)
-        {
-            rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-
-            // 1. Gắn CinemachineCamera chính bám theo xe
-            CinemachineCamera cam = FindFirstObjectByType<CinemachineCamera>();
-            if (cam != null)
-            {
-                Transform diemBamCam = transform.Find("pointFollowTarget");
-                cam.Target.TrackingTarget = (diemBamCam != null) ? diemBamCam : this.transform;
-            }
-
-            // 2. Gắn Camera Minimap bám theo xe của mình
-            MinimapController minimap = FindFirstObjectByType<MinimapController>();
-            if (minimap != null)
-            {
-                minimap.targetXeCuaMinh = this.transform;
-            }
-        }
-        else
-        {
-            // Nếu là xe của người chơi khác: Tắt vật lý cục bộ để nhận tọa độ mượt từ PhotonTransformView
-            rb.isKinematic = true;
-        }
     }
 
     private void CapNhatMauMuiTen()
     {
-        if (mrIcon == null) return;
-
-        bool laXeCuaMinh = PhotonNetwork.IsConnected
-            ? (pv != null && pv.IsMine)
-            : true;
-
-        Color mauDanhDau = laXeCuaMinh ? Color.green : Color.red;
-        mrIcon.material.SetColor("_BaseColor", mauDanhDau);
-        mrIcon.material.color = mauDanhDau;
+        if (matMuiTen == null) return;
+        Color mau = LaXeCuaMinh ? Color.green : Color.red;
+        matMuiTen.SetColor("_BaseColor", mau);
+        matMuiTen.color = mau;
     }
 
-    // Xử lý ăn đồng xu Tag "CheckPoint": biến mất đồng xu & cộng +5s cho người ăn
-    private void XuLyAnDongXu(GameObject objVaCham)
+    // =========================================================================
+    // VA CHẠM (CheckPoint / WinPoint xử lý ở XuLyVaChamChoXe)
+    // =========================================================================
+    private bool LaNuoc(GameObject go)
     {
-        if (objVaCham == null || !objVaCham.activeSelf) return;
-
-        if (objVaCham.CompareTag("CheckPoint"))
-        {
-            if (!PhotonNetwork.IsConnected || (pv != null && pv.IsMine))
-            {
-                if (GameManager.Instance != null)
-                {
-                    GameManager.Instance.QuaCheckPoint();
-                }
-            }
-
-            objVaCham.SetActive(false);
-        }
-    }
-
-    private void OnTriggerEnter(Collider other)
-    {
-        XuLyAnDongXu(other.gameObject);
+        return go.name.Contains("Sea_Plane") || go.CompareTag("Sea_Plane") || go.CompareTag("Water");
     }
 
     private void OnTriggerStay(Collider other)
     {
-        if (pv != null && !pv.IsMine) return;
+        if (!LaXeCuaMinh) return;
 
-        if (other.gameObject.name.Contains("Sea_Plane") || other.gameObject.CompareTag("Sea_Plane") || other.gameObject.CompareTag("Water"))
-        {
-            if (GameManager.Instance != null)
-            {
-                GameManager.Instance.ChamNuocTruThoiGian();
-            }
-        }
-    }
-
-    private void OnCollisionEnter(Collision collision)
-    {
-        XuLyAnDongXu(collision.gameObject);
+        if (LaNuoc(other.gameObject) && GameManager.Instance != null)
+            GameManager.Instance.ChamNuocTruThoiGian();
     }
 
     private void OnCollisionStay(Collision collision)
     {
-        if (pv != null && !pv.IsMine) return;
+        if (!LaXeCuaMinh) return;
 
-        if (collision.gameObject.name.Contains("Sea_Plane") || collision.gameObject.CompareTag("Sea_Plane") || collision.gameObject.CompareTag("Water"))
-        {
-            if (GameManager.Instance != null)
-            {
-                GameManager.Instance.ChamNuocTruThoiGian();
-            }
-        }
+        if (LaNuoc(collision.gameObject) && GameManager.Instance != null)
+            GameManager.Instance.ChamNuocTruThoiGian();
 
         for (int i = 0; i < collision.contactCount; i++)
         {
@@ -199,12 +164,14 @@ public class scooter : MonoBehaviour
         }
     }
 
+    // =========================================================================
+    // INPUT
+    // =========================================================================
     private void Update()
     {
-        // Chặn nhận phím bấm nếu chiếc xe này không phải của mình
-        if (pv != null && !pv.IsMine) return;
+        if (!LaXeCuaMinh) return;
 
-        // Khóa điều khiển xe cho đến khi TẤT CẢ người chơi trong phòng đều bấm Bắt Đầu Đua
+        // Khoá điều khiển đến khi tất cả người chơi bấm Bắt Đầu Đua
         if (GameManager.Instance != null && !GameManager.Instance.daBatDauDua)
         {
             dangTangToc = false;
@@ -213,32 +180,22 @@ public class scooter : MonoBehaviour
             return;
         }
 
-        // Mũi tên lên hoặc W: tiến tới + tăng tốc
-        dangTangToc = Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.W);
-        if (dangTangToc)
-        {
-            xeDangBat = true;
-        }
+        float doc = Input.GetAxisRaw("Vertical");   // W/S, mũi tên lên/xuống
+        dauVaoRe = Input.GetAxisRaw("Horizontal");  // A/D, mũi tên trái/phải
 
-        // Mũi tên xuống hoặc S: Chạy lùi
-        dangLui = Input.GetKey(KeyCode.DownArrow) || Input.GetKey(KeyCode.S);
+        dangTangToc = doc > 0.1f;
+        dangLui = doc < -0.1f;
+        if (dangTangToc) xeDangBat = true;
 
-        // A/D hoặc mũi tên trái/phải: rẽ
-        dauVaoRe = 0f;
-        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) dauVaoRe += 1f;
-        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) dauVaoRe -= 1f;
-
-        // Space: nhảy
-        if (Input.GetKeyDown(KeyCode.Space))
-        {
-            thoiDiemBamNhay = Time.time;
-        }
+        if (Input.GetKeyDown(KeyCode.Space)) thoiDiemBamNhay = Time.time;
     }
 
+    // =========================================================================
+    // VẬT LÝ
+    // =========================================================================
     private void FixedUpdate()
     {
-        // Chặn tính toán vật lý nếu chiếc xe này không phải của mình
-        if (pv != null && !pv.IsMine) return;
+        if (!LaXeCuaMinh) return;
 
         rb.angularVelocity = Vector3.zero;
 
@@ -252,54 +209,56 @@ public class scooter : MonoBehaviour
     {
         float tocDoMucTieu = 0f;
 
-        if (dangTangToc)
+        if (dangTangToc) tocDoMucTieu = tocDoXe * heSoTangToc;
+        else if (dangLui) tocDoMucTieu = -tocDoXe * 0.5f;
+        else if (xeDangBat) tocDoMucTieu = tocDoXe;
+
+        // Đồng bộ lại tốc độ nếu xe bị hãm do va chạm thật sự
+        Vector3 vHienTai = rb.linearVelocity;
+        float tocDoThucTe = Vector3.Dot(new Vector3(vHienTai.x, 0f, vHienTai.z), transform.right);
+        if (Mathf.Abs(tocDoDangChay - tocDoThucTe) > 4f)
         {
-            tocDoMucTieu = tocDoXe * heSoTangToc;
-        }
-        else if (dangLui)
-        {
-            tocDoMucTieu = -tocDoXe * 0.5f;
-        }
-        else if (xeDangBat)
-        {
-            tocDoMucTieu = tocDoXe;
+            tocDoDangChay = tocDoThucTe;
         }
 
         tocDoDangChay = Mathf.Lerp(tocDoDangChay, tocDoMucTieu, giaToc * Time.fixedDeltaTime);
 
-        Vector3 huongDiChuyen = transform.right * tocDoDangChay;
-        rb.linearVelocity = new Vector3(huongDiChuyen.x, rb.linearVelocity.y, huongDiChuyen.z);
+        Vector3 huong = transform.right * tocDoDangChay;
+        rb.linearVelocity = new Vector3(huong.x, vHienTai.y, huong.z);
     }
 
     public void ReXe()
     {
-        if (Mathf.Abs(tocDoDangChay) < 0.1f || dauVaoRe == 0f) return;
+        float huongMucTieu = 0f;
+        if (Mathf.Abs(tocDoDangChay) >= 0.1f && !Mathf.Approximately(dauVaoRe, 0f))
+        {
+            huongMucTieu = (tocDoDangChay < 0f) ? -dauVaoRe : dauVaoRe;
+        }
 
-        float huongReThucTe = (tocDoDangChay < 0) ? -dauVaoRe : dauVaoRe;
+        gocReHienTai = Mathf.Lerp(gocReHienTai, huongMucTieu, doMuotLai * Time.fixedDeltaTime);
+        if (Mathf.Abs(gocReHienTai) < 0.001f) return;
 
-        Quaternion re = Quaternion.Euler(0f, huongReThucTe * lucReXe * Time.fixedDeltaTime, 0f);
+        Quaternion re = Quaternion.Euler(0f, gocReHienTai * lucReXe * Time.fixedDeltaTime, 0f);
         rb.MoveRotation(rb.rotation * re);
     }
 
     public void PhanhXe()
     {
         if (hieuUngPhanh != null)
-        {
             hieuUngPhanh.SetActive(dangLui && Mathf.Abs(tocDoDangChay) > 1f);
-        }
     }
 
     private void NhayXe()
     {
-        bool duocBamGanDay = Time.time - thoiDiemBamNhay <= thoiGianDemNhay;
-        bool duocChamDatGanDay = Time.time - thoiDiemChamDat <= thoiGianCoyote;
-
-        if (!duocBamGanDay || !duocChamDatGanDay) return;
+        bool duocBam = Time.time - thoiDiemBamNhay <= thoiGianDemNhay;
+        bool duocChamDat = Time.time - thoiDiemChamDat <= thoiGianCoyote;
+        if (!duocBam || !duocChamDat) return;
 
         thoiDiemBamNhay = -10f;
         thoiDiemChamDat = -10f;
 
-        rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
+        Vector3 v = rb.linearVelocity;
+        rb.linearVelocity = new Vector3(v.x, 0f, v.z);
         rb.AddForce(Vector3.up * lucNhay, ForceMode.Impulse);
     }
 }

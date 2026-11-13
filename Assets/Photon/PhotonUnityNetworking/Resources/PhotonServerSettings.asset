@@ -20,7 +20,7 @@ MonoBehaviour:
     AppIdVideo: 
     AppVersion: 
     UseNameServer: 1
-    FixedRegion: 
+    FixedRegion: asia
     Server: 
     Port: 0
     ProxyServer: 
@@ -42,6 +42,12 @@ MonoBehaviour:
   - RespawnSpaceship
   - ThongBaoCoNguoiThang
   - BaoDanhSanSang
+  - RPC_DanhDauNguoiChet
+  - RPC_ThongBaoHoa
+  - RPC_ThongBaoNguoiThang
+  - YeuCauThang
+  - ThongBaoTatCaBiLoai
+  - NhanGocCamera
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 0

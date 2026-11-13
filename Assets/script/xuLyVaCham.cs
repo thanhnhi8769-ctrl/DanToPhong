@@ -1,48 +1,57 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
+using Photon.Pun;
 
-public class XuLyVaChamChoXe : MonoBehaviour
+public class XuLyVaChamChoXe : MonoBehaviourPun
 {
-    // Xử lý va chạm dạng đi xuyên qua (Trigger) như Checkpoint, WinPoint, Vạch đích
+    private bool LaXeCuaMinh
+    {
+        get { return !PhotonNetwork.IsConnected || photonView == null || photonView.IsMine; }
+    }
+
     private void OnTriggerEnter(Collider other)
     {
-        // 1. Khi xe chạy qua Checkpoint
-        if (other.gameObject.CompareTag("CheckPoint"))
+        // 1. CheckPoint: xe nào ăn thì đồng xu biến mất trên mọi máy,
+        //    nhưng chỉ chủ xe mới được cộng thời gian.
+        if (other.CompareTag("CheckPoint"))
         {
-            Debug.Log("Đã qua một Checkpoint! Đang gọi GameManager...");
+            if (!other.gameObject.activeSelf) return;
 
-            if (GameManager.Instance != null)
-            {
+            other.gameObject.SetActive(false);
+
+            if (LaXeCuaMinh && GameManager.Instance != null)
                 GameManager.Instance.QuaCheckPoint();
-            }
+
+            return;
         }
 
-        // 2. KHI XE CHẠY QUA WINPOINT (Tách độc lập hoàn toàn bằng "if")
-        if (other.gameObject.CompareTag("WinPoint"))
+        // 2. WinPoint: chỉ xe của mình
+        if (other.CompareTag("WinPoint"))
         {
-            Debug.Log("Đã về đích (WinPoint)! Đang gọi GameManager...");
-
-            if (GameManager.Instance != null)
-            {
+            if (LaXeCuaMinh && GameManager.Instance != null)
                 GameManager.Instance.QuaWinPoint();
-            }
+            return;
         }
 
-        // 3. Khi xe chạy qua vạch đích dự phòng (Finish)
-        if (other.gameObject.CompareTag("Finish"))
+        // 3. Rơi xuống nước (Trigger): chỉ tính cho xe của mình
+        if (LaXeCuaMinh && (other.gameObject.name == "Sea_Plane" || other.CompareTag("Water")))
         {
-            Debug.Log("Đã về đích thành công bằng Tag Finish!");
             if (GameManager.Instance != null)
-            {
-                GameManager.Instance.QuaWinPoint();
-            }
+                GameManager.Instance.ChamNuocTruThoiGian();
         }
     }
 
-    // Xử lý va chạm vật lý thông thường (Collision) như tông vào rào chắn, tường, vật cản
     private void OnCollisionEnter(Collision collision)
     {
+        if (!LaXeCuaMinh) return;
+
+        // Rơi xuống nước (nếu Sea_Plane chưa tích Is Trigger)
+        if (collision.gameObject.name == "Sea_Plane" || collision.gameObject.CompareTag("Water"))
+        {
+            if (GameManager.Instance != null)
+                GameManager.Instance.ChamNuocTruThoiGian();
+            return;
+        }
+
         if (collision.gameObject.CompareTag("Obstacle") || collision.gameObject.name.Contains("Barricade"))
         {
             Debug.Log("Xe đã tông vào chướng ngại vật!");

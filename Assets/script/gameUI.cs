@@ -1,35 +1,29 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using TMPro;
-using UnityEngine.SceneManagement; // Thêm thư viện quản lý scene để dùng được hàm chuyển màn
+using UnityEngine.SceneManagement;
+using Photon.Pun;
 
+// Đồng hồ đã do GameManager cập nhật, script này chỉ còn lo các nút.
 public class GameUi : MonoBehaviour
 {
-    // Kéo ô Text trên màn hình vào đây trong Unity Inspector
-    public TextMeshProUGUI timeText;
-
-    // Update is called once per frame
-    void Update()
-    {
-        HienThiThoiGianGame();
-    }
-
-    public void HienThiThoiGianGame()
-    {
-        // Lấy thời gian từ GameManager và gán lên chữ
-        timeText.SetText(Mathf.FloorToInt(GameManager.Instance.thoiGianChoPhepVeDich).ToString());
-    }
-
-    // Hàm gọi khi bấm nút Chơi Lại (load lại scene "Game")
+    // Nút Chơi Lại (chỉ dùng khi chơi offline; online nên về Lobby)
     public void ChoiLai()
     {
+        Time.timeScale = 1f;
         SceneManager.LoadScene("game");
     }
 
-    // Hàm gọi khi bấm nút Về Menu (load lại scene "Menu")
+    // Nút Về Menu
     public void VeMenu()
     {
-        SceneManager.LoadScene("menu");
+        Time.timeScale = 1f;
+        if (PhotonNetwork.InRoom)
+        {
+            // GameManager.OnLeftRoom sẽ tự load scene menu
+            PhotonNetwork.LeaveRoom();
+        }
+        else
+        {
+            SceneManager.LoadScene("menu");
+        }
     }
 }
