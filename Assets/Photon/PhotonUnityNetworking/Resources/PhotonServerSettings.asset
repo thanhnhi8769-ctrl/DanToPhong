@@ -11,14 +11,14 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9f3758f8f58fdef43803eb9be1df0608, type: 3}
   m_Name: PhotonServerSettings
-  m_EditorClassIdentifier: PhotonUnityNetworking::Photon.Pun.ServerSettings
+  m_EditorClassIdentifier: 
   AppSettings:
-    AppIdRealtime: e8e5c1c7-6ece-4a8e-8f27-7056a42cda93
+    AppIdRealtime: 5a6221c7-3ef1-4c03-b9fe-717afdf35515
     AppIdFusion: 
     AppIdChat: 
-    AppIdVoice: 
+    AppIdVoice: 9867f242-987b-441c-a67c-2e6c3108da08
     AppIdVideo: 
-    AppVersion: 
+    AppVersion: 1.0
     UseNameServer: 1
     FixedRegion: asia
     Server: 
@@ -35,19 +35,22 @@ MonoBehaviour:
   RunInBackground: 1
   StartInOfflineMode: 0
   RpcList:
+  - CantHearYou
+  - ChangeColour
+  - HeresWhy
   - ClickRpc
   - DestroyRpc
   - DestroySpaceship
   - Fire
+  - NhanGocCamera
   - RespawnSpaceship
-  - ThongBaoCoNguoiThang
-  - BaoDanhSanSang
   - RPC_DanhDauNguoiChet
   - RPC_ThongBaoHoa
   - RPC_ThongBaoNguoiThang
-  - YeuCauThang
+  - ThongBaoCoNguoiThang
   - ThongBaoTatCaBiLoai
-  - NhanGocCamera
+  - YeuCauThang
+  - RPC_AnNhanVatCoVu
   DisableAutoOpenWizard: 1
-  ShowSettings: 0
+  ShowSettings: 1
   DevRegionSetOnce: 0

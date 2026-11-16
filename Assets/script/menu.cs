@@ -1,59 +1,94 @@
+using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using TMPro;
 
 public class MenuController : MonoBehaviour
 {
-    [Header("Nút bật/tắt nhạc (không bắt buộc)")]
-    public TMP_Text nhanNutNhac;       // chữ trên nút: "NHẠC: BẬT" / "NHẠC: TẮT"
-    public GameObject iconNhacBat;     // icon loa bật (nếu có)
-    public GameObject iconNhacTat;     // icon loa gạch chéo (nếu có)
+    [Header("Tên Scene")]
+    public string tenSceneChon = "SelectScene";
+    public string tenSceneShop = "ShopScene";
 
-    private const string KEY_NHAC = "NhacBat";
-    private bool nhacDangBat = true;
+    [Header("Xác nhận thoát (tùy chọn)")]
+    [Tooltip("Gán panel xác nhận nếu muốn ESC hỏi trước khi thoát. Để trống thì ESC thoát luôn.")]
+    public GameObject panelXacNhanThoat;
 
-    void Start()
+    private bool dangChuyenScene = false;
+
+    private void Start()
     {
-        // Nhớ lựa chọn của người chơi từ lần trước
-        nhacDangBat = PlayerPrefs.GetInt(KEY_NHAC, 1) == 1;
-        ApDungNhac();
+        Time.timeScale = 1f;
+        if (panelXacNhanThoat != null) panelXacNhanThoat.SetActive(false);
     }
 
-    // Gắn vào nút bật/tắt nhạc
-    public void BatTatNhac()
+    private void Update()
     {
-        nhacDangBat = !nhacDangBat;
-        PlayerPrefs.SetInt(KEY_NHAC, nhacDangBat ? 1 : 0);
-        PlayerPrefs.Save();
-        ApDungNhac();
+        if (!NhanEsc()) return;
+
+        if (panelXacNhanThoat != null)
+        {
+            // ESC bật/tắt panel xác nhận
+            panelXacNhanThoat.SetActive(!panelXacNhanThoat.activeSelf);
+        }
+        else
+        {
+            ThoatGame();
+        }
     }
 
-    private void ApDungNhac()
+    private static bool NhanEsc()
     {
-        // Âm lượng tổng: giữ nguyên khi chuyển scene nên vào game vẫn tắt/mở theo lựa chọn
-        AudioListener.volume = nhacDangBat ? 1f : 0f;
-
-        if (nhanNutNhac != null) nhanNutNhac.text = nhacDangBat ? "NHẠC: BẬT" : "NHẠC: TẮT";
-        if (iconNhacBat != null) iconNhacBat.SetActive(nhacDangBat);
-        if (iconNhacTat != null) iconNhacTat.SetActive(!nhacDangBat);
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        var kb = UnityEngine.InputSystem.Keyboard.current;
+        return kb != null && kb.escapeKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.Escape);
+#endif
     }
 
-    // Hàm gọi khi bấm nút PLAY -> sang màn hình chọn Xe, Mũ, Nhân vật & Map
-    public void ChoiGame()
+    // ------------------------------------------------------------------
+    // GẮN VÀO BUTTON
+    // ------------------------------------------------------------------
+    public void BatTatNhac() { MenuLobbyMusic.BatTat(); }
+
+    public void ChoiGame() { ChuyenScene(tenSceneChon); }
+    public void MoShop() { ChuyenScene(tenSceneShop); }
+
+    /// Gắn vào nút "Không" / "Hủy" của panel xác nhận.
+    public void HuyThoat()
     {
-        SceneManager.LoadScene("SelectScene");
+        if (panelXacNhanThoat != null) panelXacNhanThoat.SetActive(false);
     }
 
-    // Hàm gọi khi bấm nút SHOP -> sang cửa hàng mua đồ
-    public void MoShop()
-    {
-        SceneManager.LoadScene("ShopScene");
-    }
-
-    // Hàm gọi khi bấm nút QUIT
+    /// Gắn vào nút "Thoát" và nút "Có" của panel xác nhận.
     public void ThoatGame()
     {
-        Debug.Log("Đã thoát game!");
+        if (dangChuyenScene) return;
+        dangChuyenScene = true;
+
+        Log("Đã thoát game!");
+
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
         Application.Quit();
+#endif
+    }
+
+    // ------------------------------------------------------------------
+    // HELPER
+    // ------------------------------------------------------------------
+    private void ChuyenScene(string tenScene)
+    {
+        if (dangChuyenScene) return;
+        dangChuyenScene = true;
+
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(tenScene);
+    }
+
+    [Conditional("UNITY_EDITOR")]
+    private static void Log(string noiDung)
+    {
+        UnityEngine.Debug.Log(noiDung);
     }
 }

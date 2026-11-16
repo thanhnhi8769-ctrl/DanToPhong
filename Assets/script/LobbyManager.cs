@@ -19,23 +19,31 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     [Header("Nút sao chép mã (tự tạo nếu để trống)")]
     public GameObject copyButton;
-    public Vector2 viTriNutCopy = new Vector2(-20f, 20f);      // lệch so với góc dưới phải
+    public Vector2 viTriNutCopy = new Vector2(-20f, 20f);
     public Vector2 kichThuocNutCopy = new Vector2(190f, 46f);
+
+    [Header("Kết nối")]
+    public int soLanThuKetNoiLaiToiDa = 3;
+    public float thoiGianChoKetNoi = 10f;
+    public float thoiGianChoLenh = 8f;
 
     private TMP_Text nhanCopyText;
     private bool dangXuLy = false;
     private bool dangThoat = false;
+    private int soLanThuLai = 0;
     private Coroutine coroutineThongBao;
+    private Coroutine coChoLenh;
     private const int DO_DAI_MA_PHONG = 5;
-    private const string KY_TU_MA_PHONG = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Bỏ O, 0, I, 1 tránh nhìn nhầm
+    private const string KY_TU_MA_PHONG = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private const string TIN_NHAN_MAT_MANG = "Không kết nối được Server. Kiểm tra Internet.\nNhấn ESC để quay lại menu.";
 
     void Start()
     {
+        Time.timeScale = 1f;
         PhotonNetwork.AutomaticallySyncScene = true;
         PhotonNetwork.GameVersion = "1.0";
         PhotonNetwork.PhotonServerSettings.AppSettings.FixedRegion = "asia";
 
-        // Có tên để hiện trong danh sách phòng và thông báo trong trận
         if (string.IsNullOrEmpty(PhotonNetwork.NickName))
             PhotonNetwork.NickName = "Player" + Random.Range(1000, 10000);
 
@@ -51,19 +59,12 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             PhotonNetwork.LeaveRoom();
         }
 
-        statusText.text = "Đang kết nối tới Server...";
-        if (!PhotonNetwork.IsConnected)
-        {
-            PhotonNetwork.ConnectUsingSettings();
-        }
-        else if (PhotonNetwork.IsConnectedAndReady)
-        {
-            statusText.text = "Đã kết nối! Bấm TẠO PHÒNG lấy mã, hoặc nhập mã để VÀO PHÒNG.";
-        }
+        BatDauKetNoi();
     }
 
     void Update()
     {
+        // ESC luôn thoát được, kể cả khi đang chờ server
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             BamNutExit();
@@ -71,7 +72,42 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     }
 
     // =========================================================================
-    // Ô NHẬP MÃ: tự viết hoa, giới hạn 5 ký tự, Enter để vào phòng
+    // KẾT NỐI (có giới hạn thử lại + báo lỗi khi mất mạng)
+    // =========================================================================
+    private void BatDauKetNoi()
+    {
+        if (PhotonNetwork.IsConnectedAndReady)
+        {
+            statusText.text = "Đã kết nối! Bấm TẠO PHÒNG lấy mã, hoặc nhập mã để VÀO PHÒNG.";
+            return;
+        }
+
+        statusText.text = "Đang kết nối tới Server...";
+        if (!PhotonNetwork.IsConnected)
+            PhotonNetwork.ConnectUsingSettings();
+
+        StartCoroutine(GiamSatKetNoi());
+    }
+
+    private IEnumerator GiamSatKetNoi()
+    {
+        yield return new WaitForSecondsRealtime(thoiGianChoKetNoi);
+
+        if (!PhotonNetwork.IsConnectedAndReady && !PhotonNetwork.InRoom && !dangThoat)
+            statusText.text = TIN_NHAN_MAT_MANG;
+    }
+
+    private IEnumerator KetNoiLaiSau(float giay)
+    {
+        yield return new WaitForSecondsRealtime(giay);
+
+        if (dangThoat || PhotonNetwork.IsConnected) yield break;
+        PhotonNetwork.ConnectUsingSettings();
+        StartCoroutine(GiamSatKetNoi());
+    }
+
+    // =========================================================================
+    // Ô NHẬP MÃ
     // =========================================================================
     private void CauHinhOnhapMa()
     {
@@ -79,7 +115,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         roomInput.characterLimit = DO_DAI_MA_PHONG;
 
-        // Cho phép nhấn chuột phải vào ô mã phòng để dán mã từ Clipboard.
         RoomInputPasteHandler pasteHandler =
             roomInput.GetComponent<RoomInputPasteHandler>();
         if (pasteHandler == null)
@@ -98,7 +133,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     }
 
     // =========================================================================
-    // NÚT SAO CHÉP MÃ (nhỏ, góc dưới phải)
+    // NÚT SAO CHÉP MÃ
     // =========================================================================
     private void TaoNutCopyNeuChuaCo()
     {
@@ -154,7 +189,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         copyButton = obj;
     }
 
-    // Gắn vào nút nếu bạn tự làm nút riêng
     public void CopyMaPhong()
     {
         if (!PhotonNetwork.InRoom) return;
@@ -175,27 +209,27 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     }
 
     // =========================================================================
-    // THOÁT / KẾT NỐI
+    // THOÁT
     // =========================================================================
     public void BamNutExit()
     {
-        if (dangXuLy || dangThoat) return;
+        if (dangThoat) return;
 
-        if (PhotonNetwork.InRoom)
+        // Đang trong phòng và còn mạng -> rời phòng trước
+        if (PhotonNetwork.InRoom && PhotonNetwork.IsConnected)
         {
             dangXuLy = true;
             statusText.text = "Đang rời phòng...";
             PhotonNetwork.LeaveRoom();
+            return;
         }
-        else
-        {
-            dangThoat = true;
-            if (PhotonNetwork.IsConnected)
-            {
-                PhotonNetwork.Disconnect();
-            }
-            SceneManager.LoadScene(0);
-        }
+
+        // Còn lại (chưa có mạng, đang chờ server, đang ở sảnh): thoát thẳng về menu
+        dangThoat = true;
+        StopAllCoroutines();
+        if (PhotonNetwork.IsConnected) PhotonNetwork.Disconnect();
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(0);
     }
 
     public override void OnLeftRoom()
@@ -203,6 +237,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         dangXuLy = false;
         StopAllCoroutines();
         coroutineThongBao = null;
+        coChoLenh = null;
 
         HienGiaoDienChuaVaoPhong();
         statusText.text = "Đã rời phòng. Bấm TẠO PHÒNG hoặc nhập mã để VÀO PHÒNG.";
@@ -210,6 +245,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     public override void OnConnectedToMaster()
     {
+        soLanThuLai = 0;
         statusText.text = "Đã kết nối! Bấm TẠO PHÒNG lấy mã, hoặc nhập mã để VÀO PHÒNG.";
         PhotonNetwork.JoinLobby();
     }
@@ -219,12 +255,21 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (dangThoat) return;
 
         dangXuLy = false;
-        StopAllCoroutines();
+        HuyChoLenh();
         coroutineThongBao = null;
 
         HienGiaoDienChuaVaoPhong();
-        statusText.text = $"Mất kết nối ({cause}). Đang kết nối lại...";
-        PhotonNetwork.ConnectUsingSettings();
+
+        if (soLanThuLai < soLanThuKetNoiLaiToiDa)
+        {
+            soLanThuLai++;
+            statusText.text = $"Mất kết nối ({cause}). Thử lại {soLanThuLai}/{soLanThuKetNoiLaiToiDa}...";
+            StartCoroutine(KetNoiLaiSau(2f));
+        }
+        else
+        {
+            statusText.text = TIN_NHAN_MAT_MANG;
+        }
     }
 
     private void HienGiaoDienChuaVaoPhong()
@@ -253,13 +298,47 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         return new string(ma);
     }
 
+    private string LyDoChuaSanSang()
+    {
+        if (!PhotonNetwork.IsConnected) return TIN_NHAN_MAT_MANG;
+        return "Chưa kết nối xong Server, vui lòng đợi 1 giây...";
+    }
+
+    // Tự mở khóa nếu server không trả lời
+    private void BatDauChoLenh()
+    {
+        HuyChoLenh();
+        coChoLenh = StartCoroutine(HetGioChoLenh());
+    }
+
+    private void HuyChoLenh()
+    {
+        if (coChoLenh != null)
+        {
+            StopCoroutine(coChoLenh);
+            coChoLenh = null;
+        }
+    }
+
+    private IEnumerator HetGioChoLenh()
+    {
+        yield return new WaitForSecondsRealtime(thoiGianChoLenh);
+
+        coChoLenh = null;
+        if (dangXuLy && !PhotonNetwork.InRoom)
+        {
+            dangXuLy = false;
+            statusText.text = "Server không phản hồi. Hãy thử lại hoặc nhấn ESC để quay lại.";
+        }
+    }
+
     public void CreateRoom()
     {
         if (dangXuLy || PhotonNetwork.InRoom) return;
 
         if (!PhotonNetwork.IsConnectedAndReady)
         {
-            statusText.text = "Chưa kết nối xong Server, vui lòng đợi 1 giây...";
+            statusText.text = LyDoChuaSanSang();
             return;
         }
 
@@ -273,7 +352,16 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             IsVisible = true,
             IsOpen = true
         };
-        PhotonNetwork.CreateRoom(maPhongMoi, roomOptions);
+
+        if (PhotonNetwork.CreateRoom(maPhongMoi, roomOptions))
+        {
+            BatDauChoLenh();
+        }
+        else
+        {
+            dangXuLy = false;
+            statusText.text = "Không gửi được lệnh tạo phòng. Hãy thử lại!";
+        }
     }
 
     public void JoinRoom()
@@ -282,7 +370,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         if (!PhotonNetwork.IsConnectedAndReady)
         {
-            statusText.text = "Chưa kết nối xong Server, vui lòng đợi 1 giây...";
+            statusText.text = LyDoChuaSanSang();
             return;
         }
 
@@ -295,7 +383,16 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         dangXuLy = true;
         statusText.text = $"Đang tìm phòng mã: {maNhapVao}...";
-        PhotonNetwork.JoinRoom(maNhapVao);
+
+        if (PhotonNetwork.JoinRoom(maNhapVao))
+        {
+            BatDauChoLenh();
+        }
+        else
+        {
+            dangXuLy = false;
+            statusText.text = "Không gửi được lệnh vào phòng. Hãy thử lại!";
+        }
     }
 
     public void StartGame()
@@ -307,7 +404,17 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (copyButton != null) copyButton.SetActive(false);
         statusText.text = "Đang tải đường đua...";
         PhotonNetwork.CurrentRoom.IsOpen = false;
-        PhotonNetwork.LoadLevel("game");
+
+        // Lưu map vào Room Properties để mọi client đọc được
+        string map = PlayerInventory.GetSelectedMap();
+        if (!string.IsNullOrEmpty(map))
+        {
+            PhotonNetwork.CurrentRoom.SetCustomProperties(
+                new ExitGames.Client.Photon.Hashtable { { "Map", map } });
+        }
+
+        // Load thẳng map, không đi qua scene "game"
+        PhotonNetwork.LoadLevel(GameNetworkManager.LayTenSceneVaoGame());
     }
 
     // =========================================================================
@@ -316,6 +423,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public override void OnJoinedRoom()
     {
         dangXuLy = false;
+        HuyChoLenh();
 
         if (roomInput != null) roomInput.gameObject.SetActive(false);
         if (createButton != null) createButton.SetActive(false);
@@ -323,7 +431,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (copyButton != null) copyButton.SetActive(true);
         DatLaiNhanCopy();
 
-        // Chủ phòng tự copy sẵn mã vào Clipboard
         if (PhotonNetwork.IsMasterClient)
         {
             GUIUtility.systemCopyBuffer = PhotonNetwork.CurrentRoom.Name;
@@ -342,7 +449,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         HienThongBaoTamThoi($"<color=#FFFF00>{LayTen(otherPlayer)} đã thoát khỏi phòng!</color>");
     }
 
-    // Chủ phòng thoát -> Photon chuyển chủ phòng cho người khác, cập nhật nút Start
     public override void OnMasterClientSwitched(Player newMasterClient)
     {
         HienThongBaoTamThoi(newMasterClient.IsLocal
@@ -353,7 +459,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public override void OnCreateRoomFailed(short returnCode, string message)
     {
         dangXuLy = false;
-        // Hiếm khi mã ngẫu nhiên bị trùng -> tự tạo lại mã khác
+        HuyChoLenh();
+
         if (returnCode == ErrorCode.GameIdAlreadyExists)
         {
             CreateRoom();
@@ -365,6 +472,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public override void OnJoinRoomFailed(short returnCode, string message)
     {
         dangXuLy = false;
+        HuyChoLenh();
 
         if (returnCode == ErrorCode.GameDoesNotExist)
             statusText.text = "Không tìm thấy phòng này. Kiểm tra lại MÃ PHÒNG!";
@@ -453,7 +561,6 @@ public class RoomInputPasteHandler : MonoBehaviour, IPointerClickHandler
         if (string.IsNullOrWhiteSpace(clipboard))
             return;
 
-        // Mã phòng chỉ gồm 5 ký tự; bỏ khoảng trắng và chuyển thành chữ hoa.
         string maPhong = clipboard.Trim().ToUpper();
         if (maPhong.Length > 5)
             maPhong = maPhong.Substring(0, 5);
@@ -463,4 +570,3 @@ public class RoomInputPasteHandler : MonoBehaviour, IPointerClickHandler
         inputField.caretPosition = inputField.text.Length;
     }
 }
-

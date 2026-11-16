@@ -13,14 +13,15 @@ public class MenuLobbyMusic : MonoBehaviour
 
     [Header("Nút mute (tự tạo, không cần làm UI)")]
     public bool tuTaoNutMute = true;
-    public bool hienNutTrongTran = false;                          // bật nếu muốn nút hiện cả khi đang đua
-    public Vector2 viTriNut = new Vector2(-30f, -30f);             // lệch so với góc trên phải
+    public bool hienNutTrongTran = false;                          // trong trận đã có nút loa của GameManager
+    public Vector2 viTriNut = new Vector2(-30f, -30f);
     public float kichThuocNut = 70f;
     [Tooltip("Để trống thì tự vẽ icon loa bằng code")]
     public Sprite iconLoaBat;
     public Sprite iconLoaTat;
 
-    private const string KEY_NHAC = "NhacBat"; // dùng chung với MenuController
+    // Cùng key với GameManager -> mọi scene đồng bộ
+    private const string KEY_NHAC_TAT = "NhacBiTat";
 
     private static MenuLobbyMusic instance;
     private static Sprite spriteBatCache;
@@ -28,10 +29,13 @@ public class MenuLobbyMusic : MonoBehaviour
 
     private AudioSource audioSource;
     private bool daTamDung = false;
-    private bool nhacDangBat = true;
+    private bool nhacBiTat = false;
+    private float thoiDiemKiemTra = 0f;
 
     private GameObject canvasNut;
     private Image iconImage;
+
+    public static bool NhacBiTat { get { return PlayerPrefs.GetInt(KEY_NHAC_TAT, 0) == 1; } }
 
     // =========================================================================
     // KHỞI TẠO
@@ -47,7 +51,7 @@ public class MenuLobbyMusic : MonoBehaviour
         instance = this;
         DontDestroyOnLoad(gameObject);
 
-        nhacDangBat = PlayerPrefs.GetInt(KEY_NHAC, 1) == 1;
+        nhacBiTat = NhacBiTat;
 
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
@@ -78,9 +82,26 @@ public class MenuLobbyMusic : MonoBehaviour
         if (instance == this) instance = null;
     }
 
+    // Tự đồng bộ khi nơi khác (nút loa trong game...) đổi key
+    private void Update()
+    {
+        if (Time.unscaledTime < thoiDiemKiemTra) return;
+        thoiDiemKiemTra = Time.unscaledTime + 0.1f;
+
+        bool tat = NhacBiTat;
+        float mong = tat ? 0f : 1f;
+
+        if (tat != nhacBiTat || !Mathf.Approximately(AudioListener.volume, mong))
+        {
+            nhacBiTat = tat;
+            ApDungNhac();
+        }
+    }
+
     // =========================================================================
     // BẬT / TẮT NHẠC (mute toàn bộ âm thanh)
     // =========================================================================
+    // Gắn vào nút loa của menu nếu bạn tự làm nút: MenuLobbyMusic.BatTat()
     public static void BatTat()
     {
         if (instance != null) instance.BatTatNhac();
@@ -88,8 +109,8 @@ public class MenuLobbyMusic : MonoBehaviour
 
     public void BatTatNhac()
     {
-        nhacDangBat = !nhacDangBat;
-        PlayerPrefs.SetInt(KEY_NHAC, nhacDangBat ? 1 : 0);
+        nhacBiTat = !nhacBiTat;
+        PlayerPrefs.SetInt(KEY_NHAC_TAT, nhacBiTat ? 1 : 0);
         PlayerPrefs.Save();
         ApDungNhac();
 
@@ -99,10 +120,11 @@ public class MenuLobbyMusic : MonoBehaviour
 
     private void ApDungNhac()
     {
-        AudioListener.volume = nhacDangBat ? 1f : 0f;
+        AudioListener.pause = false;
+        AudioListener.volume = nhacBiTat ? 0f : 1f;
 
         if (iconImage != null)
-            iconImage.sprite = nhacDangBat ? LayIconBat() : LayIconTat();
+            iconImage.sprite = nhacBiTat ? LayIconTat() : LayIconBat();
     }
 
     // =========================================================================
@@ -115,9 +137,11 @@ public class MenuLobbyMusic : MonoBehaviour
 
     private void KhiChuyenScene(Scene scene, LoadSceneMode mode)
     {
+        nhacBiTat = NhacBiTat;
+        ApDungNhac();
+
         bool laSanh = LaSceneSanh(scene.name);
 
-        // Nút mute chỉ hiện ở sảnh (hoặc mọi nơi nếu bật hienNutTrongTran)
         if (canvasNut != null)
         {
             bool hien = laSanh || hienNutTrongTran;
@@ -129,7 +153,6 @@ public class MenuLobbyMusic : MonoBehaviour
 
         if (laSanh)
         {
-            // Về sảnh: tiếp tục nhạc đang dừng, hoặc phát mới nếu chưa phát
             if (daTamDung)
             {
                 audioSource.UnPause();
@@ -142,7 +165,6 @@ public class MenuLobbyMusic : MonoBehaviour
         }
         else
         {
-            // Vào map đua: tạm dừng nhạc sảnh (GameManager tự bật nhạc đua)
             if (audioSource.isPlaying)
             {
                 audioSource.Pause();
@@ -151,7 +173,6 @@ public class MenuLobbyMusic : MonoBehaviour
         }
     }
 
-    // Scene nào chưa có EventSystem thì nút không bấm được, nên tự thêm
     private void DamBaoEventSystem()
     {
         if (FindFirstObjectByType<EventSystem>() != null) return;
@@ -168,7 +189,7 @@ public class MenuLobbyMusic : MonoBehaviour
 
         Canvas canvas = canvasNut.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 999; // luôn nằm trên các UI khác
+        canvas.sortingOrder = 999;
 
         CanvasScaler scaler = canvasNut.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -190,7 +211,7 @@ public class MenuLobbyMusic : MonoBehaviour
         Button btn = nut.GetComponent<Button>();
         btn.targetGraphic = nen;
         Navigation nav = new Navigation();
-        nav.mode = Navigation.Mode.None; // tránh Space/Enter bấm nhầm nút
+        nav.mode = Navigation.Mode.None;
         btn.navigation = nav;
         btn.onClick.AddListener(BatTatNhac);
 
@@ -208,7 +229,7 @@ public class MenuLobbyMusic : MonoBehaviour
     }
 
     // =========================================================================
-    // VẼ ICON LOA BẰNG CODE (không cần file ảnh)
+    // VẼ ICON LOA BẰNG CODE
     // =========================================================================
     private Sprite LayIconBat()
     {
@@ -236,7 +257,6 @@ public class MenuLobbyMusic : MonoBehaviour
         {
             for (int x = 0; x < N; x++)
             {
-                // 3x3 điểm mẫu cho mép mịn
                 int trung = 0;
                 for (int sy = 0; sy < 3; sy++)
                     for (int sx = 0; sx < 3; sx++)
@@ -256,10 +276,8 @@ public class MenuLobbyMusic : MonoBehaviour
 
     private static bool TrongHinhLoa(float u, float v, bool bat)
     {
-        // Thân loa
         if (u >= 0.17f && u <= 0.33f && v >= 0.39f && v <= 0.61f) return true;
 
-        // Chóp loa (loe dần sang phải)
         if (u > 0.33f && u <= 0.52f)
         {
             float nua = 0.11f + (u - 0.33f) / 0.19f * 0.17f;
@@ -268,7 +286,6 @@ public class MenuLobbyMusic : MonoBehaviour
 
         if (bat)
         {
-            // 3 sóng âm
             float dx = u - 0.56f;
             float dy = v - 0.5f;
             if (dx > 0f)
@@ -285,7 +302,6 @@ public class MenuLobbyMusic : MonoBehaviour
         }
         else
         {
-            // Dấu X
             if (KhoangCachDenDoan(u, v, 0.63f, 0.39f, 0.86f, 0.61f) <= 0.027f) return true;
             if (KhoangCachDenDoan(u, v, 0.86f, 0.39f, 0.63f, 0.61f) <= 0.027f) return true;
         }

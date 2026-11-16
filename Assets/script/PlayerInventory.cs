@@ -4,7 +4,7 @@ public static class PlayerInventory
 {
     private const string COINS_KEY = "PlayerCoins";
     private const string MAP_KEY = "SelectedMap";
-    private const string INIT_KEY = "InventoryInitialized_v2"; // Đổi key để reset sạch dữ liệu test cũ
+    private const string INIT_KEY = "InventoryInitialized_v3"; // Đổi key v3 để reset sạch dữ liệu cũ (Mũ, Người)
 
     // Khởi tạo dữ liệu mặc định lần đầu vào game
     private static void EnsureInitialized()
@@ -14,15 +14,11 @@ public static class PlayerInventory
         // 1. Tặng đúng 100 xu khởi đầu
         PlayerPrefs.SetInt(COINS_KEY, 100);
 
-        // 2. Mỗi loại chỉ mở khóa duy nhất món đầu tiên (index = 0)
+        // 2. Mở khóa duy nhất xe đầu tiên (index = 0)
         PlayerPrefs.SetInt("Unlocked_Scooter_0", 1);
-        PlayerPrefs.SetInt("Unlocked_Helmet_0", 1);
-        PlayerPrefs.SetInt("Unlocked_Character_0", 1);
 
-        // 3. Trang bị mặc định món số 0 và map "game"
+        // 3. Trang bị mặc định xe số 0 và map "game"
         PlayerPrefs.SetInt("Equipped_Scooter", 0);
-        PlayerPrefs.SetInt("Equipped_Helmet", 0);
-        PlayerPrefs.SetInt("Equipped_Character", 0);
         PlayerPrefs.SetString(MAP_KEY, "game");
 
         PlayerPrefs.SetInt(INIT_KEY, 1);

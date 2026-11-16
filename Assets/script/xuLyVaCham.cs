@@ -3,15 +3,30 @@ using Photon.Pun;
 
 public class XuLyVaChamChoXe : MonoBehaviourPun
 {
+    private Rigidbody rb;
+    private Collider xeCol;
+
     private bool LaXeCuaMinh
     {
         get { return !PhotonNetwork.IsConnected || photonView == null || photonView.IsMine; }
     }
 
+    private void Awake()
+    {
+        rb = GetComponentInParent<Rigidbody>();
+        xeCol = GetComponent<Collider>();
+
+        if (rb != null)
+        {
+            // Chạy mượt khung hình, không lún mặt đường gây khựng xe
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        }
+    }
+
     private void OnTriggerEnter(Collider other)
     {
-        // 1. CheckPoint: xe nào ăn thì đồng xu biến mất trên mọi máy,
-        //    nhưng chỉ chủ xe mới được cộng thời gian.
+        // 1. CheckPoint: ăn đồng xu cộng thời gian
         if (other.CompareTag("CheckPoint"))
         {
             if (!other.gameObject.activeSelf) return;
@@ -24,19 +39,12 @@ public class XuLyVaChamChoXe : MonoBehaviourPun
             return;
         }
 
-        // 2. WinPoint: chỉ xe của mình
+        // 2. WinPoint: chạm vạch đích
         if (other.CompareTag("WinPoint"))
         {
             if (LaXeCuaMinh && GameManager.Instance != null)
-                GameManager.Instance.QuaWinPoint();
+                GameManager.Instance.QuaWinPoint(other);
             return;
-        }
-
-        // 3. Rơi xuống nước (Trigger): chỉ tính cho xe của mình
-        if (LaXeCuaMinh && (other.gameObject.name == "Sea_Plane" || other.CompareTag("Water")))
-        {
-            if (GameManager.Instance != null)
-                GameManager.Instance.ChamNuocTruThoiGian();
         }
     }
 
@@ -44,17 +52,19 @@ public class XuLyVaChamChoXe : MonoBehaviourPun
     {
         if (!LaXeCuaMinh) return;
 
-        // Rơi xuống nước (nếu Sea_Plane chưa tích Is Trigger)
-        if (collision.gameObject.name == "Sea_Plane" || collision.gameObject.CompareTag("Water"))
-        {
-            if (GameManager.Instance != null)
-                GameManager.Instance.ChamNuocTruThoiGian();
-            return;
-        }
-
+        // Chống kẹt xe & chống bị hất văng xuống biển khi đâm trúng vật cản
         if (collision.gameObject.CompareTag("Obstacle") || collision.gameObject.name.Contains("Barricade"))
         {
-            Debug.Log("Xe đã tông vào chướng ngại vật!");
+            if (xeCol != null && collision.collider != null)
+            {
+                Physics.IgnoreCollision(xeCol, collision.collider, true);
+            }
+
+            // Chỉ làm chậm xe nhẹ 20% thay vì chặn đứng hoặc đẩy bay xe
+            if (rb != null)
+            {
+                rb.linearVelocity *= 0.8f;
+            }
         }
     }
 }
