@@ -8,17 +8,17 @@
 
 ```
 Menu ──Play──► Lobby ──Tạo / Vào phòng──► SELECT VEHICLE ──► Select ──Xác nhận──► Lobby ──START GAME──► Đường đua
-  │                                                                                                       
-  └──► Shop (mua & trang bị vật phẩm)
+│
+
+└──► Shop (mua & trang bị 25 mẫu xe Scooter)
 ```
+1. **Menu:** Bấm **Play** để vào **Sảnh chờ (Lobby)**, hoặc vào **Shop** để mua và trang bị xe.
+2. **Lobby:** Tạo phòng mới hoặc nhập mã 5 ký tự để tham gia phòng bạn bè.
+3. **Select Vehicle:** Khi đã ở trong phòng, bấm **SELECT VEHICLE** để sang màn hình chọn xe (và chọn bản đồ nếu bạn là Chủ phòng).
+4. **Xác nhận (Confirm):** Lưu lựa chọn và quay lại **Lobby** mà **vẫn giữ nguyên phòng** cùng danh sách thành viên.
+5. **START GAME:** Chủ phòng bấm để khóa phòng và đồng bộ đưa cả phòng vào đường đua.
 
-1. **Menu:** Bấm **Play** để vào thẳng **Sảnh chờ (Lobby)**, hoặc vào **Shop** để mua đồ.
-2. **Lobby:** Tạo phòng hoặc nhập mã để vào phòng.
-3. **Select Vehicle:** Sau khi đã ở trong phòng, bấm nút **SELECT VEHICLE** để sang màn hình chọn xe (và chọn map nếu bạn là Chủ phòng).
-4. **Xác nhận:** Quay lại Lobby, **vẫn giữ nguyên phòng** và danh sách người chơi.
-5. **START GAME:** Chủ phòng bấm để cả phòng cùng vào đường đua.
-
-> 💡 Mỗi người chơi **chọn xe cho riêng mình**, và xe nào được chọn thì **đúng xe đó xuất hiện** trên đường đua (kể cả trong mắt những người chơi khác).
+> 💡 Mỗi người chơi **chọn xe cho riêng mình**, hệ thống đồng bộ qua mạng để **đúng mẫu xe và màu sơn** đó xuất hiện trên đường đua trong mắt tất cả người chơi.
 
 ---
 
@@ -31,27 +31,26 @@ Game hỗ trợ linh hoạt **Chơi đơn (1 người)** và **Chơi mạng tố
   - Mã phòng được **tự động sao chép sẵn vào Clipboard** ngay khi tạo phòng, kèm nút **SAO CHÉP MÃ** ở góc dưới bên phải để gửi nhanh cho bạn bè.
 - **Tham gia phòng bằng mã (Join Room):**
   - Nhập **Mã phòng 5 ký tự** (tự động chuyển thành chữ in hoa) hoặc **nhấp chuột phải trực tiếp vào ô nhập mã** để dán nhanh từ Clipboard, sau đó nhấn `Enter` hoặc bấm **Join**.
-  - Hệ thống thông báo chi tiết nếu sai mã phòng, phòng đã đầy (`4/4`) hoặc trận đấu đã bắt đầu (phòng tự khóa khi vào đua).
-- **Chọn xe & bản đồ theo vai trò (nút `SELECT VEHICLE`):**
+  - Hệ thống thông báo chi tiết nếu sai mã phòng, phòng đã đầy (`4/4`) hoặc trận đấu đã bắt đầu.
+- **Chọn xe & bản đồ theo vai trò (`SELECT VEHICLE`):**
 
   | Vai trò | Được chọn | Giao diện |
   | :--- | :--- | :--- |
   | 👑 **Chủ phòng** | **Mẫu xe Scooter** + **Bản đồ (Map)** | Hộp kính 3D xoay 360° kèm khung xem trước ảnh Map |
-  | 🙋 **Người chơi thường** | **Mẫu xe Scooter** | Hộp kính 3D được **phóng to** và đặt giữa màn hình, ghi chú *"Map do Chủ Phòng chọn"* |
+  | 🙋 **Người chơi thường** | **Mẫu xe Scooter** | Hộp kính 3D được **phóng to** và đặt giữa màn hình |
 
-  - Giao diện tự **điều chỉnh kích thước** tùy theo số vật được hiển thị: 2 vật (xe + map) thì hộp xe nhỏ gọn, 1 vật (chỉ xe) thì hộp xe lớn hơn.
-  - Map do Chủ phòng chọn được lưu vào **Room Properties**, còn xe của từng người được lưu vào **Player Properties**, đồng bộ tự động cho toàn bộ phòng.
-  - Mũ bảo hiểm (Helmet) và Nhân vật (Character) lấy theo **trang bị đang dùng trong Shop**.
+- Giao diện tự **điều chỉnh kích thước** tùy theo số vật được hiển thị: 2 vật (xe + map) thì hộp xe nhỏ gọn, 1 vật (chỉ xe) thì hộp xe lớn hơn; kèm bảng hướng dẫn (`?`) trực quan ngay trên màn hình.
+- Map do Chủ phòng chọn được lưu vào **Room Properties**, còn xe của từng người được lưu vào **Player Properties**, đồng bộ tự động cho toàn bộ phòng.
 - **Sảnh chờ trực tuyến thông minh:**
   - Hiển thị thời gian thực **Mã phòng**, sĩ số (`x/4`), danh sách tên người chơi kèm nhãn `(Chủ phòng)` / `(Bạn)` và thông báo nổi bật mỗi khi có người **vào phòng** hoặc **rời phòng**.
   - **Chuyển quyền Chủ phòng tự động (Host Migration):** Nếu Chủ phòng thoát, hệ thống tự động chuyển quyền Chủ phòng và nút **START GAME** cho người chơi kế tiếp.
-  - Khi mọi người đã vào đủ, **Chủ phòng** bấm **START GAME** để khóa phòng và đồng bộ đưa toàn bộ thành viên vào đúng bản đồ đã chọn.
+  - **Xử lý khi đối thủ rớt mạng giữa trận:** Nếu chỉ còn một người trong phòng, game vẫn cho người chơi còn lại **tiếp tục đua một mình** đến khi về đích; người rớt mạng sẽ tự động bị loại khỏi danh sách phòng/bảng xếp hạng.
 - **Đồng bộ xuất phát:** Khi vào đường đua, xe của mọi người chơi được giữ cố định tại vạch xuất phát cho đến khi **tất cả thành viên trong phòng** cùng bấm **Bắt Đầu Đua** trên bảng hướng dẫn (ở chế độ Solo, game bắt đầu ngay sau khi bấm).
 - **Chế độ Khán giả (Spectator Mode) khi bị loại:**
   - Trong chế độ nhiều người chơi, nếu hết giờ giữa chừng, xe của bạn sẽ biến mất khỏi đường đua và bảng **Eliminate** hiện lên cho phép bạn chọn **Ở lại xem** hoặc **Thoát**.
   - Khi ở lại xem, camera tự động đồng bộ góc nhìn **Third-Person** của người chơi đang thi đấu và hỗ trợ chuyển đổi qua lại giữa các tay đua còn sống.
 - **Phân định Thắng / Thua & Phần thưởng Xu:**
-  - **Multiplayer:** Người đầu tiên chạm cổng **Checkwin**, hoặc **người chơi cuối cùng còn sống sót** khi tất cả đối thủ đã bị loại, sẽ thắng và nhận **+50 Xu**. Người thua nhận **0 Xu** và hiển thị trên bảng **Result**.
+  - **Multiplayer:** Mỗi máy tự tính thời gian cán đích cục bộ và đồng bộ kết quả qua Photon PUN 2. Người đầu tiên chạm cổng **Checkwin**, hoặc **người chơi cuối cùng còn sống sót** khi tất cả đối thủ đã bị loại, sẽ thắng và nhận **+50 Xu**. Người thua nhận **0 Xu** và hiển thị trên bảng **Result**.
   - **Solo:** Vượt qua cổng **Checkwin** trước khi hết giờ để nhận **+10 Xu** và mở bảng chiến thắng tiếp tục chơi.
 
 ---
@@ -64,24 +63,22 @@ Ngay trên đường đua (góc dưới bên trái màn hình), người chơi c
   - Nút bật/tắt micro nhanh (**`MIC ON` / `MIC OFF`**) ngay trên giao diện thi đấu, hỗ trợ trò chuyện thoại độ trễ thấp với các tay đua khác trong cùng phòng.
 - **Text Chat trong trận (`CHAT`):**
   - Bấm nút **`CHAT`** để nhập tin nhắn văn bản và nhấn `Enter` để gửi tới toàn bộ người chơi trong phòng.
-  - Hệ thống tự động khóa điều khiển lái xe khi bạn đang gõ chữ trong ô chat để tránh xe vô tình chạy lệch khỏi đường đua.
+  - Tin nhắn hiển thị tức thời theo phiên đấu (không lưu lịch sử sau khi rời phòng) và hệ thống tự động khóa điều khiển lái xe khi bạn đang gõ chữ để tránh xe chạy lệch đường.
 
 ---
 
-## 🛒 4. Hệ Thống Cửa Hàng 3D & Tủ Đồ Sưu Tập (3D Shop & Inventory)
+## 🛒 4. Hệ Thống Cửa Hàng 3D & Bộ Sưu Tập 25 Xe Scooter (`3D Shop`)
 
-Từ màn hình Menu chính, người chơi truy cập **Cửa hàng (Shop)** để dùng số Xu tích lũy được mở khóa trang bị cá nhân hóa:
+Từ màn hình Menu chính, người chơi truy cập **Cửa hàng (Shop)** để dùng số Xu tích lũy được mở khóa và trang bị xe:
 
-- **3 Danh mục vật phẩm (Tabs):**
-  - **Scooter:** Các mẫu xe tay ga / scooter 3D đa dạng kiểu dáng và màu sắc.
-  - **Helmet:** Các mẫu mũ bảo hiểm cá tính.
-  - **Character:** Các nhân vật tay đua 3D.
+- **25 Mẫu Xe Scooter Đa Sắc Màu (`VehicleCatalog`):**
+  - Đầy đủ 25 phiên bản từ **Default**, **Classic Black** đến các phối màu nổi bật (*Ocean Blue, Racing Red, Neon Green, Solar Yellow, Royal Purple, Rose Gold, Emerald...*), phủ màu trực tiếp trên GPU cho độ sắc nét cao và chuyển xe mượt mà.
 - **Sân khấu trưng bày 3D xoay 360° (3D Showcase Stage):**
-  - Tự động chuẩn hóa kích thước, căn giữa tâm hình học (*Bounds*) và vô hiệu hóa vật lý thừa để trưng bày mô hình 3D xoay mượt mà ngay giữa màn hình.
-  - Chuyển qua lại giữa các vật phẩm (`Next` / `Previous`), xem tên, giá bán và mua trực tiếp bằng Xu (`BUY`) với thông báo trạng thái tức thì (`PURCHASED` / `NOT ENOUGH COINS` / `OWNED`).
-- **Kệ trưng bày đồ đã sở hữu (Mini Owned Shelf):**
-  - Ở góc trên bên trái màn hình Shop hiển thị **Kệ đồ 3D thu nhỏ (`OWNED ITEMS`)** chia 3 hàng (`SCOOTER`, `HELMET`, `CHAR`).
-  - Toàn bộ vật phẩm đã mở khóa được nhân bản thu nhỏ, tự mở rộng khung kệ và xoay 3D để bạn theo dõi bộ sưu tập.
+  - Tự động chuẩn hóa kích thước, căn giữa tâm hình học (*Bounds*) và vô hiệu hóa vật lý thừa để trưng bày mô hình 3D xoay mượt mà trên vòng sáng trắng giữa màn hình.
+  - Chuyển qua lại giữa các mẫu xe (`<` / `>` hoặc phím mũi tên), xem tên, giá bán và thao tác trực tiếp qua nút trạng thái: **`BUY`** (mua bằng Xu) $\rightarrow$ **`EQUIP`** (trang bị xe đã sở hữu) $\rightarrow$ **`EQUIPPED`** (đang sử dụng).
+- **Kệ trưng bày xe đã sở hữu (`OWNED SCOOTERS`):**
+  - Ở góc trên bên trái màn hình Shop hiển thị **Kệ xe 3D thu nhỏ (`OWNED SCOOTERS`)** sắp xếp theo lưới 5 cột.
+  - Toàn bộ các mẫu xe đã mở khóa được nhân bản với vật liệu độc lập và xoay 3D trực quan để bạn theo dõi bộ sưu tập của mình.
 
 ---
 
@@ -103,7 +100,8 @@ Từ màn hình Menu chính, người chơi truy cập **Cửa hàng (Shop)** đ
 | `←` / `A` hoặc nút `<` | Xe trước đó |
 | `→` / `D` hoặc nút `>` | Xe kế tiếp |
 | Nút `<` `>` dưới khung ảnh | Đổi map *(chỉ Chủ phòng)* |
-| Nút xác nhận | Lưu lựa chọn và **quay lại Lobby (giữ nguyên phòng)** |
+| Nút `CONFIRM` hoặc `Enter` | Lưu lựa chọn và **quay lại Lobby (giữ nguyên phòng)** |
+| Nút `?` | Mở / đóng bảng hướng dẫn thao tác |
 | `ESC` | Đang trong phòng: quay lại Lobby. Ngoài phòng: về Menu |
 
 ### Khi đang đua:
@@ -149,34 +147,31 @@ Sau khi cuộc đua bắt đầu, chỉ cần nhấn phím tăng tốc lần đ�
 
 ---
 
-## 🔊 8. Hệ Thống Âm Thanh & Giao Diện Trực Quan (Audio & UI)
+## 🔊 8. Hệ Thống Âm Thanh, Dữ Liệu & Giao Diện (Audio, Data & UI)
 
-- **Nhạc nền xuyên suốt:** Nhạc nền tự động phát từ **Menu** sang **Lobby** và chuyển sang nhạc đường đua sôi động khi vào trận (tự tạm dừng khi mở bảng `ESC` ở chế độ Solo và dừng khi kết thúc ván).
-- **Hiệu ứng âm thanh (SFX):** Âm thanh phản hồi riêng khi ăn Checkpoint, Chiến thắng (Win) và Bị loại / Thua cuộc (Game Over).
-- **Hiển thị Xu & Bảng tin sự kiện:**
-  - Luôn hiển thị **tổng số Xu hiện có** ở góc trên bên trái màn hình, đồng bộ vào các bảng kết quả và Cửa hàng.
-  - Bảng tin thông báo tự gom nhóm và mờ dần khi có người bị loại, thoát phòng hoặc nhận thưởng thời gian.
-- **Hiệu ứng nút bấm:** Nút phóng nhẹ khi rê chuột, nhún khi bấm và có viền sáng đổi màu theo màu chủ đạo của chiếc xe đang chọn.
+- **Lưu trữ tiến trình cục bộ (`PlayerPrefs`):** Dữ liệu người chơi (Nickname, số Xu, danh sách xe đã mở khóa, xe đang trang bị và bản đồ đã chọn) được lưu bền vững trên máy qua `PlayerInventory` và `VehicleCatalog`.
+- **Nhạc nền & Hiệu ứng âm thanh:** Nhạc nền phát xuyên suốt từ **Menu** sang **Lobby** và chuyển sang nhạc đường đua sôi động khi vào trận, kèm SFX riêng cho Checkpoint, Chiến thắng và Bị loại.
+- **Giao diện tối giản hiện đại:** Hiệu ứng nút bấm phản hồi mượt mà với viền sáng trắng tinh gọn, đồng bộ số Xu và bảng tin thông báo thời gian thực trên đường đua.
 
 ---
 
 ## 💡 9. Mẹo Đua Xe (Pro Tips)
 
 - **Vào phòng cực nhanh:** Chủ phòng bấm **Create** là mã 5 ký tự đã nằm sẵn trong Clipboard để `Ctrl + V` gửi bạn bè; người vào phòng chỉ cần **chuột phải** vào ô nhập mã là dán ngay.
-- **Chọn xe sau khi vào phòng:** Bạn có thể đổi xe bất cứ lúc nào trước khi Chủ phòng bấm START GAME mà không bị mất phòng.
-- **Bật Mic phối hợp hoặc "troll" bạn bè:** Bấm `MIC` ở góc dưới bên trái để nói chuyện trực tiếp với đồng đội / đối thủ khi đang bứt tốc.
+- **Đổi xe linh hoạt trong phòng:** Bạn có thể bấm `SELECT VEHICLE` để đổi sang bất kỳ chiếc xe nào đã mua trước khi Chủ phòng bấm `START GAME` mà không bị mất phòng.
+- **Bật Mic phối hợp hoặc tương tác cùng bạn bè:** Bấm `MIC` ở góc dưới bên trái để trò chuyện trực tiếp khi đang bứt tốc.
 - **Theo dõi mũi tên Đỏ trên Minimap:** Quan sát khoảng cách và hướng rẽ của đối thủ để chủ động bứt tốc ở các đoạn đường thẳng.
 - **Giảm ga & phanh đúng lúc khi vào cua (`S` / `↓`):** Rơi khỏi đường đua sẽ bị đưa về vạch xuất phát và mất rất nhiều thời gian, hãy nhả ga hoặc rà phanh nhẹ trước các khúc cua gắt.
-- **Cày Xu mở khóa Shop:** Chơi Multiplayer để nhận **+50 Xu/trận thắng**, mở khóa nhanh toàn bộ bộ sưu tập Scooter, Helmet và Character.
+- **Cày Xu mở khóa 25 mẫu xe:** Chơi Multiplayer để nhận **+50 Xu/trận thắng**, mở khóa nhanh toàn bộ bộ sưu tập Scooter trong Shop.
 
 ---
 
 ## 🛠️ 10. Công Nghệ Sử Dụng
 
 - **Game Engine:** Unity 6 (Universal Render Pipeline - URP)
-- **Networking & Voice:** Photon PUN 2 & Photon Voice 2 (Asia Region, Room Code, Map/Gear Custom Properties Sync & Host Migration)
+- **Networking & Voice:** Photon PUN 2 & Photon Voice 2 (Asia Region, Room Code, Map/Vehicle Custom Properties Sync & Host Migration)
 - **Camera System:** Unity Cinemachine, Networked Third-Person Spectator Camera & Orthographic Minimap Camera
-- **UI, 3D Showcase & Audio:** TextMeshPro (TMP), Dynamic 3D Bounds Normalization & Multi-channel AudioSource
+- **UI, 3D Showcase & Audio:** TextMeshPro (TMP), GPU Material Tinting (`VehicleCatalog`), Dynamic 3D Bounds Normalization & Multi-channel AudioSource
 
 ---
 
