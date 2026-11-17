@@ -17,6 +17,11 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public GameObject joinButton;
     public GameObject startButton;
 
+    [Header("Chọn xe / map (nút chỉ hiện khi đã vào phòng)")]
+    public GameObject selectButton;
+    [Tooltip("Tên scene Select. PHẢI chứa chữ 'select' (vd: SelectScene)")]
+    public string tenSceneSelect = "SelectScene";
+
     [Header("Nút sao chép mã (tự tạo nếu để trống)")]
     public GameObject copyButton;
     public Vector2 viTriNutCopy = new Vector2(-20f, 20f);
@@ -37,6 +42,10 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     private int soLanThuLai = 0;
     private Coroutine coroutineThongBao;
     private Coroutine coChoLenh;
+
+    // true khi đang đi sang scene Select -> khi về Lobby không rời phòng
+    private static bool dangQuaSceneChonXe = false;
+
     private const int DO_DAI_MA_PHONG = 5;
     private const string KY_TU_MA_PHONG = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private const string TIN_NHAN_MAT_MANG = "Không kết nối được Server. Kiểm tra Internet.\nNhấn ESC để quay lại menu.";
@@ -53,6 +62,25 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         if (startButton != null) startButton.SetActive(false);
 
+        if (selectButton != null)
+        {
+            // Tìm Button ở chính nó hoặc ở object con
+            Button sb = selectButton.GetComponent<Button>();
+            if (sb == null) sb = selectButton.GetComponentInChildren<Button>(true);
+
+            if (sb != null)
+            {
+                // Xóa luôn các sự kiện đã gắn sẵn trong Inspector (vd: nút được copy từ nút Create/Exit)
+                sb.onClick = new Button.ButtonClickedEvent();
+                sb.onClick.AddListener(MoSceneChonXe);
+            }
+            else
+            {
+                Debug.LogError("[Lobby] Select Button không có component Button!", selectButton);
+            }
+            selectButton.SetActive(false);
+        }
+
         TaoNutCopyNeuChuaCo();
         if (copyButton != null) copyButton.SetActive(false);
 
@@ -62,9 +90,19 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         if (PhotonNetwork.InRoom)
         {
+            // Phòng còn mở (chưa Start) = vừa từ Select về -> giữ phòng.
+            // Phòng đã đóng = vừa đua xong -> rời phòng như cũ.
+            if (dangQuaSceneChonXe || PhotonNetwork.CurrentRoom.IsOpen)
+            {
+                // Vừa chọn xe/map xong -> giữ nguyên phòng
+                dangQuaSceneChonXe = false;
+                HienGiaoDienTrongPhong();
+                return;
+            }
             PhotonNetwork.LeaveRoom();
         }
 
+        dangQuaSceneChonXe = false;
         BatDauKetNoi();
     }
 
@@ -81,7 +119,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     {
         ButtonFx.MauChung = mauVienNut;
 
-        // Include: lấy cả nút đang ẩn (Start, Copy...)
         foreach (Button b in FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
         {
             if (b.GetComponent<ButtonFx>() == null) b.gameObject.AddComponent<ButtonFx>();
@@ -89,7 +126,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     }
 
     // =========================================================================
-    // KẾT NỐI (có giới hạn thử lại + báo lỗi khi mất mạng)
+    // KẾT NỐI
     // =========================================================================
     private void BatDauKetNoi()
     {
@@ -226,6 +263,54 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     }
 
     // =========================================================================
+    // CHỌN XE / MAP
+    // =========================================================================
+    public void MoSceneChonXe()
+    {
+        Debug.Log("[Lobby] Bấm CHỌN XE -> " + tenSceneSelect);
+
+        if (!PhotonNetwork.InRoom)
+        {
+            statusText.text = "Hãy TẠO PHÒNG hoặc VÀO PHÒNG trước khi chọn xe!";
+            return;
+        }
+        if (dangXuLy || dangThoat) return;
+
+        if (!Application.CanStreamedLevelBeLoaded(tenSceneSelect))
+        {
+            string loi = $"Không tìm thấy scene '{tenSceneSelect}'. Thêm nó vào File > Build Settings!";
+            statusText.text = loi;
+            Debug.LogError("[Lobby] " + loi);
+            return;
+        }
+
+        dangQuaSceneChonXe = true;
+        StopAllCoroutines();
+
+        // Tắt đồng bộ scene tự động: chủ phòng sang Select thì khách KHÔNG bị kéo theo.
+        // (Lobby.Start sẽ bật lại khi quay về.)
+        PhotonNetwork.AutomaticallySyncScene = false;
+
+        SceneManager.LoadScene(tenSceneSelect);
+    }
+
+    // Hiện giao diện "đang ở trong phòng" (dùng khi vừa vào phòng và khi quay về từ Select)
+    private void HienGiaoDienTrongPhong()
+    {
+        dangXuLy = false;
+        HuyChoLenh();
+
+        if (roomInput != null) roomInput.gameObject.SetActive(false);
+        if (createButton != null) createButton.SetActive(false);
+        if (joinButton != null) joinButton.SetActive(false);
+        if (copyButton != null) copyButton.SetActive(true);
+        if (selectButton != null) selectButton.SetActive(true);
+        DatLaiNhanCopy();
+
+        HienTrangThaiPhong();
+    }
+
+    // =========================================================================
     // THOÁT
     // =========================================================================
     public void BamNutExit()
@@ -241,7 +326,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             return;
         }
 
-        // Còn lại (chưa có mạng, đang chờ server, đang ở sảnh): thoát thẳng về menu
+        // Còn lại: thoát thẳng về menu
         dangThoat = true;
         StopAllCoroutines();
         if (PhotonNetwork.IsConnected) PhotonNetwork.Disconnect();
@@ -300,6 +385,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (joinButton != null) joinButton.SetActive(true);
         if (startButton != null) startButton.SetActive(false);
         if (copyButton != null) copyButton.SetActive(false);
+        if (selectButton != null) selectButton.SetActive(false);
     }
 
     // =========================================================================
@@ -321,7 +407,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         return "Chưa kết nối xong Server, vui lòng đợi 1 giây...";
     }
 
-    // Tự mở khóa nếu server không trả lời
     private void BatDauChoLenh()
     {
         HuyChoLenh();
@@ -419,10 +504,11 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         dangXuLy = true;
         if (startButton != null) startButton.SetActive(false);
         if (copyButton != null) copyButton.SetActive(false);
+        if (selectButton != null) selectButton.SetActive(false);
         statusText.text = "Đang tải đường đua...";
         PhotonNetwork.CurrentRoom.IsOpen = false;
 
-        // Lưu map vào Room Properties để mọi client đọc được
+        // Lưu map (do chủ phòng chọn) vào Room Properties để mọi client đọc được
         string map = PlayerInventory.GetSelectedMap();
         if (!string.IsNullOrEmpty(map))
         {
@@ -430,7 +516,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
                 new ExitGames.Client.Photon.Hashtable { { "Map", map } });
         }
 
-        // Load thẳng map, không đi qua scene "game"
         PhotonNetwork.LoadLevel(GameNetworkManager.LayTenSceneVaoGame());
     }
 
@@ -439,21 +524,12 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     // =========================================================================
     public override void OnJoinedRoom()
     {
-        dangXuLy = false;
-        HuyChoLenh();
-
-        if (roomInput != null) roomInput.gameObject.SetActive(false);
-        if (createButton != null) createButton.SetActive(false);
-        if (joinButton != null) joinButton.SetActive(false);
-        if (copyButton != null) copyButton.SetActive(true);
-        DatLaiNhanCopy();
+        HienGiaoDienTrongPhong();
 
         if (PhotonNetwork.IsMasterClient)
         {
             GUIUtility.systemCopyBuffer = PhotonNetwork.CurrentRoom.Name;
         }
-
-        HienTrangThaiPhong();
     }
 
     public override void OnPlayerEnteredRoom(Player newPlayer)
@@ -534,8 +610,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         string dauDong = string.IsNullOrEmpty(thongBao) ? "" : thongBao + "\n";
         string dongCuoi = laChuPhong
-            ? "Gửi mã cho bạn bè rồi bấm START GAME!"
-            : "Đang chờ Chủ Phòng bấm START GAME...";
+            ? "Bấm CHỌN XE để chọn xe + map, gửi mã cho bạn bè rồi bấm START GAME!"
+            : "Bấm CHỌN XE để chọn xe. Đang chờ Chủ Phòng bấm START GAME...";
 
         statusText.text =
             $"{dauDong}MÃ PHÒNG: <color=#00FFFF><b>{phong.Name}</b></color> ({phong.PlayerCount}/{phong.MaxPlayers})\n" +

@@ -5,9 +5,72 @@ using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using TMPro;
 using Photon.Pun;
+using Photon.Realtime;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
+
+public class ButtonFx : MonoBehaviour,
+    IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
+{
+    public static Color MauChung = Color.white;
+    public float phongHover = 1.06f;
+    public float nenBam = 0.94f;
+
+    private Selectable sel;
+    private Outline vien;
+    private Vector3 scaleGoc;
+    private bool hover, bam;
+    private float tHover;
+    private float scaleHienTai = 1f;
+
+    private void Awake()
+    {
+        sel = GetComponent<Selectable>();
+        scaleGoc = transform.localScale;
+
+        Graphic nen = GetComponent<Graphic>();
+        if (nen != null)
+        {
+            vien = GetComponent<Outline>();
+            if (vien == null) vien = gameObject.AddComponent<Outline>();
+            vien.effectDistance = new Vector2(2f, -2f);
+            vien.effectColor = new Color(1f, 1f, 1f, 0.35f);
+        }
+    }
+
+    public void OnPointerEnter(PointerEventData e) { hover = true; }
+    public void OnPointerExit(PointerEventData e) { hover = false; bam = false; }
+    public void OnPointerDown(PointerEventData e) { bam = true; }
+    public void OnPointerUp(PointerEventData e) { bam = false; }
+
+    private void OnDisable()
+    {
+        hover = false;
+        bam = false;
+        tHover = 0f;
+        scaleHienTai = 1f;
+        transform.localScale = scaleGoc;
+    }
+
+    private void Update()
+    {
+        float dt = Time.unscaledDeltaTime;
+        bool ok = sel == null || sel.interactable;
+
+        tHover = Mathf.MoveTowards(tHover, (ok && hover) ? 1f : 0f, dt * 10f);
+        float s = 1f + (phongHover - 1f) * tHover;
+        if (ok && bam) s *= nenBam;
+
+        scaleHienTai = Mathf.Lerp(scaleHienTai, s, 1f - Mathf.Exp(-20f * dt));
+        transform.localScale = scaleGoc * scaleHienTai;
+
+        if (vien != null)
+        {
+            float a = ok ? Mathf.Lerp(0.35f, 1f, tHover) : 0.15f;
+            vien.effectColor = new Color(1f, 1f, 1f, a);
+        }
+    }
+}
 
 public class SelectManager : MonoBehaviour
 {
@@ -16,48 +79,40 @@ public class SelectManager : MonoBehaviour
     {
         public string displayName;
         public string sceneName;
-        public Sprite previewImage;   // KÉO ẢNH MAP VÀO ĐÂY
+        public Sprite previewImage;
     }
 
-    [Header("Tên các mẫu xe")]
-    public string[] tenCacMauXe = { "ElectricScooterDefault", "ElectricScooterDefaultBlack" };
+    [Header("Vehicle Catalog")]
+    public string[] tenCacMauXe;
 
-    [Header("Danh sách Map đua (thêm map = tăng Size, điền tên scene + kéo ảnh)")]
+    [Header("Danh sach Map")]
     public MapOption[] maps;
 
-    [Header("Sân khấu trưng bày 3D")]
+    [Header("San khau trung bay 3D")]
     public Transform showcaseStage;
-    public float rotateSpeed = 45f;
+    public float rotateSpeed = 40f;
 
-    [Header("Hộp kính xe")]
-    public Vector3 hopViTri = new Vector3(0f, 1.3f, 3.0f);
-    public float hopKichThuoc = 1.0f;
+    [Header("Hop kinh xe - HOST")]
+    public Vector3 hopViTri = new Vector3(0f, 1.3f, 3f);
+    public float hopKichThuoc = 1f;
 
-    [Header("Khung chọn Map")]
+    [Header("Hop kinh xe - GUEST")]
+    public Vector3 hopViTriMotVat = new Vector3(0f, 1.2f, 3f);
+    public float hopKichThuocMotVat = 1.4f;
+
+    [Header("Khung chon Map")]
     public float mapPickerY = 0.14f;
     public Vector2 mapPreviewSize = new Vector2(400f, 225f);
 
-    [Header("Giao diện UI")]
-    public TMP_Text itemNameText;
-    public TMP_Text warningText;
+    [Header("Giao dien UI")]
+    public TMPro.TMP_Text itemNameText;
+    public TMPro.TMP_Text warningText;
     public Button confirmButton;
 
-    [Header("Màu chủ đạo")]
-    public Color mauMacDinh = new Color(0.15f, 0.95f, 0.5f);
-    [Tooltip("Ép màu cho từng xe theo thứ tự. Để Alpha = 0 thì tự lấy từ model.")]
-    public Color[] mauXeTuyChinh;
-    public bool doiMauTheoXe = true;
-    public bool doiMauChuTenXe = true;
-    public float tocDoDoiMau = 6f;
+    public float doHaChuTenXe = 40f;
+    public RectTransform[] cacUICanHa;
 
-    [Header("Hiệu ứng nền (nhẹ)")]
-    public bool batHieuUng = true;
-    [Tooltip("Dịch hiệu ứng sàn lên/xuống so với đáy hộp kính.")]
-    public float doLechSan = -0.07f;
-    public float tocDoNhip = 1.6f;
-    public bool tintNenCamera = false;
-
-    [Header("Hiệu ứng nút")]
+    [Header("Hieu ung nut")]
     public bool hieuUngNut = true;
 
     [Header("Navigation")]
@@ -65,114 +120,307 @@ public class SelectManager : MonoBehaviour
     public string tenSceneMenu = "menu";
 
     private const string TAB_SCOOTER = "Scooter";
-    private const string TAB_MAP = "Map";
-    private static readonly Color MAU_NEN_CAMERA = new Color(0.02f, 0.03f, 0.04f);
 
-    private string currentTab = TAB_SCOOTER;
-    private int scooterIndex = 0;
-    private int mapIndex = 0;
-    private bool dangChuyenScene = false;
+    private int scooterIndex;
+    private int mapIndex;
+    private bool dangChuyenScene;
+    private bool laChuPhong = true;
+
+    private Vector3 hopViTriHT;
+    private float hopKichThuocHT;
 
     private Camera cam;
     private Font fontMacDinh;
-
     private Transform trucXoayXe;
-    private readonly List<GameObject> danhSachXeTrungBay = new List<GameObject>();
 
-    // UI chọn map
+    private readonly Dictionary<string, GameObject> modelTheoLoai = new Dictionary<string, GameObject>();
+    private GameObject prefabScooterGoc;
+
     private GameObject mapPickerGO;
     private Text lblMap;
     private Image imgMap;
-    private Coroutine coroutineHieuUngMap;
     private Outline mapOutline;
-    private readonly List<Text> chuTheoMau = new List<Text>();
 
-    // Màu
-    private Color[] mauXe;
-    private Color mauHienTai;
-    private Color mauMucTieu;
-    private Color mauDaApDung = new Color(-1f, -1f, -1f, -1f);
-    private bool canApMauTinh = true;
-    private float xungSang = 0f;     // 1 = vừa đổi xe, giảm dần về 0
-
-    // Material / texture dùng chung (tạo 1 lần, hủy ở OnDestroy)
     private Material matKinh;
     private Material matDe;
     private Material matLine;
-    private Material matSan;
-    private Texture2D texGlow;
 
-    // Hiệu ứng 3D
     private LineRenderer lrVienHop;
-    private Transform fxRoot;
-    private LineRenderer vongTrong;
+    private float thoiDiemKiemTraVaiTro;
+    private Canvas cachedCanvas;
 
-    // ------------------------------------------------------------------
-    // LIFECYCLE
-    // ------------------------------------------------------------------
     private void Start()
     {
         Time.timeScale = 1f;
+        PhotonNetwork.AutomaticallySyncScene = false;
         cam = Camera.main;
+        cachedCanvas = FindFirstObjectByType<Canvas>();
 
-        tenCacMauXe = new string[] { "ElectricScooterDefault", "ElectricScooterDefaultBlack" };
-        scooterIndex = Mathf.Clamp(PlayerInventory.GetEquippedIndex(TAB_SCOOTER), 0, tenCacMauXe.Length - 1);
+        ButtonFx.MauChung = Color.white;
+        tenCacMauXe = VehicleCatalog.GetAllNames();
+
+        if (itemNameText != null)
+        {
+            itemNameText.color = Color.white;
+            itemNameText.rectTransform.anchoredPosition += new Vector2(0f, -doHaChuTenXe);
+        }
+
+        if (cacUICanHa != null)
+        {
+            foreach (RectTransform r in cacUICanHa)
+            {
+                if (r != null && (itemNameText == null || r != itemNameText.rectTransform))
+                    r.anchoredPosition += new Vector2(0f, -doHaChuTenXe);
+            }
+        }
+
+        laChuPhong = !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
+
+        bool coMap = laChuPhong && maps != null && maps.Length > 0;
+        hopViTriHT = coMap ? hopViTri : hopViTriMotVat;
+        hopKichThuocHT = coMap ? hopKichThuoc : hopKichThuocMotVat;
+
+        scooterIndex = VehicleCatalog.GetSelectedIndex();
+        if (!VehicleCatalog.IsOwned(scooterIndex))
+            scooterIndex = TimXeDauTienDaSoHuu();
+
+        if (PhotonNetwork.InRoom &&
+            PhotonNetwork.LocalPlayer != null &&
+            PhotonNetwork.LocalPlayer.CustomProperties.TryGetValue("Scooter", out object xeTrongPhong))
+        {
+            int indexPhoton = System.Convert.ToInt32(xeTrongPhong);
+            if (indexPhoton >= 0 && indexPhoton < VehicleCatalog.Count && VehicleCatalog.IsOwned(indexPhoton))
+                scooterIndex = indexPhoton;
+        }
+
+        scooterIndex = Mathf.Clamp(scooterIndex, 0, VehicleCatalog.Count - 1);
 
         string savedMap = PlayerInventory.GetSelectedMap();
         if (maps != null)
         {
             for (int i = 0; i < maps.Length; i++)
             {
-                if (maps[i].sceneName == savedMap) { mapIndex = i; break; }
+                if (maps[i] != null && maps[i].sceneName == savedMap)
+                {
+                    mapIndex = i;
+                    break;
+                }
             }
         }
 
         TaoTaiNguyenDungChung();
         TuDongNoiNutUI();
         CanChinhCameraVaSanKhau();
-        TaoHaiModelXeDocLap();
 
-        mauHienTai = mauMucTieu = LayMauMucTieu();
+        prefabScooterGoc = Resources.Load<GameObject>("Scooter");
+        if (prefabScooterGoc == null)
+            Debug.LogError("[SelectManager] Không tìm thấy Prefab 'Resources/Scooter'!");
 
-        if (batHieuUng) TaoHieuUng();
+        if (laChuPhong) TaoUIChonMap();
+        DongBoLopHienThiUI();
 
-        TaoUIChonMap();
         SelectTab(TAB_SCOOTER);
+        CapNhatGiaoDien();
+    }
 
-        mauHienTai = mauMucTieu;
-        xungSang = 0f;
-        canApMauTinh = true;
-        ApDungMau(1f);
+    private void LateUpdate()
+    {
+        DongBoLopHienThiUI();
+    }
+
+    private void DongBoLopHienThiUI()
+    {
+        if (cachedCanvas == null) cachedCanvas = FindFirstObjectByType<Canvas>();
+        if (cachedCanvas == null) return;
+
+        Transform root = cachedCanvas.rootCanvas.transform;
+        bool bangHuongDanDangMo = false;
+
+        // Tìm hộp thoại hướng dẫn đang mở (dựa vào khung hộp thoại trung tâm chứa chữ hướng dẫn)
+        foreach (Image img in root.GetComponentsInChildren<Image>(false))
+        {
+            if (img == null || img.GetComponent<Button>() != null) continue;
+            if (mapPickerGO != null && img.transform.IsChildOf(mapPickerGO.transform)) continue;
+
+            RectTransform rt = img.rectTransform;
+            // Bỏ qua lớp phủ toàn màn hình (giữ nguyên lớp phủ xám toàn màn hình)
+            if (rt.anchorMin == Vector2.zero && rt.anchorMax == Vector2.one) continue;
+
+            // Nhận diện khung hộp thoại lớn ở giữa màn hình
+            if (rt.rect.width > 500f && rt.rect.height > 300f)
+            {
+                bangHuongDanDangMo = true;
+
+                // Đổi màu khung hộp thoại sáng sang nền tối để chữ trắng rõ ràng
+                Color c = img.color;
+                if (c.r > 0.55f && c.g > 0.55f && c.b > 0.55f)
+                    img.color = new Color(0.10f, 0.12f, 0.16f, 0.96f);
+            }
+        }
+
+        if (mapPickerGO != null)
+        {
+            bool nenHienMap = laChuPhong && maps != null && maps.Length > 0 && !bangHuongDanDangMo;
+            if (mapPickerGO.activeSelf != nenHienMap)
+                mapPickerGO.SetActive(nenHienMap);
+
+            // Khi bảng hướng dẫn đã đóng, đưa MapPicker lên trên lớp phủ xám để ảnh map sáng rõ
+            if (nenHienMap && mapPickerGO.transform.GetSiblingIndex() != root.childCount - 1)
+                mapPickerGO.transform.SetAsLastSibling();
+        }
+    }
+
+    private GameObject LayHoacTaoXe(int index)
+    {
+        if (prefabScooterGoc == null || index < 0 || index >= VehicleCatalog.Count) return null;
+
+        VehicleCatalog.VehicleData data = VehicleCatalog.Get(index);
+        string loai = string.IsNullOrEmpty(data.sourceModel) ? "Default" : data.sourceModel;
+
+        if (!modelTheoLoai.TryGetValue(loai, out GameObject holder) || holder == null)
+        {
+            holder = new GameObject($"XeModel_{loai}");
+            holder.transform.SetParent(trucXoayXe, false);
+            holder.transform.localPosition = Vector3.zero;
+            holder.transform.localRotation = Quaternion.identity;
+            holder.transform.localScale = Vector3.one;
+
+            GameObject tempRoot = Instantiate(prefabScooterGoc);
+            Transform nguon = TimNodeThongMinh(tempRoot.transform, data.sourceModel);
+
+            if (nguon != null)
+            {
+                GameObject banSao = Instantiate(nguon.gameObject, holder.transform);
+                banSao.name = loai;
+                banSao.SetActive(true);
+
+                foreach (Rigidbody rb in banSao.GetComponentsInChildren<Rigidbody>(true)) Destroy(rb);
+                foreach (Collider col in banSao.GetComponentsInChildren<Collider>(true)) col.enabled = false;
+                foreach (MonoBehaviour mb in banSao.GetComponentsInChildren<MonoBehaviour>(true)) mb.enabled = false;
+
+                foreach (Transform t in banSao.GetComponentsInChildren<Transform>(true))
+                {
+                    t.gameObject.SetActive(true);
+                    t.gameObject.layer = 0;
+                }
+
+                Renderer[] renderers = banSao.GetComponentsInChildren<Renderer>(true);
+                Bounds b = new Bounds();
+                bool coMesh = false;
+
+                foreach (Renderer r in renderers)
+                {
+                    if (r.gameObject.name.Contains("Minimap") || r.gameObject.name.Contains("vetPhanh"))
+                    {
+                        r.enabled = false;
+                        continue;
+                    }
+                    r.enabled = true;
+                    r.shadowCastingMode = ShadowCastingMode.Off;
+                    r.receiveShadows = false;
+                    if (!coMesh) { b = r.bounds; coMesh = true; }
+                    else b.Encapsulate(r.bounds);
+                }
+
+                if (coMesh)
+                {
+                    float maxDim = Mathf.Max(b.size.x, b.size.y, b.size.z);
+                    if (maxDim > 0.0001f)
+                    {
+                        float factor = 0.72f / maxDim;
+                        banSao.transform.localScale *= factor;
+
+                        coMesh = false;
+                        foreach (Renderer r in renderers)
+                        {
+                            if (!r.enabled) continue;
+                            if (!coMesh) { b = r.bounds; coMesh = true; }
+                            else b.Encapsulate(r.bounds);
+                        }
+                    }
+
+                    banSao.transform.position += holder.transform.position - b.center;
+                }
+            }
+
+            Destroy(tempRoot);
+            modelTheoLoai[loai] = holder;
+        }
+
+        foreach (var kv in modelTheoLoai)
+        {
+            if (kv.Value != null)
+                kv.Value.SetActive(kv.Key == loai);
+        }
+
+        VehicleCatalog.ApplyPaint(holder, data.color);
+        return holder;
+    }
+
+    private int TimXeDauTienDaSoHuu()
+    {
+        for (int i = 0; i < VehicleCatalog.Count; i++)
+        {
+            if (VehicleCatalog.IsOwned(i)) return i;
+        }
+        return 0;
+    }
+
+    private void CapNhatVaiTro()
+    {
+        if (Time.unscaledTime < thoiDiemKiemTraVaiTro) return;
+        thoiDiemKiemTraVaiTro = Time.unscaledTime + 0.5f;
+
+        bool moi = !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
+        if (moi == laChuPhong) return;
+
+        laChuPhong = moi;
+
+        if (laChuPhong)
+        {
+            if (mapPickerGO == null) TaoUIChonMap();
+            else mapPickerGO.SetActive(true);
+            DongBoLopHienThiUI();
+        }
+        else
+        {
+            if (mapPickerGO != null) mapPickerGO.SetActive(false);
+        }
+
+        CanChinhCameraTheoVaiTro();
+        CapNhatGiaoDien();
+    }
+
+    private void CanChinhCameraTheoVaiTro()
+    {
+        bool coMap = laChuPhong && maps != null && maps.Length > 0;
+        hopViTriHT = coMap ? hopViTri : hopViTriMotVat;
+        hopKichThuocHT = coMap ? hopKichThuoc : hopKichThuocMotVat;
+
+        if (trucXoayXe != null && trucXoayXe.parent != null)
+        {
+            Transform hop = trucXoayXe.parent;
+            hop.position = hopViTriHT;
+            hop.localScale = Vector3.one * hopKichThuocHT;
+        }
     }
 
     private void Update()
     {
         if (dangChuyenScene) return;
 
-        if (Nhan(Phim.Esc))
+        CapNhatVaiTro();
+
+        if (!MultiplayerAllInOne.DangGoChat)
         {
-            BackToMenu();
-            return;
+            if (Nhan(Phim.Esc)) { BackToMenu(); return; }
+            if (Nhan(Phim.Trai)) PreviousItem();
+            else if (Nhan(Phim.Phai)) NextItem();
+            else if (Nhan(Phim.Enter)) ConfirmSelection();
         }
-
-        if (Nhan(Phim.Trai)) PreviousItem();
-        else if (Nhan(Phim.Phai)) NextItem();
-
-        float dt = Time.deltaTime;
 
         if (trucXoayXe != null)
-            trucXoayXe.Rotate(0f, rotateSpeed * dt, 0f, Space.World);
-
-        if (!GanBang(mauHienTai, mauMucTieu))
-        {
-            Color moi = Color.Lerp(mauHienTai, mauMucTieu, 1f - Mathf.Exp(-tocDoDoiMau * dt));
-            mauHienTai = GanBang(moi, mauMucTieu) ? mauMucTieu : moi;
-        }
-
-        xungSang = Mathf.MoveTowards(xungSang, 0f, dt * 2.5f);
-
-        float nhip = 0.5f + 0.5f * Mathf.Sin(Time.time * tocDoNhip);
-        ApDungMau(nhip);
+            trucXoayXe.Rotate(0f, rotateSpeed * Time.deltaTime, 0f, Space.World);
     }
 
     private void OnDestroy()
@@ -180,16 +428,9 @@ public class SelectManager : MonoBehaviour
         if (matKinh != null) Destroy(matKinh);
         if (matDe != null) Destroy(matDe);
         if (matLine != null) Destroy(matLine);
-        if (matSan != null) Destroy(matSan);
-        if (texGlow != null) Destroy(texGlow);
-
-        if (mapPickerGO != null) Destroy(mapPickerGO);
     }
 
-    // ------------------------------------------------------------------
-    // INPUT
-    // ------------------------------------------------------------------
-    private enum Phim { Esc, Trai, Phai }
+    private enum Phim { Esc, Trai, Phai, Enter }
 
     private static bool Nhan(Phim p)
     {
@@ -201,6 +442,7 @@ public class SelectManager : MonoBehaviour
             case Phim.Esc: return kb.escapeKey.wasPressedThisFrame;
             case Phim.Trai: return kb.leftArrowKey.wasPressedThisFrame || kb.aKey.wasPressedThisFrame;
             case Phim.Phai: return kb.rightArrowKey.wasPressedThisFrame || kb.dKey.wasPressedThisFrame;
+            case Phim.Enter: return kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame;
         }
         return false;
 #else
@@ -209,19 +451,12 @@ public class SelectManager : MonoBehaviour
             case Phim.Esc: return Input.GetKeyDown(KeyCode.Escape);
             case Phim.Trai: return Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A);
             case Phim.Phai: return Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D);
+            case Phim.Enter: return Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
         }
         return false;
 #endif
     }
 
-    private static bool GanBang(Color a, Color b)
-    {
-        return ((Vector4)a - (Vector4)b).sqrMagnitude < 0.00001f;
-    }
-
-    // ------------------------------------------------------------------
-    // TÀI NGUYÊN DÙNG CHUNG
-    // ------------------------------------------------------------------
     private void TaoTaiNguyenDungChung()
     {
         fontMacDinh = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -232,34 +467,9 @@ public class SelectManager : MonoBehaviour
         Shader sprite = Shader.Find("Sprites/Default");
         if (sprite == null) sprite = unlit;
 
-        matKinh = TaoMaterialKinh(new Color(0.28f, 0.45f, 0.32f, 0.24f));
-        matDe = new Material(unlit) { color = new Color(0.18f, 0.32f, 0.22f) };
-        matLine = new Material(sprite);
-
-        const int size = 64;
-        var pixels = new Color32[size * size];
-        float tam = (size - 1) * 0.5f;
-        float banKinh = size * 0.5f;
-        for (int y = 0; y < size; y++)
-        {
-            for (int x = 0; x < size; x++)
-            {
-                float dx = x - tam, dy = y - tam;
-                float d = Mathf.Sqrt(dx * dx + dy * dy) / banKinh;
-                float a = Mathf.Pow(Mathf.Clamp01(1f - d), 2f);
-                pixels[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
-            }
-        }
-
-        texGlow = new Texture2D(size, size, TextureFormat.RGBA32, false)
-        {
-            wrapMode = TextureWrapMode.Clamp,
-            filterMode = FilterMode.Bilinear
-        };
-        texGlow.SetPixels32(pixels);
-        texGlow.Apply(false, true);
-
-        matSan = new Material(sprite) { mainTexture = texGlow };
+        matKinh = TaoMaterialKinh(new Color(1f, 1f, 1f, 0.12f));
+        matDe = new Material(unlit) { color = new Color(0.16f, 0.18f, 0.20f) };
+        matLine = new Material(sprite) { color = Color.white };
     }
 
     private Material TaoMaterialKinh(Color mauKinh)
@@ -270,8 +480,8 @@ public class SelectManager : MonoBehaviour
             Material mat = new Material(urpLit);
             mat.SetFloat("_Surface", 1f);
             mat.SetFloat("_Blend", 0f);
-            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
             mat.SetInt("_ZWrite", 0);
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.renderQueue = 3000;
@@ -280,243 +490,62 @@ public class SelectManager : MonoBehaviour
             return mat;
         }
 
-        Material stdMat = new Material(Shader.Find("Standard"));
-        stdMat.SetFloat("_Mode", 3f);
-        stdMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        stdMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        Shader standard = Shader.Find("Standard");
+        if (standard == null) standard = Shader.Find("Unlit/Color");
+
+        Material stdMat = new Material(standard);
+        if (stdMat.HasProperty("_Mode")) stdMat.SetFloat("_Mode", 3f);
+        stdMat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+        stdMat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
         stdMat.SetInt("_ZWrite", 0);
         stdMat.renderQueue = 3000;
         stdMat.color = mauKinh;
         return stdMat;
     }
 
-    // ------------------------------------------------------------------
-    // MÀU CHỦ ĐẠO TỪ XE
-    // ------------------------------------------------------------------
-    private Color LayMauXe(int index, GameObject model)
-    {
-        if (mauXeTuyChinh != null && index < mauXeTuyChinh.Length && mauXeTuyChinh[index].a > 0.01f)
-        {
-            Color c = mauXeTuyChinh[index];
-            c.a = 1f;
-            return c;
-        }
-        return LayMauChuDao(model);
-    }
-
-    private Color LayMauChuDao(GameObject model)
-    {
-        if (model == null) return mauMacDinh;
-
-        var trongSo = new Dictionary<int, float>();
-        var bangMau = new Dictionary<int, Color>();
-
-        foreach (Renderer r in model.GetComponentsInChildren<Renderer>(true))
-        {
-            if (r.name.Contains("Minimap") || r.name.Contains("vetPhanh")) continue;
-
-            Mesh mesh = null;
-            SkinnedMeshRenderer smr = r as SkinnedMeshRenderer;
-            if (smr != null) mesh = smr.sharedMesh;
-            else
-            {
-                MeshFilter mf = r.GetComponent<MeshFilter>();
-                if (mf != null) mesh = mf.sharedMesh;
-            }
-
-            Material[] mats = r.sharedMaterials;
-            if (mats == null || mats.Length == 0) continue;
-
-            float w = (mesh != null ? mesh.vertexCount : 1f) / mats.Length;
-
-            foreach (Material m in mats)
-            {
-                if (m == null) continue;
-
-                Color c;
-                if (m.HasProperty("_BaseColor")) c = m.GetColor("_BaseColor");
-                else if (m.HasProperty("_Color")) c = m.GetColor("_Color");
-                else continue;
-
-                Color32 k = c;
-                int key = k.r | (k.g << 8) | (k.b << 16);
-
-                float cu;
-                trongSo.TryGetValue(key, out cu);
-                trongSo[key] = cu + w;
-                bangMau[key] = c;
-            }
-        }
-
-        if (trongSo.Count == 0) return mauMacDinh;
-
-        int tot = 0;
-        float max = -1f;
-        foreach (var kv in trongSo)
-        {
-            if (kv.Value > max) { max = kv.Value; tot = kv.Key; }
-        }
-
-        Color chon = bangMau[tot];
-        Color.RGBToHSV(chon, out float h, out float s, out float v);
-
-        if (s >= 0.35f && v >= 0.3f)
-            return Color.HSVToRGB(h, Mathf.Clamp(s, 0.55f, 1f), 1f);
-
-        return Color.HSVToRGB(h, s, Mathf.Max(v, 0.06f));
-    }
-
-    private Color LayMauMucTieu()
-    {
-        if (doiMauTheoXe && mauXe != null && scooterIndex >= 0 && scooterIndex < mauXe.Length)
-            return mauXe[scooterIndex];
-        return mauMacDinh;
-    }
-
-    private void ApDungMau(float nhip)
-    {
-        Color c = mauHienTai;
-        ButtonFx.MauChung = c;
-
-        if (canApMauTinh || !GanBang(c, mauDaApDung))
-        {
-            ApMauTinh(c);
-            mauDaApDung = c;
-            canApMauTinh = false;
-        }
-
-        if (matKinh != null)
-        {
-            Color tint = Color.Lerp(new Color(0.15f, 0.20f, 0.18f), c, 0.35f);
-            tint.a = 0.24f + xungSang * 0.08f;
-            matKinh.color = tint;
-        }
-        if (matDe != null)
-            matDe.color = Color.Lerp(new Color(0.05f, 0.08f, 0.07f), c, 0.30f);
-
-        if (lrVienHop != null)
-        {
-            Color e = new Color(c.r, c.g, c.b, Mathf.Lerp(0.75f, 1f, nhip));
-            lrVienHop.startColor = e;
-            lrVienHop.endColor = e;
-        }
-
-        if (mapOutline != null)
-            mapOutline.effectColor = new Color(c.r, c.g, c.b, 0.9f);
-
-        CapNhatHieuUng(c, nhip);
-    }
-
-    private void ApMauTinh(Color c)
-    {
-        for (int i = 0; i < chuTheoMau.Count; i++)
-            if (chuTheoMau[i] != null) chuTheoMau[i].color = c;
-        if (doiMauChuTenXe && itemNameText != null) itemNameText.color = c;
-    }
-
-    // ------------------------------------------------------------------
-    // HIỆU ỨNG 3D (tối giản: 1 vòng + vệt sáng sàn)
-    // ------------------------------------------------------------------
-    private void TaoHieuUng()
-    {
-        fxRoot = new GameObject("AutoStageFX").transform;
-        fxRoot.position = new Vector3(
-            hopViTri.x,
-            hopViTri.y - hopKichThuoc * 0.5f + doLechSan,
-            hopViTri.z);
-
-        GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        pad.name = "FX_SanSang";
-        Destroy(pad.GetComponent<Collider>());
-        Transform padSan = pad.transform;
-        padSan.SetParent(fxRoot, false);
-        padSan.localPosition = new Vector3(0f, -0.005f, 0f);
-        padSan.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        padSan.localScale = new Vector3(hopKichThuoc * 3f, hopKichThuoc * 3f, 1f);
-        MeshRenderer mrPad = pad.GetComponent<MeshRenderer>();
-        mrPad.sharedMaterial = matSan;
-        mrPad.shadowCastingMode = ShadowCastingMode.Off;
-        mrPad.receiveShadows = false;
-
-        vongTrong = TaoVong("FX_Vong", 0.03f);
-    }
-
-    /// Vòng tròn bán kính 1, chỉnh kích thước bằng localScale.
-    private LineRenderer TaoVong(string ten, float doDay)
-    {
-        GameObject go = new GameObject(ten);
-        go.transform.SetParent(fxRoot, false);
-
-        LineRenderer lr = go.AddComponent<LineRenderer>();
-        lr.useWorldSpace = false;
-        lr.loop = true;
-        lr.widthMultiplier = doDay;
-        lr.sharedMaterial = matLine;
-        lr.shadowCastingMode = ShadowCastingMode.Off;
-        lr.receiveShadows = false;
-
-        const int n = 72;
-        lr.positionCount = n;
-        for (int i = 0; i < n; i++)
-        {
-            float a = i / (float)n * Mathf.PI * 2f;
-            lr.SetPosition(i, new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)));
-        }
-        return lr;
-    }
-
-    private void CapNhatHieuUng(Color c, float nhip)
-    {
-        if (fxRoot == null) return;
-
-        if (vongTrong != null)
-        {
-            float r = hopKichThuoc * 0.95f * (1f + 0.02f * nhip + 0.08f * xungSang);
-            vongTrong.transform.localScale = new Vector3(r, 1f, r);
-            Color v = new Color(c.r, c.g, c.b, Mathf.Lerp(0.55f, 0.9f, nhip));
-            vongTrong.startColor = v; vongTrong.endColor = v;
-        }
-
-        if (matSan != null)
-            matSan.color = new Color(c.r, c.g, c.b, Mathf.Lerp(0.25f, 0.4f, nhip) + xungSang * 0.15f);
-
-        if (tintNenCamera && cam != null && cam.clearFlags == CameraClearFlags.SolidColor)
-            cam.backgroundColor = Color.Lerp(MAU_NEN_CAMERA, c, 0.08f);
-    }
-
-    private void BungSangKhiDoiXe()
-    {
-        xungSang = 1f;
-    }
-
-    // ------------------------------------------------------------------
-    // UI
-    // ------------------------------------------------------------------
     private void GanHieuUngNut(Button b)
     {
         if (!hieuUngNut || b == null) return;
-        if (b.GetComponent<ButtonFx>() == null) b.gameObject.AddComponent<ButtonFx>();
+        if (b.GetComponent<ButtonFx>() == null)
+            b.gameObject.AddComponent<ButtonFx>();
     }
 
     private void TuDongNoiNutUI()
     {
         Button[] allButtons = FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+
         foreach (Button btn in allButtons)
         {
+            if (btn == null) continue;
             GanHieuUngNut(btn);
+
+            string tenBtn = btn.gameObject.name.ToLower();
+            TMPro.TMP_Text txt = btn.GetComponentInChildren<TMPro.TMP_Text>(true);
+            string label = txt != null ? txt.text.Trim().ToUpper() : "";
+
+            if (btn == confirmButton || tenBtn.Contains("confirm") || label == "CONFIRM")
+            {
+                if (confirmButton == null) confirmButton = btn;
+                btn.onClick.RemoveListener(ConfirmSelection);
+                btn.onClick.AddListener(ConfirmSelection);
+                continue;
+            }
+
+            if (tenBtn.Contains("back") || label == "BACK")
+            {
+                btn.onClick.RemoveListener(BackToMenu);
+                btn.onClick.AddListener(BackToMenu);
+                continue;
+            }
 
             if (btn.onClick.GetPersistentEventCount() != 0) continue;
 
-            TMP_Text txt = btn.GetComponentInChildren<TMP_Text>(true);
-            if (txt == null) continue;
-            string label = txt.text.Trim();
-
-            if (label == ">")
+            if (label == ">" || tenBtn.Contains("next"))
             {
                 btn.onClick.RemoveListener(NextItem);
                 btn.onClick.AddListener(NextItem);
             }
-            else if (label == "<")
+            else if (label == "<" || tenBtn.Contains("pre") || tenBtn.Contains("prev"))
             {
                 btn.onClick.RemoveListener(PreviousItem);
                 btn.onClick.AddListener(PreviousItem);
@@ -526,26 +555,25 @@ public class SelectManager : MonoBehaviour
 
     private void TaoUIChonMap()
     {
-        if (maps == null || maps.Length == 0) return;
+        if (!laChuPhong || maps == null || maps.Length == 0) return;
 
         Canvas canvas = FindFirstObjectByType<Canvas>();
         if (canvas == null) return;
 
         Transform goc = canvas.rootCanvas.transform;
-
         Transform cu = goc.Find("MapPicker");
         if (cu != null) Destroy(cu.gameObject);
 
         mapPickerGO = new GameObject("MapPicker", typeof(RectTransform));
         mapPickerGO.transform.SetParent(goc, false);
+
         RectTransform rt = mapPickerGO.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2(0.5f, mapPickerY);
         rt.anchoredPosition = Vector2.zero;
         rt.sizeDelta = new Vector2(300f, 34f);
 
-        chuTheoMau.Clear();
         lblMap = TaoText(mapPickerGO.transform, "LblMap", Vector2.zero, new Vector2(160f, 30f), 20);
-        chuTheoMau.Add(lblMap);
+        lblMap.color = Color.white;
 
         TaoNut(mapPickerGO.transform, "<", new Vector2(-100f, 0f), () => DoiMap(-1));
         TaoNut(mapPickerGO.transform, ">", new Vector2(100f, 0f), () => DoiMap(1));
@@ -554,6 +582,7 @@ public class SelectManager : MonoBehaviour
 
         GameObject h = new GameObject("MapPreview", typeof(RectTransform), typeof(Image));
         h.transform.SetParent(mapPickerGO.transform, false);
+
         RectTransform hr = h.GetComponent<RectTransform>();
         hr.anchoredPosition = viTriAnh;
         hr.sizeDelta = mapPreviewSize;
@@ -564,57 +593,32 @@ public class SelectManager : MonoBehaviour
 
         mapOutline = h.AddComponent<Outline>();
         mapOutline.effectDistance = new Vector2(3f, -3f);
+        mapOutline.effectColor = Color.white;
 
-        canApMauTinh = true;
         CapNhatMap();
     }
 
     private void DoiMap(int huong)
     {
-        if (maps == null || maps.Length == 0) return;
+        if (!laChuPhong || maps == null || maps.Length == 0) return;
+
         mapIndex = (mapIndex + huong + maps.Length) % maps.Length;
         CapNhatMap();
 
-        if (imgMap != null)
+        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null)
         {
-            if (coroutineHieuUngMap != null) StopCoroutine(coroutineHieuUngMap);
-            coroutineHieuUngMap = StartCoroutine(HieuUngNhayAnhMap(imgMap.rectTransform));
+            PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
+            {
+                { "Map", maps[mapIndex].sceneName }
+            });
         }
-
-        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient)
-            PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable { { "Map", maps[mapIndex].sceneName } });
-    }
-
-    private IEnumerator HieuUngNhayAnhMap(RectTransform rectTransform)
-    {
-        Vector3 scaleGoc = Vector3.one;
-        Vector3 scaleTo = Vector3.one * 1.04f;
-        const float thoiGian = 0.1f;
-
-        float elapsed = 0f;
-        while (elapsed < thoiGian)
-        {
-            elapsed += Time.deltaTime;
-            rectTransform.localScale = Vector3.Lerp(scaleGoc, scaleTo, elapsed / thoiGian);
-            yield return null;
-        }
-
-        elapsed = 0f;
-        while (elapsed < thoiGian)
-        {
-            elapsed += Time.deltaTime;
-            rectTransform.localScale = Vector3.Lerp(scaleTo, scaleGoc, elapsed / thoiGian);
-            yield return null;
-        }
-
-        rectTransform.localScale = scaleGoc;
-        coroutineHieuUngMap = null;
     }
 
     private Text TaoText(Transform cha, string ten, Vector2 viTri, Vector2 kichThuoc, int coChu = 20)
     {
         GameObject go = new GameObject(ten, typeof(RectTransform), typeof(Text));
         go.transform.SetParent(cha, false);
+
         RectTransform r = go.GetComponent<RectTransform>();
         r.anchoredPosition = viTri;
         r.sizeDelta = kichThuoc;
@@ -632,25 +636,31 @@ public class SelectManager : MonoBehaviour
     {
         GameObject go = new GameObject("Btn_" + nhan, typeof(RectTransform), typeof(Image), typeof(Button));
         go.transform.SetParent(cha, false);
+
         RectTransform r = go.GetComponent<RectTransform>();
         r.anchoredPosition = viTri;
         r.sizeDelta = new Vector2(34f, 30f);
 
-        go.GetComponent<Image>().color = new Color(0.1f, 0.1f, 0.1f, 0.9f);
+        go.GetComponent<Image>().color = new Color(0.12f, 0.12f, 0.14f, 0.92f);
+
         Button btn = go.GetComponent<Button>();
         btn.onClick.AddListener(onClick);
         GanHieuUngNut(btn);
 
         Text t = TaoText(go.transform, "Text", Vector2.zero, r.sizeDelta, 18);
         t.text = nhan;
+        t.color = Color.white;
     }
 
     private void CapNhatMap()
     {
-        if (maps == null || maps.Length == 0) return;
+        if (maps == null || maps.Length == 0 || mapIndex >= maps.Length || maps[mapIndex] == null)
+            return;
+
         MapOption m = maps[mapIndex];
 
-        if (lblMap != null) lblMap.text = string.IsNullOrEmpty(m.displayName) ? m.sceneName : m.displayName;
+        if (lblMap != null)
+            lblMap.text = string.IsNullOrEmpty(m.displayName) ? m.sceneName : m.displayName;
 
         if (imgMap != null)
         {
@@ -659,9 +669,6 @@ public class SelectManager : MonoBehaviour
         }
     }
 
-    // ------------------------------------------------------------------
-    // SÂN KHẤU + HỘP KÍNH
-    // ------------------------------------------------------------------
     private void CanChinhCameraVaSanKhau()
     {
         if (cam != null)
@@ -680,272 +687,184 @@ public class SelectManager : MonoBehaviour
         showcaseStage.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
         showcaseStage.localScale = Vector3.one;
 
-        trucXoayXe = TaoHopKinh("HopKinh_Xe", hopViTri, Vector3.one * hopKichThuoc);
+        trucXoayXe = TaoHopKinh("HopKinh_Xe", hopViTriHT, hopKichThuocHT);
     }
 
-    private Transform TaoHopKinh(string tenHop, Vector3 viTri, Vector3 kichThuocHop)
+    private Transform TaoHopKinh(string ten, Vector3 viTri, float kichThuoc)
     {
-        GameObject hopCha = new GameObject(tenHop);
-        hopCha.transform.SetParent(showcaseStage, false);
-        hopCha.transform.position = viTri;
+        GameObject hop = new GameObject(ten);
+        hop.transform.SetParent(showcaseStage, false);
+        hop.transform.position = viTri;
+        hop.transform.localScale = Vector3.one * kichThuoc;
 
-        TaoKhoi("KinhTrongSuot", hopCha.transform, matKinh, Vector3.zero, kichThuocHop);
-        TaoKhoi("DeHop", hopCha.transform, matDe,
-            new Vector3(0f, -kichThuocHop.y * 0.5f - 0.03f, 0f),
-            new Vector3(kichThuocHop.x + 0.06f, 0.06f, kichThuocHop.z + 0.06f));
+        GameObject de = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        de.name = "DeHop";
+        Destroy(de.GetComponent<Collider>());
+        de.transform.SetParent(hop.transform, false);
+        de.transform.localPosition = new Vector3(0f, -0.52f, 0f);
+        de.transform.localScale = new Vector3(1.06f, 0.06f, 1.06f);
+        de.GetComponent<MeshRenderer>().sharedMaterial = matDe;
 
-        VeVienHop(hopCha.transform, kichThuocHop);
+        GameObject kinh = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        kinh.name = "MatKinh";
+        Destroy(kinh.GetComponent<Collider>());
+        kinh.transform.SetParent(hop.transform, false);
+        kinh.transform.localPosition = Vector3.zero;
+        kinh.transform.localScale = Vector3.one;
+        MeshRenderer mrKinh = kinh.GetComponent<MeshRenderer>();
+        mrKinh.sharedMaterial = matKinh;
+        mrKinh.shadowCastingMode = ShadowCastingMode.Off;
 
-        GameObject truc = new GameObject("TrucXoayBenTrong");
-        truc.transform.SetParent(hopCha.transform, false);
+        GameObject vienObj = new GameObject("VienHop");
+        vienObj.transform.SetParent(hop.transform, false);
+        lrVienHop = vienObj.AddComponent<LineRenderer>();
+        lrVienHop.useWorldSpace = false;
+        lrVienHop.loop = false;
+        lrVienHop.widthMultiplier = 0.015f;
+        lrVienHop.sharedMaterial = matLine;
+        lrVienHop.startColor = Color.white;
+        lrVienHop.endColor = Color.white;
+
+        Vector3[] pts = new Vector3[]
+        {
+            new Vector3(-0.5f, -0.5f, -0.5f), new Vector3( 0.5f, -0.5f, -0.5f),
+            new Vector3( 0.5f,  0.5f, -0.5f), new Vector3(-0.5f,  0.5f, -0.5f),
+            new Vector3(-0.5f, -0.5f, -0.5f),
+            new Vector3(-0.5f, -0.5f,  0.5f), new Vector3( 0.5f, -0.5f,  0.5f),
+            new Vector3( 0.5f, -0.5f, -0.5f), new Vector3( 0.5f, -0.5f,  0.5f),
+            new Vector3( 0.5f,  0.5f,  0.5f), new Vector3( 0.5f,  0.5f, -0.5f),
+            new Vector3( 0.5f,  0.5f,  0.5f), new Vector3(-0.5f,  0.5f,  0.5f),
+            new Vector3(-0.5f,  0.5f, -0.5f), new Vector3(-0.5f,  0.5f,  0.5f),
+            new Vector3(-0.5f, -0.5f,  0.5f)
+        };
+        lrVienHop.positionCount = pts.Length;
+        lrVienHop.SetPositions(pts);
+
+        GameObject truc = new GameObject("TrucXoay");
+        truc.transform.SetParent(hop.transform, false);
         truc.transform.localPosition = Vector3.zero;
         return truc.transform;
     }
 
-    private static void TaoKhoi(string ten, Transform cha, Material mat, Vector3 viTri, Vector3 scale)
+    private static Transform TimNodeThongMinh(Transform root, string tenUuTien)
     {
-        GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        cube.name = ten;
-        Destroy(cube.GetComponent<Collider>());
-
-        Transform t = cube.transform;
-        t.SetParent(cha, false);
-        t.localPosition = viTri;
-        t.localScale = scale;
-
-        MeshRenderer mr = cube.GetComponent<MeshRenderer>();
-        mr.sharedMaterial = mat;
-        mr.shadowCastingMode = ShadowCastingMode.Off;
-        mr.receiveShadows = false;
-    }
-
-    private void VeVienHop(Transform parent, Vector3 size)
-    {
-        GameObject lineObj = new GameObject("VienHopKinh");
-        lineObj.transform.SetParent(parent, false);
-
-        lrVienHop = lineObj.AddComponent<LineRenderer>();
-        lrVienHop.useWorldSpace = false;
-        lrVienHop.startWidth = 0.018f;
-        lrVienHop.endWidth = 0.018f;
-        lrVienHop.sharedMaterial = matLine;
-        lrVienHop.shadowCastingMode = ShadowCastingMode.Off;
-        lrVienHop.receiveShadows = false;
-
-        float x = size.x * 0.5f;
-        float y = size.y * 0.5f;
-        float z = size.z * 0.5f;
-
-        Vector3[] pts = new Vector3[]
+        if (!string.IsNullOrEmpty(tenUuTien))
         {
-            new Vector3(-x, -y, -z), new Vector3(x, -y, -z), new Vector3(x, -y, z), new Vector3(-x, -y, z), new Vector3(-x, -y, -z),
-            new Vector3(-x,  y, -z), new Vector3(x,  y, -z), new Vector3(x, -y, -z), new Vector3(x,  y, -z),
-            new Vector3( x,  y,  z), new Vector3(x, -y,  z), new Vector3(x,  y,  z),
-            new Vector3(-x,  y,  z), new Vector3(-x, -y,  z), new Vector3(-x,  y,  z),
-            new Vector3(-x,  y, -z)
-        };
-        lrVienHop.positionCount = pts.Length;
-        lrVienHop.SetPositions(pts);
-    }
-
-    // ------------------------------------------------------------------
-    // MODEL XE
-    // ------------------------------------------------------------------
-    private void TaoHaiModelXeDocLap()
-    {
-        danhSachXeTrungBay.Clear();
-
-        mauXe = new Color[tenCacMauXe.Length];
-        for (int i = 0; i < mauXe.Length; i++) mauXe[i] = mauMacDinh;
-
-        GameObject prefabGoc = Resources.Load<GameObject>("Scooter");
-        if (prefabGoc == null) return;
-
-        GameObject tempRoot = Instantiate(prefabGoc);
-        tempRoot.SetActive(false);
-
-        for (int i = 0; i < tenCacMauXe.Length; i++)
-        {
-            Transform timThay = TimNodeTheoTen(tempRoot.transform, tenCacMauXe[i]);
-
-            if (timThay == null)
+            foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
             {
-                Transform slot = TimNodeTheoTen(tempRoot.transform, i == 0 ? "Scooter_1" : "Scooter_2");
-                if (slot != null && slot.childCount > 0) timThay = slot.GetChild(0);
+                if (t.name == tenUuTien && t.GetComponentsInChildren<Renderer>(true).Length > 0)
+                    return t;
             }
-
-            if (timThay == null)
-            {
-                danhSachXeTrungBay.Add(null);
-                continue;
-            }
-
-            GameObject banSao = Instantiate(timThay.gameObject);
-            banSao.name = tenCacMauXe[i];
-
-            mauXe[i] = LayMauXe(i, banSao);
-            danhSachXeTrungBay.Add(TaoHolderVaCanGiuaHop(banSao));
         }
 
-        Destroy(tempRoot);
-    }
-
-    private static Transform TimNodeTheoTen(Transform root, string ten)
-    {
         foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
         {
-            if (t.name == ten) return t;
+            if (t == root) continue;
+            string n = t.name.ToLower();
+            if ((n.Contains("scooter") || n.Contains("default")) && !n.Contains("black") && t.GetComponentsInChildren<Renderer>(true).Length > 0)
+                return t;
         }
+
+        foreach (MeshRenderer mr in root.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            if (!mr.name.Contains("Minimap") && !mr.name.Contains("vetPhanh"))
+                return mr.transform.parent != null && mr.transform.parent != root ? mr.transform.parent : mr.transform;
+        }
+
         return null;
     }
 
-    private static bool TinhBounds(Renderer[] renderers, out Bounds bounds)
+    public void SelectTab(string tab)
     {
-        bounds = default;
-        bool co = false;
-
-        for (int i = 0; i < renderers.Length; i++)
-        {
-            Renderer r = renderers[i];
-            if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
-
-            if (!co) { bounds = r.bounds; co = true; }
-            else bounds.Encapsulate(r.bounds);
-        }
-        return co;
-    }
-
-    private GameObject TaoHolderVaCanGiuaHop(GameObject model)
-    {
-        foreach (MonoBehaviour mb in model.GetComponentsInChildren<MonoBehaviour>(true))
-            if (mb != null) Destroy(mb);
-        foreach (Collider col in model.GetComponentsInChildren<Collider>(true))
-            if (col != null) Destroy(col);
-        foreach (Rigidbody rb in model.GetComponentsInChildren<Rigidbody>(true))
-            if (rb != null) Destroy(rb);
-
-        GameObject khungChuan = new GameObject(model.name + "_Holder");
-        Transform kt = khungChuan.transform;
-        kt.SetParent(trucXoayXe, false);
-        kt.localPosition = Vector3.zero;
-        kt.localRotation = Quaternion.identity;
-        kt.localScale = Vector3.one;
-
-        Transform mt = model.transform;
-        mt.SetParent(kt, false);
-        mt.localPosition = Vector3.zero;
-        mt.localRotation = Quaternion.identity;
-        mt.localScale = Vector3.one;
-
-        khungChuan.SetActive(true);
-        foreach (Transform t in model.GetComponentsInChildren<Transform>(true))
-        {
-            t.gameObject.SetActive(true);
-            t.gameObject.layer = 0;
-        }
-
-        Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
-        foreach (Renderer r in renderers)
-        {
-            if (r.name.Contains("Minimap") || r.name.Contains("vetPhanh"))
-            {
-                r.gameObject.SetActive(false);
-                continue;
-            }
-            r.enabled = true;
-            r.shadowCastingMode = ShadowCastingMode.Off;
-            r.receiveShadows = false;
-        }
-
-        if (TinhBounds(renderers, out Bounds b))
-        {
-            float maxDim = Mathf.Max(b.size.x, b.size.y, b.size.z);
-            if (maxDim > 0.000001f)
-            {
-                mt.localScale = Vector3.one * ((hopKichThuoc * 0.72f) / maxDim);
-
-                if (TinhBounds(renderers, out b))
-                    mt.position += kt.position - b.center;
-            }
-        }
-
-        khungChuan.SetActive(false);
-        return khungChuan;
-    }
-
-    // ------------------------------------------------------------------
-    // CHỌN XE / MAP
-    // ------------------------------------------------------------------
-    public void SelectTab(string tabName)
-    {
-        currentTab = tabName;
         CapNhatGiaoDien();
     }
 
-    public void NextItem() { DoiItem(1); }
-    public void PreviousItem() { DoiItem(-1); }
+    public void NextItem() => DoiXe(1);
+    public void PreviousItem() => DoiXe(-1);
 
-    private void DoiItem(int huong)
+    private void DoiXe(int huong)
     {
-        if (currentTab == TAB_SCOOTER && tenCacMauXe.Length > 0)
-        {
-            scooterIndex = (scooterIndex + huong + tenCacMauXe.Length) % tenCacMauXe.Length;
-            BungSangKhiDoiXe();
-            CapNhatGiaoDien();
-        }
-        else if (currentTab == TAB_MAP)
-        {
-            DoiMap(huong);
-            CapNhatGiaoDien();
-        }
+        int total = VehicleCatalog.Count;
+        if (total <= 0) return;
+
+        scooterIndex = (scooterIndex + huong + total) % total;
+        CapNhatGiaoDien();
     }
 
     private void CapNhatGiaoDien()
     {
-        int soXe = Mathf.Max(1, tenCacMauXe.Length);
-        if (scooterIndex < 0 || scooterIndex >= soXe) scooterIndex = 0;
+        LayHoacTaoXe(scooterIndex);
 
-        for (int i = 0; i < danhSachXeTrungBay.Count; i++)
-        {
-            if (danhSachXeTrungBay[i] != null)
-                danhSachXeTrungBay[i].SetActive(i == scooterIndex);
-        }
+        VehicleCatalog.VehicleData data = VehicleCatalog.Get(scooterIndex);
+        bool daSoHuu = VehicleCatalog.IsOwned(scooterIndex);
 
         if (itemNameText != null)
         {
-            if (currentTab == TAB_SCOOTER && tenCacMauXe.Length > 0)
-                itemNameText.text = $"XE: {tenCacMauXe[scooterIndex]}";
-            else if (currentTab == TAB_MAP && maps != null && maps.Length > 0)
-                itemNameText.text = $"MAP: {maps[mapIndex].displayName}";
+            itemNameText.text = data.name.ToUpper();
+            itemNameText.color = Color.white;
         }
-
-        if (confirmButton != null) confirmButton.interactable = true;
-
-        mauMucTieu = LayMauMucTieu();
 
         if (warningText != null)
         {
-            string hex = ColorUtility.ToHtmlStringRGB(mauMucTieu);
-            warningText.text = $"<color=#{hex}>SẴN SÀNG RA ĐƯỜNG ĐUA!</color>";
+            warningText.gameObject.SetActive(!daSoHuu);
+            if (!daSoHuu)
+                warningText.text = $"LOCKED ({data.price} COINS IN SHOP)";
         }
+
+        if (confirmButton != null)
+            confirmButton.interactable = daSoHuu;
     }
 
-    // ------------------------------------------------------------------
-    // NAVIGATION
-    // ------------------------------------------------------------------
-    public void ConfirmAndGoToLobby()
+    public void ConfirmSelection()
     {
         if (dangChuyenScene) return;
+
+        if (!VehicleCatalog.IsOwned(scooterIndex))
+        {
+            if (warningText != null)
+            {
+                warningText.gameObject.SetActive(true);
+                warningText.text = "YOU DO NOT OWN THIS SCOOTER!";
+            }
+            return;
+        }
+
         dangChuyenScene = true;
+        VehicleCatalog.SelectVehicle(scooterIndex);
 
-        PlayerInventory.SetEquippedIndex(TAB_SCOOTER, scooterIndex);
-        if (maps != null && maps.Length > 0)
+        if (laChuPhong && maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
+        {
             PlayerInventory.SetSelectedMap(maps[mapIndex].sceneName);
+        }
 
-        if (mapPickerGO != null) Destroy(mapPickerGO);
+        if (PhotonNetwork.InRoom)
+        {
+            if (PhotonNetwork.LocalPlayer != null)
+            {
+                PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
+                {
+                    { "Scooter", scooterIndex }
+                });
+            }
 
-        Time.timeScale = 1f;
-        SceneManager.LoadScene(tenSceneLobby);
+            if (PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null &&
+                maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
+            {
+                PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
+                {
+                    { "Map", maps[mapIndex].sceneName }
+                });
+            }
+
+            SceneManager.LoadScene(tenSceneLobby);
+        }
+        else
+        {
+            string mapToLoad = (maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
+                ? maps[mapIndex].sceneName
+                : tenSceneMenu;
+            SceneManager.LoadScene(mapToLoad);
+        }
     }
 
     public void BackToMenu()
@@ -953,78 +872,9 @@ public class SelectManager : MonoBehaviour
         if (dangChuyenScene) return;
         dangChuyenScene = true;
 
-        if (mapPickerGO != null) Destroy(mapPickerGO);
+        if (PhotonNetwork.InRoom)
+            PhotonNetwork.LeaveRoom();
 
-        Time.timeScale = 1f;
         SceneManager.LoadScene(tenSceneMenu);
-    }
-}
-
-/// Hiệu ứng nút: phóng nhẹ khi rê chuột, nhún khi bấm, viền sáng theo màu xe.
-[DisallowMultipleComponent]
-public class ButtonFx : MonoBehaviour,
-    IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
-{
-    /// Màu viền dùng chung (SelectManager đổi theo màu xe, scene khác dùng màu mặc định)
-    public static Color MauChung = new Color(0.15f, 0.95f, 0.5f);
-
-    public float phongHover = 1.07f;
-    public float nhunBam = 0.93f;
-    public float tocDo = 16f;
-
-    private Button btn;
-    private Outline vien;
-    private Vector3 scaleGoc;
-    private bool hover, bam;
-    private float h, p;
-
-    private void Awake()
-    {
-        btn = GetComponent<Button>();
-        scaleGoc = transform.localScale;
-
-        Image img = GetComponent<Image>();
-        if (img != null)
-        {
-            vien = GetComponent<Outline>();
-            if (vien == null) vien = gameObject.AddComponent<Outline>();
-            vien.effectDistance = new Vector2(2.5f, -2.5f);
-            vien.effectColor = new Color(1f, 1f, 1f, 0f);
-        }
-    }
-
-    private void OnEnable()
-    {
-        hover = bam = false;
-        h = p = 0f;
-        if (scaleGoc != Vector3.zero) transform.localScale = scaleGoc;
-    }
-
-    private void OnDisable()
-    {
-        if (scaleGoc != Vector3.zero) transform.localScale = scaleGoc;
-    }
-
-    public void OnPointerEnter(PointerEventData e) { hover = true; }
-    public void OnPointerExit(PointerEventData e) { hover = false; bam = false; }
-    public void OnPointerDown(PointerEventData e) { bam = true; }
-    public void OnPointerUp(PointerEventData e) { bam = false; }
-
-    private void Update()
-    {
-        bool ok = btn == null || btn.interactable;
-        float k = 1f - Mathf.Exp(-tocDo * Time.unscaledDeltaTime);
-
-        h = Mathf.Lerp(h, (hover && ok) ? 1f : 0f, k);
-        p = Mathf.Lerp(p, (bam && ok) ? 1f : 0f, k);
-
-        float s = Mathf.Lerp(1f, phongHover, h) * Mathf.Lerp(1f, nhunBam, p);
-        transform.localScale = scaleGoc * s;
-
-        if (vien != null)
-        {
-            Color c = MauChung;
-            vien.effectColor = new Color(c.r, c.g, c.b, h * 0.9f);
-        }
     }
 }

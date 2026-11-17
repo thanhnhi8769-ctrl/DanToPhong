@@ -6,7 +6,8 @@ using UnityEngine.UI;
 public class MenuController : MonoBehaviour
 {
     [Header("Tên Scene")]
-    public string tenSceneChon = "SelectScene";
+    [Tooltip("Nút Play dẫn tới Lobby (chọn xe/map sẽ làm trong Lobby sau khi vào phòng)")]
+    public string tenSceneLobby = "LobbyScene";
     public string tenSceneShop = "ShopScene";
 
     [Header("Xác nhận thoát (tùy chọn)")]
@@ -68,7 +69,8 @@ public class MenuController : MonoBehaviour
     // ------------------------------------------------------------------
     public void BatTatNhac() { MenuLobbyMusic.BatTat(); }
 
-    public void ChoiGame() { ChuyenScene(tenSceneChon); }
+    /// Gắn vào nút "Play": Menu -> Lobby
+    public void ChoiGame() { ChuyenScene(tenSceneLobby); }
     public void MoShop() { ChuyenScene(tenSceneShop); }
 
     /// Gắn vào nút "Không" / "Hủy" của panel xác nhận.

@@ -41,9 +41,9 @@ public class GameNetworkManager : MonoBehaviour
     {
         string ten = scene.name.ToLower();
 
-        if (ten.Contains("select")) return;
+        if (ten.Contains("select") || ten.Contains("shop") || ten.Contains("menu") || ten.Contains("lobby"))
+            return;
 
-        // Fallback: nếu vẫn lỡ vào scene "game" gốc -> chuyển sang map đã chọn
         if (ten == "game")
         {
             string m = LayMapDaChon();
@@ -54,7 +54,9 @@ public class GameNetworkManager : MonoBehaviour
             }
         }
 
-        if (!ten.Contains("game")) return;
+        // Tự nhận diện màn chơi nếu tên scene có "game"/"map" HOẶC trong scene có GameManager
+        bool laSceneDua = ten.Contains("game") || ten.Contains("map") || FindFirstObjectByType<GameManager>() != null;
+        if (!laSceneDua) return;
 
         if (FindFirstObjectByType<GameNetworkManager>() == null)
         {
@@ -73,7 +75,6 @@ public class GameNetworkManager : MonoBehaviour
         return PlayerInventory.GetSelectedMap();
     }
 
-    // Lobby gọi hàm này để load thẳng map, không đi qua scene "game"
     public static string LayTenSceneVaoGame()
     {
         string m = LayMapDaChon();
@@ -82,7 +83,9 @@ public class GameNetworkManager : MonoBehaviour
 
     private void Start()
     {
-        if (SceneManager.GetActiveScene().name.ToLower().Contains("select")) return;
+        string tenScene = SceneManager.GetActiveScene().name.ToLower();
+        if (tenScene.Contains("select") || tenScene.Contains("shop") || tenScene.Contains("menu") || tenScene.Contains("lobby"))
+            return;
 
         TuDongTimSpawnPointsNeuThieu();
         StartCoroutine(ChoVaoPhongVaSinhXe());
@@ -109,8 +112,8 @@ public class GameNetworkManager : MonoBehaviour
 
     private Vector3 DatLenMatDuong(Vector3 goc)
     {
-        Vector3 batDau = goc + Vector3.up * 3f;
-        RaycastHit[] cac = Physics.RaycastAll(batDau, Vector3.down, 40f, ~0, QueryTriggerInteraction.Ignore);
+        Vector3 batDau = goc + Vector3.up * 5f;
+        RaycastHit[] cac = Physics.RaycastAll(batDau, Vector3.down, 50f, ~0, QueryTriggerInteraction.Ignore);
 
         float tot = float.MaxValue;
         bool laRoad = false;
@@ -132,14 +135,34 @@ public class GameNetworkManager : MonoBehaviour
         return (coHit ? diem : goc) + Vector3.up * doCaoThaXe;
     }
 
+    private GameObject TaiPrefabXe()
+    {
+        GameObject prefab = Resources.Load<GameObject>(tenPrefabXeGoc);
+        if (prefab != null) return prefab;
+
+        // Dự phòng nếu tên Prefab trong Resources viết hoa/thường khác nhau
+        foreach (GameObject go in Resources.LoadAll<GameObject>(""))
+        {
+            if (go != null && (go.name.Equals(tenPrefabXeGoc, System.StringComparison.OrdinalIgnoreCase)
+                || go.GetComponent<scooter>() != null))
+            {
+                tenPrefabXeGoc = go.name;
+                return go;
+            }
+        }
+
+        Debug.LogError($"[GameNetworkManager] Không tìm thấy Prefab xe '{tenPrefabXeGoc}' trong thư mục Resources!");
+        return null;
+    }
+
     private IEnumerator ChoVaoPhongVaSinhXe()
     {
-        if (PhotonNetwork.IsConnected)
+        if (PhotonNetwork.IsConnected && !PhotonNetwork.InRoom)
         {
-            float timeout = 3f;
-            while (!PhotonNetwork.InRoom && timeout > 0f)
+            float timeout = 2.5f;
+            while (PhotonNetwork.IsConnected && !PhotonNetwork.InRoom && timeout > 0f)
             {
-                timeout -= Time.deltaTime;
+                timeout -= Time.unscaledDeltaTime;
                 yield return null;
             }
         }
@@ -165,7 +188,7 @@ public class GameNetworkManager : MonoBehaviour
             viTriSpawn = DatLenMatDuong(mucTieu);
         }
 
-        int indexXe = PlayerInventory.GetEquippedIndex("Scooter");
+        int indexXe = VehicleCatalog.GetSelectedIndex();
         GameObject xe = null;
 
         if (PhotonNetwork.IsConnectedAndReady && PhotonNetwork.InRoom)
@@ -174,9 +197,7 @@ public class GameNetworkManager : MonoBehaviour
             {
                 Hashtable trangBi = new Hashtable
                 {
-                    { "Scooter", indexXe },
-                    { "Helmet", PlayerInventory.GetEquippedIndex("Helmet") },
-                    { "Character", PlayerInventory.GetEquippedIndex("Character") }
+                    { "Scooter", indexXe }
                 };
                 PhotonNetwork.LocalPlayer.SetCustomProperties(trangBi);
             }
@@ -187,7 +208,7 @@ public class GameNetworkManager : MonoBehaviour
         }
         else
         {
-            GameObject prefab = Resources.Load<GameObject>(tenPrefabXeGoc);
+            GameObject prefab = TaiPrefabXe();
             if (prefab != null)
                 xe = Instantiate(prefab, viTriSpawn, gocSpawn);
         }
@@ -209,7 +230,7 @@ public class GameNetworkManager : MonoBehaviour
             }
         }
 
-        yield return new WaitForSeconds(0.25f);
+        yield return new WaitForSecondsRealtime(0.25f);
         DongBoTatCaXeTrongPhong();
     }
 
@@ -217,6 +238,9 @@ public class GameNetworkManager : MonoBehaviour
     {
         if (xeRoot == null) return;
 
+        VehicleCatalog.VehicleData data = VehicleCatalog.Get(indexXe);
+
+        // 1. Tắt các bộ phận xe cũ rời rạc
         string[] doCu = { "ElectricScooter", "ElectricScooter_T", "ElectricScooter_wheel1", "ElectricScooter_wheel2" };
         foreach (string ten in doCu)
         {
@@ -225,40 +249,23 @@ public class GameNetworkManager : MonoBehaviour
         }
 
         Transform mauTrang = TimNodeTheoTen(xeRoot.transform, "ElectricScooterDefault");
-        if (mauTrang == null) mauTrang = TimNodeTheoTen(xeRoot.transform, "Scooter_1");
-
         Transform mauDen = TimNodeTheoTen(xeRoot.transform, "ElectricScooterDefaultBlack");
-        if (mauDen == null) mauDen = TimNodeTheoTen(xeRoot.transform, "Scooter_2");
 
-        var danhSachMau = new List<Transform>();
-        if (mauTrang != null) danhSachMau.Add(mauTrang);
-        if (mauDen != null) danhSachMau.Add(mauDen);
+        if (mauTrang != null) mauTrang.gameObject.SetActive(false);
+        if (mauDen != null) mauDen.gameObject.SetActive(false);
 
-        Transform nhomXe = TimNodeTheoTen(xeRoot.transform, "NhomXe");
-        if (nhomXe != null)
+        // 2. Chọn đúng node gốc theo data.sourceModel
+        Transform mauDuocChon = TimNodeTheoTen(xeRoot.transform, data.sourceModel);
+        if (mauDuocChon == null)
+            mauDuocChon = (data.sourceModel == "ElectricScooterDefaultBlack") ? mauDen : mauTrang;
+
+        if (mauDuocChon == null)
         {
-            foreach (Transform con in nhomXe)
-            {
-                if (!danhSachMau.Contains(con))
-                    danhSachMau.Add(con);
-            }
-        }
-
-        if (danhSachMau.Count == 0)
-        {
-            Debug.LogWarning("[XE] Không tìm thấy mẫu xe nào trong Prefab!");
+            Debug.LogWarning($"[XE] Không tìm thấy model '{data.sourceModel}' trong Prefab!");
             return;
         }
 
-        int idxHopLe = Mathf.Clamp(indexXe, 0, danhSachMau.Count - 1);
-        Transform mauDuocChon = danhSachMau[idxHopLe];
-
-        foreach (Transform m in danhSachMau)
-        {
-            if (m != null && m != mauDuocChon)
-                m.gameObject.SetActive(false);
-        }
-
+        // 3. Bật toàn bộ cây cha và cây con của mẫu được chọn
         Transform p = mauDuocChon;
         while (p != null && p != xeRoot.transform)
         {
@@ -273,6 +280,11 @@ public class GameNetworkManager : MonoBehaviour
                 t.gameObject.layer = 0;
         }
 
+        // 4. Sơn đúng màu xe theo VehicleCatalog
+        VehicleCatalog.ApplyPaint(mauDuocChon.gameObject, data.color);
+
+        // 5. Tính kích thước an toàn (tránh lỗi Renderer.bounds bị 0 khi Time.timeScale = 0)
+        Physics.SyncTransforms();
         Renderer[] renderers = mauDuocChon.GetComponentsInChildren<Renderer>(true);
         Bounds b = new Bounds();
         bool coMesh = false;
@@ -280,6 +292,8 @@ public class GameNetworkManager : MonoBehaviour
         foreach (Renderer r in renderers)
         {
             r.enabled = true;
+            if (r.bounds.size.sqrMagnitude <= 0.00001f) continue;
+
             if (!coMesh) { b = r.bounds; coMesh = true; }
             else b.Encapsulate(r.bounds);
         }
@@ -287,14 +301,16 @@ public class GameNetworkManager : MonoBehaviour
         if (coMesh)
         {
             float maxDim = Mathf.Max(b.size.x, b.size.y, b.size.z);
-            if (maxDim > 0.00001f && Mathf.Abs(maxDim - kichThuocMucTieu) > 0.05f)
+            if (maxDim > 0.05f && Mathf.Abs(maxDim - kichThuocMucTieu) > 0.05f)
             {
-                float heSo = kichThuocMucTieu / maxDim;
+                float heSo = Mathf.Clamp(kichThuocMucTieu / maxDim, 0.05f, 20f);
                 mauDuocChon.localScale *= heSo;
+                Physics.SyncTransforms();
 
                 coMesh = false;
                 foreach (Renderer r in renderers)
                 {
+                    if (r.bounds.size.sqrMagnitude <= 0.00001f) continue;
                     if (!coMesh) { b = r.bounds; coMesh = true; }
                     else b.Encapsulate(r.bounds);
                 }
@@ -322,9 +338,9 @@ public class GameNetworkManager : MonoBehaviour
             {
                 idx = (int)pv.InstantiationData[0];
             }
-            else if (pv.Owner != null && pv.Owner.CustomProperties != null && pv.Owner.CustomProperties.ContainsKey("Scooter"))
+            else if (pv.Owner != null)
             {
-                idx = (int)pv.Owner.CustomProperties["Scooter"];
+                idx = VehicleCatalog.GetPlayerVehicleIndex(pv.Owner);
             }
 
             KichHoatDungMauXe(pv.gameObject, idx, kichThuocXeChuan);

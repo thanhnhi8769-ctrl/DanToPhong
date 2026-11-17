@@ -51,6 +51,7 @@ MonoBehaviour:
   - ThongBaoTatCaBiLoai
   - YeuCauThang
   - RPC_AnNhanVatCoVu
+  - RPC_CoNguoiVeDich
   DisableAutoOpenWizard: 1
   ShowSettings: 1
   DevRegionSetOnce: 0
