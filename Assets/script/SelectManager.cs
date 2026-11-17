@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -49,13 +50,15 @@ public class SelectManager : MonoBehaviour
     public bool doiMauChuTenXe = true;
     public float tocDoDoiMau = 6f;
 
-    [Header("Hiệu ứng")]
+    [Header("Hiệu ứng nền (nhẹ)")]
     public bool batHieuUng = true;
     [Tooltip("Dịch hiệu ứng sàn lên/xuống so với đáy hộp kính.")]
     public float doLechSan = -0.07f;
-    public float tocDoNhip = 2.2f;
-    public bool tintNenCamera = true;
-    public bool hieuUngKhungMap = true;
+    public float tocDoNhip = 1.6f;
+    public bool tintNenCamera = false;
+
+    [Header("Hiệu ứng nút")]
+    public bool hieuUngNut = true;
 
     [Header("Navigation")]
     public string tenSceneLobby = "LobbyScene";
@@ -81,17 +84,8 @@ public class SelectManager : MonoBehaviour
     private Text lblMap;
     private Image imgMap;
     private Coroutine coroutineHieuUngMap;
-    private Outline mapOutline1;
-    private Outline mapOutline2;
+    private Outline mapOutline;
     private readonly List<Text> chuTheoMau = new List<Text>();
-
-    // Hiệu ứng khung map
-    private Image haloMap;
-    private RectTransform scanRT;
-    private Image scanBand;
-    private Image scanLine;
-    private Image flashMap;
-    private float xungMap = 0f;      // 1 = vừa đổi map, giảm dần về 0
 
     // Màu
     private Color[] mauXe;
@@ -106,15 +100,12 @@ public class SelectManager : MonoBehaviour
     private Material matDe;
     private Material matLine;
     private Material matSan;
-    private Material matHat;
     private Texture2D texGlow;
-    private Sprite spriteGlow;
 
     // Hiệu ứng 3D
     private LineRenderer lrVienHop;
     private Transform fxRoot;
-    private LineRenderer vongTrong, vongNgoai, vongSong;
-    private ParticleSystem hatSang;
+    private LineRenderer vongTrong;
 
     // ------------------------------------------------------------------
     // LIFECYCLE
@@ -127,7 +118,6 @@ public class SelectManager : MonoBehaviour
         tenCacMauXe = new string[] { "ElectricScooterDefault", "ElectricScooterDefaultBlack" };
         scooterIndex = Mathf.Clamp(PlayerInventory.GetEquippedIndex(TAB_SCOOTER), 0, tenCacMauXe.Length - 1);
 
-        // Khớp map đã chọn từ trước khi vẽ UI
         string savedMap = PlayerInventory.GetSelectedMap();
         if (maps != null)
         {
@@ -149,10 +139,8 @@ public class SelectManager : MonoBehaviour
         TaoUIChonMap();
         SelectTab(TAB_SCOOTER);
 
-        // Vào cảnh là đúng màu ngay, không chuyển màu từ đầu
         mauHienTai = mauMucTieu;
         xungSang = 0f;
-        xungMap = 0f;
         canApMauTinh = true;
         ApDungMau(1f);
     }
@@ -175,7 +163,6 @@ public class SelectManager : MonoBehaviour
         if (trucXoayXe != null)
             trucXoayXe.Rotate(0f, rotateSpeed * dt, 0f, Space.World);
 
-        // Chuyển màu mượt, tới nơi thì chốt luôn
         if (!GanBang(mauHienTai, mauMucTieu))
         {
             Color moi = Color.Lerp(mauHienTai, mauMucTieu, 1f - Mathf.Exp(-tocDoDoiMau * dt));
@@ -183,7 +170,6 @@ public class SelectManager : MonoBehaviour
         }
 
         xungSang = Mathf.MoveTowards(xungSang, 0f, dt * 2.5f);
-        xungMap = Mathf.MoveTowards(xungMap, 0f, dt * 3f);
 
         float nhip = 0.5f + 0.5f * Mathf.Sin(Time.time * tocDoNhip);
         ApDungMau(nhip);
@@ -195,11 +181,8 @@ public class SelectManager : MonoBehaviour
         if (matDe != null) Destroy(matDe);
         if (matLine != null) Destroy(matLine);
         if (matSan != null) Destroy(matSan);
-        if (matHat != null) Destroy(matHat);
-        if (spriteGlow != null) Destroy(spriteGlow);
         if (texGlow != null) Destroy(texGlow);
 
-        // Không để UI MapPicker lọt sang scene tiếp theo
         if (mapPickerGO != null) Destroy(mapPickerGO);
     }
 
@@ -253,7 +236,6 @@ public class SelectManager : MonoBehaviour
         matDe = new Material(unlit) { color = new Color(0.18f, 0.32f, 0.22f) };
         matLine = new Material(sprite);
 
-        // Texture glow tròn mềm, ghi 1 lần bằng SetPixels32
         const int size = 64;
         var pixels = new Color32[size * size];
         float tam = (size - 1) * 0.5f;
@@ -277,11 +259,7 @@ public class SelectManager : MonoBehaviour
         texGlow.SetPixels32(pixels);
         texGlow.Apply(false, true);
 
-        // Sprite dùng cho quầng sáng của khung map (UI)
-        spriteGlow = Sprite.Create(texGlow, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
-
         matSan = new Material(sprite) { mainTexture = texGlow };
-        matHat = new Material(sprite) { mainTexture = texGlow };
     }
 
     private Material TaoMaterialKinh(Color mauKinh)
@@ -326,7 +304,6 @@ public class SelectManager : MonoBehaviour
         return LayMauChuDao(model);
     }
 
-    /// Lấy màu chiếm nhiều nhất trên xe (tính theo số đỉnh mesh), kể cả màu đen.
     private Color LayMauChuDao(GameObject model)
     {
         if (model == null) return mauMacDinh;
@@ -383,7 +360,6 @@ public class SelectManager : MonoBehaviour
         Color chon = bangMau[tot];
         Color.RGBToHSV(chon, out float h, out float s, out float v);
 
-        // Màu rực thì làm sáng cho đẹp, màu đen/xám/trắng thì giữ nguyên
         if (s >= 0.35f && v >= 0.3f)
             return Color.HSVToRGB(h, Mathf.Clamp(s, 0.55f, 1f), 1f);
 
@@ -397,12 +373,11 @@ public class SelectManager : MonoBehaviour
         return mauMacDinh;
     }
 
-    /// Áp màu hiện tại lên toàn bộ UI + 3D + hiệu ứng. nhip: 0..1
     private void ApDungMau(float nhip)
     {
         Color c = mauHienTai;
+        ButtonFx.MauChung = c;
 
-        // Phần tĩnh: chỉ áp khi màu đổi (hoặc vừa tạo lại UI)
         if (canApMauTinh || !GanBang(c, mauDaApDung))
         {
             ApMauTinh(c);
@@ -410,11 +385,10 @@ public class SelectManager : MonoBehaviour
             canApMauTinh = false;
         }
 
-        // Kính + đế hộp
         if (matKinh != null)
         {
             Color tint = Color.Lerp(new Color(0.15f, 0.20f, 0.18f), c, 0.35f);
-            tint.a = 0.24f + xungSang * 0.10f;
+            tint.a = 0.24f + xungSang * 0.08f;
             matKinh.color = tint;
         }
         if (matDe != null)
@@ -422,21 +396,14 @@ public class SelectManager : MonoBehaviour
 
         if (lrVienHop != null)
         {
-            Color e = new Color(c.r, c.g, c.b, Mathf.Lerp(0.65f, 1f, nhip));
+            Color e = new Color(c.r, c.g, c.b, Mathf.Lerp(0.75f, 1f, nhip));
             lrVienHop.startColor = e;
             lrVienHop.endColor = e;
         }
 
-        // Khung map: cùng màu với xe
-        if (mapOutline1 != null)
-            mapOutline1.effectColor = new Color(c.r, c.g, c.b, Mathf.Lerp(0.55f, 1f, nhip));
-        if (mapOutline2 != null)
-        {
-            Color sang = Color.Lerp(c, Color.white, 0.25f);
-            mapOutline2.effectColor = new Color(sang.r, sang.g, sang.b, Mathf.Lerp(0.45f, 0.85f, nhip));
-        }
+        if (mapOutline != null)
+            mapOutline.effectColor = new Color(c.r, c.g, c.b, 0.9f);
 
-        CapNhatHieuUngKhungMap(c, nhip);
         CapNhatHieuUng(c, nhip);
     }
 
@@ -445,16 +412,10 @@ public class SelectManager : MonoBehaviour
         for (int i = 0; i < chuTheoMau.Count; i++)
             if (chuTheoMau[i] != null) chuTheoMau[i].color = c;
         if (doiMauChuTenXe && itemNameText != null) itemNameText.color = c;
-
-        if (hatSang != null)
-        {
-            var main = hatSang.main;
-            main.startColor = c;
-        }
     }
 
     // ------------------------------------------------------------------
-    // HIỆU ỨNG 3D (quanh hộp kính)
+    // HIỆU ỨNG 3D (tối giản: 1 vòng + vệt sáng sàn)
     // ------------------------------------------------------------------
     private void TaoHieuUng()
     {
@@ -464,7 +425,6 @@ public class SelectManager : MonoBehaviour
             hopViTri.y - hopKichThuoc * 0.5f + doLechSan,
             hopViTri.z);
 
-        // Vệt sáng trên sàn
         GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Quad);
         pad.name = "FX_SanSang";
         Destroy(pad.GetComponent<Collider>());
@@ -472,65 +432,13 @@ public class SelectManager : MonoBehaviour
         padSan.SetParent(fxRoot, false);
         padSan.localPosition = new Vector3(0f, -0.005f, 0f);
         padSan.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        padSan.localScale = new Vector3(hopKichThuoc * 3.6f, hopKichThuoc * 3.6f, 1f);
+        padSan.localScale = new Vector3(hopKichThuoc * 3f, hopKichThuoc * 3f, 1f);
         MeshRenderer mrPad = pad.GetComponent<MeshRenderer>();
         mrPad.sharedMaterial = matSan;
         mrPad.shadowCastingMode = ShadowCastingMode.Off;
         mrPad.receiveShadows = false;
 
-        // 2 vòng cố định + 1 vòng sóng lan ra
-        vongTrong = TaoVong("FX_VongTrong", 0.040f);
-        vongNgoai = TaoVong("FX_VongNgoai", 0.015f);
-        vongSong = TaoVong("FX_VongSong", 0.020f);
-
-        // Hạt sáng bay lên, chỉ sinh ra quanh hộp (không xuyên qua xe)
-        GameObject hatObj = new GameObject("FX_HatSang");
-        hatObj.transform.SetParent(fxRoot, false);
-        hatObj.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f); // trục Z chỉ lên
-
-        hatSang = hatObj.AddComponent<ParticleSystem>();
-        hatSang.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
-        var main = hatSang.main;
-        main.loop = true;
-        main.playOnAwake = true;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(3f, 5f);
-        main.startSpeed = new ParticleSystem.MinMaxCurve(0.15f, 0.4f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.03f, 0.08f);
-        main.maxParticles = 100;
-        main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startColor = mauHienTai;
-
-        var em = hatSang.emission;
-        em.rateOverTime = 14f;
-
-        var shape = hatSang.shape;
-        shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.angle = 0f;
-        shape.radius = hopKichThuoc * 1.35f;
-        shape.radiusThickness = 0.35f;   // chỉ sinh ở vành ngoài, bên ngoài hộp
-
-        var col = hatSang.colorOverLifetime;
-        col.enabled = true;
-        Gradient g = new Gradient();
-        g.SetKeys(
-            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
-            new[]
-            {
-                new GradientAlphaKey(0f, 0f),
-                new GradientAlphaKey(0.9f, 0.25f),
-                new GradientAlphaKey(0.6f, 0.75f),
-                new GradientAlphaKey(0f, 1f)
-            });
-        col.color = g;
-
-        var pr = hatObj.GetComponent<ParticleSystemRenderer>();
-        pr.sharedMaterial = matHat;
-        pr.renderMode = ParticleSystemRenderMode.Billboard;
-        pr.shadowCastingMode = ShadowCastingMode.Off;
-        pr.receiveShadows = false;
-
-        hatSang.Play();
+        vongTrong = TaoVong("FX_Vong", 0.03f);
     }
 
     /// Vòng tròn bán kính 1, chỉnh kích thước bằng localScale.
@@ -563,84 +471,40 @@ public class SelectManager : MonoBehaviour
 
         if (vongTrong != null)
         {
-            float r = hopKichThuoc * 0.85f * (1f + 0.04f * nhip + 0.12f * xungSang);
+            float r = hopKichThuoc * 0.95f * (1f + 0.02f * nhip + 0.08f * xungSang);
             vongTrong.transform.localScale = new Vector3(r, 1f, r);
-            Color v = new Color(c.r, c.g, c.b, Mathf.Lerp(0.6f, 1f, nhip));
+            Color v = new Color(c.r, c.g, c.b, Mathf.Lerp(0.55f, 0.9f, nhip));
             vongTrong.startColor = v; vongTrong.endColor = v;
         }
 
-        if (vongNgoai != null)
-        {
-            float r = hopKichThuoc * 1.20f * (1f + 0.08f * (1f - nhip) + 0.18f * xungSang);
-            vongNgoai.transform.localScale = new Vector3(r, 1f, r);
-            Color v = new Color(c.r, c.g, c.b, Mathf.Lerp(0.2f, 0.5f, nhip));
-            vongNgoai.startColor = v; vongNgoai.endColor = v;
-        }
-
-        if (vongSong != null)
-        {
-            // Sóng lan ra ngoài rồi mờ dần, lặp mỗi 2 giây
-            float t = (Time.time * 0.5f) % 1f;
-            float r = hopKichThuoc * Mathf.Lerp(0.8f, 2.0f, t);
-            vongSong.transform.localScale = new Vector3(r, 1f, r);
-            Color v = new Color(c.r, c.g, c.b, (1f - t) * 0.55f);
-            vongSong.startColor = v; vongSong.endColor = v;
-        }
-
         if (matSan != null)
-            matSan.color = new Color(c.r, c.g, c.b, Mathf.Lerp(0.35f, 0.6f, nhip) + xungSang * 0.25f);
+            matSan.color = new Color(c.r, c.g, c.b, Mathf.Lerp(0.25f, 0.4f, nhip) + xungSang * 0.15f);
 
         if (tintNenCamera && cam != null && cam.clearFlags == CameraClearFlags.SolidColor)
-            cam.backgroundColor = Color.Lerp(MAU_NEN_CAMERA, c, 0.10f + xungSang * 0.05f);
+            cam.backgroundColor = Color.Lerp(MAU_NEN_CAMERA, c, 0.08f);
     }
 
     private void BungSangKhiDoiXe()
     {
         xungSang = 1f;
-        if (hatSang != null) hatSang.Emit(24);
-    }
-
-    // ------------------------------------------------------------------
-    // HIỆU ỨNG KHUNG MAP (UI)
-    // ------------------------------------------------------------------
-    private void CapNhatHieuUngKhungMap(Color c, float nhip)
-    {
-        if (!hieuUngKhungMap || imgMap == null) return;
-
-        // Quầng sáng phía sau
-        if (haloMap != null)
-        {
-            haloMap.color = new Color(c.r, c.g, c.b, Mathf.Lerp(0.25f, 0.5f, nhip) + xungMap * 0.3f);
-            float s = 1f + 0.03f * nhip + 0.10f * xungMap;
-            haloMap.rectTransform.localScale = new Vector3(s, s, 1f);
-        }
-
-        // Vệt quét chạy từ dưới lên trên
-        if (scanRT != null)
-        {
-            float t = (Time.time * 0.35f) % 1f;
-            float h = mapPreviewSize.y;
-            scanRT.anchoredPosition = new Vector2(0f, Mathf.Lerp(-h * 0.5f, h * 0.5f, t));
-
-            float fade = Mathf.Sin(t * Mathf.PI);
-            Color sang = Color.Lerp(c, Color.white, 0.35f);
-            if (scanBand != null) scanBand.color = new Color(sang.r, sang.g, sang.b, 0.14f * fade);
-            if (scanLine != null) scanLine.color = new Color(sang.r, sang.g, sang.b, 0.75f * fade);
-        }
-
-        // Chớp sáng khi đổi map
-        if (flashMap != null)
-            flashMap.color = new Color(1f, 1f, 1f, xungMap * 0.35f);
     }
 
     // ------------------------------------------------------------------
     // UI
     // ------------------------------------------------------------------
+    private void GanHieuUngNut(Button b)
+    {
+        if (!hieuUngNut || b == null) return;
+        if (b.GetComponent<ButtonFx>() == null) b.gameObject.AddComponent<ButtonFx>();
+    }
+
     private void TuDongNoiNutUI()
     {
         Button[] allButtons = FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         foreach (Button btn in allButtons)
         {
+            GanHieuUngNut(btn);
+
             if (btn.onClick.GetPersistentEventCount() != 0) continue;
 
             TMP_Text txt = btn.GetComponentInChildren<TMP_Text>(true);
@@ -669,7 +533,6 @@ public class SelectManager : MonoBehaviour
 
         Transform goc = canvas.rootCanvas.transform;
 
-        // Xóa bản cũ nếu còn sót (tránh bị nhân đôi)
         Transform cu = goc.Find("MapPicker");
         if (cu != null) Destroy(cu.gameObject);
 
@@ -689,20 +552,6 @@ public class SelectManager : MonoBehaviour
 
         Vector2 viTriAnh = new Vector2(0f, 17f + 8f + mapPreviewSize.y / 2f);
 
-        // Quầng sáng phía sau ảnh map
-        if (hieuUngKhungMap)
-        {
-            GameObject halo = new GameObject("MapHalo", typeof(RectTransform), typeof(Image));
-            halo.transform.SetParent(mapPickerGO.transform, false);
-            halo.transform.SetAsFirstSibling();
-            RectTransform hrt = halo.GetComponent<RectTransform>();
-            hrt.anchoredPosition = viTriAnh;
-            hrt.sizeDelta = mapPreviewSize * 1.35f;
-            haloMap = halo.GetComponent<Image>();
-            haloMap.sprite = spriteGlow;
-            haloMap.raycastTarget = false;
-        }
-
         GameObject h = new GameObject("MapPreview", typeof(RectTransform), typeof(Image));
         h.transform.SetParent(mapPickerGO.transform, false);
         RectTransform hr = h.GetComponent<RectTransform>();
@@ -713,58 +562,8 @@ public class SelectManager : MonoBehaviour
         imgMap.preserveAspect = true;
         imgMap.raycastTarget = false;
 
-        // Màu viền được ApDungMau cập nhật theo xe
-        mapOutline1 = h.AddComponent<Outline>();
-        mapOutline1.effectDistance = new Vector2(4f, -4f);
-
-        mapOutline2 = h.AddComponent<Outline>();
-        mapOutline2.effectDistance = new Vector2(-4f, 4f);
-
-        // Lớp cắt riêng cho vệt quét + chớp sáng (không cắt viền Outline)
-        if (hieuUngKhungMap)
-        {
-            GameObject clip = new GameObject("FxClip", typeof(RectTransform), typeof(RectMask2D));
-            clip.transform.SetParent(h.transform, false);
-            RectTransform crt = clip.GetComponent<RectTransform>();
-            crt.anchorMin = Vector2.zero;
-            crt.anchorMax = Vector2.one;
-            crt.offsetMin = Vector2.zero;
-            crt.offsetMax = Vector2.zero;
-
-            // Chớp sáng
-            GameObject fl = new GameObject("Flash", typeof(RectTransform), typeof(Image));
-            fl.transform.SetParent(clip.transform, false);
-            RectTransform frt = fl.GetComponent<RectTransform>();
-            frt.anchorMin = Vector2.zero;
-            frt.anchorMax = Vector2.one;
-            frt.offsetMin = Vector2.zero;
-            frt.offsetMax = Vector2.zero;
-            flashMap = fl.GetComponent<Image>();
-            flashMap.raycastTarget = false;
-            flashMap.color = new Color(1f, 1f, 1f, 0f);
-
-            // Vệt quét
-            GameObject sc = new GameObject("Scan", typeof(RectTransform), typeof(Image));
-            sc.transform.SetParent(clip.transform, false);
-            scanRT = sc.GetComponent<RectTransform>();
-            scanRT.anchorMin = new Vector2(0f, 0.5f);
-            scanRT.anchorMax = new Vector2(1f, 0.5f);
-            scanRT.pivot = new Vector2(0.5f, 0.5f);
-            scanRT.sizeDelta = new Vector2(0f, 26f);
-            scanBand = sc.GetComponent<Image>();
-            scanBand.raycastTarget = false;
-
-            GameObject ln = new GameObject("Line", typeof(RectTransform), typeof(Image));
-            ln.transform.SetParent(sc.transform, false);
-            RectTransform lrt = ln.GetComponent<RectTransform>();
-            lrt.anchorMin = new Vector2(0f, 0f);
-            lrt.anchorMax = new Vector2(1f, 0f);
-            lrt.pivot = new Vector2(0.5f, 0f);
-            lrt.offsetMin = new Vector2(0f, 0f);
-            lrt.offsetMax = new Vector2(0f, 3f);
-            scanLine = ln.GetComponent<Image>();
-            scanLine.raycastTarget = false;
-        }
+        mapOutline = h.AddComponent<Outline>();
+        mapOutline.effectDistance = new Vector2(3f, -3f);
 
         canApMauTinh = true;
         CapNhatMap();
@@ -775,7 +574,6 @@ public class SelectManager : MonoBehaviour
         if (maps == null || maps.Length == 0) return;
         mapIndex = (mapIndex + huong + maps.Length) % maps.Length;
         CapNhatMap();
-        xungMap = 1f;
 
         if (imgMap != null)
         {
@@ -790,7 +588,7 @@ public class SelectManager : MonoBehaviour
     private IEnumerator HieuUngNhayAnhMap(RectTransform rectTransform)
     {
         Vector3 scaleGoc = Vector3.one;
-        Vector3 scaleTo = Vector3.one * 1.06f;
+        Vector3 scaleTo = Vector3.one * 1.04f;
         const float thoiGian = 0.1f;
 
         float elapsed = 0f;
@@ -839,9 +637,10 @@ public class SelectManager : MonoBehaviour
         r.sizeDelta = new Vector2(34f, 30f);
 
         go.GetComponent<Image>().color = new Color(0.1f, 0.1f, 0.1f, 0.9f);
-        go.GetComponent<Button>().onClick.AddListener(onClick);
+        Button btn = go.GetComponent<Button>();
+        btn.onClick.AddListener(onClick);
+        GanHieuUngNut(btn);
 
-        // Chữ nút luôn trắng (nền nút tối, chữ đen sẽ không đọc được)
         Text t = TaoText(go.transform, "Text", Vector2.zero, r.sizeDelta, 18);
         t.text = nhan;
     }
@@ -977,14 +776,14 @@ public class SelectManager : MonoBehaviour
 
             if (timThay == null)
             {
-                danhSachXeTrungBay.Add(null); // giữ đúng index
+                danhSachXeTrungBay.Add(null);
                 continue;
             }
 
             GameObject banSao = Instantiate(timThay.gameObject);
             banSao.name = tenCacMauXe[i];
 
-            mauXe[i] = LayMauXe(i, banSao);   // lấy màu trước khi xử lý model
+            mauXe[i] = LayMauXe(i, banSao);
             danhSachXeTrungBay.Add(TaoHolderVaCanGiuaHop(banSao));
         }
 
@@ -1158,5 +957,74 @@ public class SelectManager : MonoBehaviour
 
         Time.timeScale = 1f;
         SceneManager.LoadScene(tenSceneMenu);
+    }
+}
+
+/// Hiệu ứng nút: phóng nhẹ khi rê chuột, nhún khi bấm, viền sáng theo màu xe.
+[DisallowMultipleComponent]
+public class ButtonFx : MonoBehaviour,
+    IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
+{
+    /// Màu viền dùng chung (SelectManager đổi theo màu xe, scene khác dùng màu mặc định)
+    public static Color MauChung = new Color(0.15f, 0.95f, 0.5f);
+
+    public float phongHover = 1.07f;
+    public float nhunBam = 0.93f;
+    public float tocDo = 16f;
+
+    private Button btn;
+    private Outline vien;
+    private Vector3 scaleGoc;
+    private bool hover, bam;
+    private float h, p;
+
+    private void Awake()
+    {
+        btn = GetComponent<Button>();
+        scaleGoc = transform.localScale;
+
+        Image img = GetComponent<Image>();
+        if (img != null)
+        {
+            vien = GetComponent<Outline>();
+            if (vien == null) vien = gameObject.AddComponent<Outline>();
+            vien.effectDistance = new Vector2(2.5f, -2.5f);
+            vien.effectColor = new Color(1f, 1f, 1f, 0f);
+        }
+    }
+
+    private void OnEnable()
+    {
+        hover = bam = false;
+        h = p = 0f;
+        if (scaleGoc != Vector3.zero) transform.localScale = scaleGoc;
+    }
+
+    private void OnDisable()
+    {
+        if (scaleGoc != Vector3.zero) transform.localScale = scaleGoc;
+    }
+
+    public void OnPointerEnter(PointerEventData e) { hover = true; }
+    public void OnPointerExit(PointerEventData e) { hover = false; bam = false; }
+    public void OnPointerDown(PointerEventData e) { bam = true; }
+    public void OnPointerUp(PointerEventData e) { bam = false; }
+
+    private void Update()
+    {
+        bool ok = btn == null || btn.interactable;
+        float k = 1f - Mathf.Exp(-tocDo * Time.unscaledDeltaTime);
+
+        h = Mathf.Lerp(h, (hover && ok) ? 1f : 0f, k);
+        p = Mathf.Lerp(p, (bam && ok) ? 1f : 0f, k);
+
+        float s = Mathf.Lerp(1f, phongHover, h) * Mathf.Lerp(1f, nhunBam, p);
+        transform.localScale = scaleGoc * s;
+
+        if (vien != null)
+        {
+            Color c = MauChung;
+            vien.effectColor = new Color(c.r, c.g, c.b, h * 0.9f);
+        }
     }
 }

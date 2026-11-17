@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class MenuController : MonoBehaviour
 {
@@ -12,12 +13,18 @@ public class MenuController : MonoBehaviour
     [Tooltip("Gán panel xác nhận nếu muốn ESC hỏi trước khi thoát. Để trống thì ESC thoát luôn.")]
     public GameObject panelXacNhanThoat;
 
+    [Header("Hiệu ứng nút")]
+    public bool hieuUngNut = true;
+    public Color mauVienNut = new Color(0.15f, 0.95f, 0.5f);
+
     private bool dangChuyenScene = false;
 
     private void Start()
     {
         Time.timeScale = 1f;
         if (panelXacNhanThoat != null) panelXacNhanThoat.SetActive(false);
+
+        if (hieuUngNut) GanHieuUngChoMoiNut();
     }
 
     private void Update()
@@ -43,6 +50,17 @@ public class MenuController : MonoBehaviour
 #else
         return Input.GetKeyDown(KeyCode.Escape);
 #endif
+    }
+
+    private void GanHieuUngChoMoiNut()
+    {
+        ButtonFx.MauChung = mauVienNut;
+
+        // Include: lấy cả nút trong panel đang ẩn (panel xác nhận thoát...)
+        foreach (Button b in FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (b.GetComponent<ButtonFx>() == null) b.gameObject.AddComponent<ButtonFx>();
+        }
     }
 
     // ------------------------------------------------------------------

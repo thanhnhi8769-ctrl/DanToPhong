@@ -22,6 +22,10 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public Vector2 viTriNutCopy = new Vector2(-20f, 20f);
     public Vector2 kichThuocNutCopy = new Vector2(190f, 46f);
 
+    [Header("Hiệu ứng nút")]
+    public bool hieuUngNut = true;
+    public Color mauVienNut = new Color(0.15f, 0.95f, 0.5f);
+
     [Header("Kết nối")]
     public int soLanThuKetNoiLaiToiDa = 3;
     public float thoiGianChoKetNoi = 10f;
@@ -52,6 +56,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         TaoNutCopyNeuChuaCo();
         if (copyButton != null) copyButton.SetActive(false);
 
+        if (hieuUngNut) GanHieuUngChoMoiNut();
+
         CauHinhOnhapMa();
 
         if (PhotonNetwork.InRoom)
@@ -68,6 +74,17 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             BamNutExit();
+        }
+    }
+
+    private void GanHieuUngChoMoiNut()
+    {
+        ButtonFx.MauChung = mauVienNut;
+
+        // Include: lấy cả nút đang ẩn (Start, Copy...)
+        foreach (Button b in FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (b.GetComponent<ButtonFx>() == null) b.gameObject.AddComponent<ButtonFx>();
         }
     }
 

@@ -56,11 +56,12 @@ public class GameManager : MonoBehaviourPunCallbacks
     [Header("Panel khác (settings, shop...) - chỉ 1 panel hiện cùng lúc")]
     public GameObject[] panelKhac;
 
-    [Header("HUD thời gian (đồng hồ tròn tự vẽ)")]
+    [Header("HUD thời gian (thanh ngang tự vẽ)")]
     public bool dungHudThoiGianMoi = true;
     [Tooltip("Kéo thanh xanh thời gian CŨ vào đây để ẩn nó. Để trống: tự tìm Slider có tên chứa time / thoi.")]
     public GameObject thanhThoiGianCu;
-    public float kichThuocDongHo = 140f;
+    [Tooltip("Rộng x Cao của thanh thời gian.")]
+    public Vector2 kichThuocThanh = new Vector2(560f, 52f);
 
     [Header("Âm thanh & Nhạc nền")]
     public AudioClip nhacNenDuaXe;
@@ -76,6 +77,10 @@ public class GameManager : MonoBehaviourPunCallbacks
     [Tooltip("Lệch so với góc trên phải. Tăng số âm theo X nếu bị đè minimap.")]
     public Vector2 viTriNutNhac = new Vector2(-360f, -20f);
     public float kichThuocNutNhac = 48f;
+
+    [Header("Hiệu ứng nút")]
+    public bool hieuUngNut = true;
+    public Color mauVienNut = new Color(1f, 0.85f, 0.2f);
 
     private const string KEY_READY = "Ready";
     private const string KEY_ELIMINATED = "Eliminated";
@@ -107,14 +112,15 @@ public class GameManager : MonoBehaviourPunCallbacks
     private readonly List<GameObject> dsPanel = new List<GameObject>();
     private GameObject panelDangHien;
 
-    // HUD thời gian tự vẽ
+    // HUD thời gian tự vẽ (thanh ngang)
     private GameObject hudRoot;
     private TMP_Text hudSo;
     private Image hudFillImg;
+    private RectTransform hudFillRect;
     private float hudToiDa = 30f;
     private float hudFillHienTai = 1f;
     private bool hudDaTao = false;
-    private static Sprite spriteBoTron, spriteDia, spriteVong, spriteXuVang;
+    private static Sprite spriteBoTron, spriteXuVang;
     private Image hudVien;
     private float hudFlashDen = 0f;
 
@@ -316,6 +322,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         hudToiDa = Mathf.Max(1f, thoiGianChoPhepVeDich);
         if (dungHudThoiGianMoi) TaoHudThoiGian();
         if (taoNutNhacTuDong) TaoNutNhac();
+        if (hieuUngNut) GanHieuUngChoMoiNut();
 
         if (cheDoNhieuNguoi && PhotonNetwork.InRoom)
         {
@@ -404,6 +411,21 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         panelDangHien = moiNhat;
         if (nutNhac != null) nutNhac.transform.SetAsLastSibling();
+    }
+
+    private void GanHieuUngNut(Button b)
+    {
+        if (!hieuUngNut || b == null) return;
+        if (b.GetComponent<ButtonFx>() == null) b.gameObject.AddComponent<ButtonFx>();
+    }
+
+    private void GanHieuUngChoMoiNut()
+    {
+        ButtonFx.MauChung = mauVienNut;
+
+        // Include: lấy cả nút trong các panel đang ẩn (pause, kết quả, loại...)
+        foreach (Button b in FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            GanHieuUngNut(b);
     }
 
     private void KhoiPhucTutorialNeuCan()
@@ -767,6 +789,7 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         Button btn = o.GetComponent<Button>();
         btn.targetGraphic = img;
+        GanHieuUngNut(btn);
         btn.onClick.AddListener(() =>
         {
             if (dangChoKetQua) return;
@@ -1259,7 +1282,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         RectTransform r = nen.rectTransform;
         r.anchorMin = r.anchorMax = new Vector2(0.5f, 1f);
         r.pivot = new Vector2(0.5f, 1f);
-        r.anchoredPosition = new Vector2(kichThuocDongHo * 0.5f + 115f, -40f);
+        r.anchoredPosition = new Vector2(0f, -(16f + kichThuocThanh.y + 14f));
         r.sizeDelta = new Vector2(190f, 66f);
 
         // Viền vàng mảnh
@@ -1512,32 +1535,6 @@ public class GameManager : MonoBehaviourPunCallbacks
         return spriteBoTron;
     }
 
-    // trong = 0: đĩa đặc. trong > 0: vòng (tỉ lệ bán kính trong / ngoài)
-    private static Sprite TaoSpriteTron(float trong)
-    {
-        const int S = 128;
-        Texture2D tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
-        tex.wrapMode = TextureWrapMode.Clamp;
-        tex.filterMode = FilterMode.Bilinear;
-
-        float c = (S - 1) / 2f;
-        float R = S / 2f - 1f;
-        float r0 = R * trong;
-
-        for (int y = 0; y < S; y++)
-        {
-            for (int x = 0; x < S; x++)
-            {
-                float d = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
-                float a = Mathf.Clamp01(R - d + 0.5f);
-                if (trong > 0f) a *= Mathf.Clamp01(d - r0 + 0.5f);
-                tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
-            }
-        }
-        tex.Apply();
-        return Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 100f);
-    }
-
     private static Sprite TaoSpriteXuVang()
     {
         const int S = 128;
@@ -1589,18 +1586,6 @@ public class GameManager : MonoBehaviourPunCallbacks
         return img;
     }
 
-    private static Image TaoAnhTron(string ten, Transform cha, Sprite sprite, Color mau)
-    {
-        GameObject o = new GameObject(ten, typeof(RectTransform), typeof(Image));
-        o.transform.SetParent(cha, false);
-        Image img = o.GetComponent<Image>();
-        img.sprite = sprite;
-        img.type = Image.Type.Simple;
-        img.color = mau;
-        img.raycastTarget = false;
-        return img;
-    }
-
     private static TMP_Text TaoChuCon(string ten, Transform cha, float coChu, Color mau, bool vien)
     {
         GameObject o = new GameObject(ten, typeof(RectTransform));
@@ -1620,7 +1605,7 @@ public class GameManager : MonoBehaviourPunCallbacks
     }
 
     // =========================================================================
-    // HUD THỜI GIAN (ĐỒNG HỒ TRÒN)
+    // HUD THỜI GIAN (THANH NGANG)
     // =========================================================================
     private void AnThanhCu(GameObject go)
     {
@@ -1643,24 +1628,18 @@ public class GameManager : MonoBehaviourPunCallbacks
         Canvas canvas = LayCanvasChinh();
         if (canvas == null) return;
 
-        if (thanhThoiGianCu != null)
-        {
-            AnThanhCu(thanhThoiGianCu);
-        }
+        if (thanhThoiGianCu != null) AnThanhCu(thanhThoiGianCu);
         else
         {
             foreach (Slider s in canvas.GetComponentsInChildren<Slider>(true))
             {
                 string ten = s.gameObject.name.ToLower();
-                if (ten.Contains("time") || ten.Contains("thoi"))
-                    AnThanhCu(s.gameObject);
+                if (ten.Contains("time") || ten.Contains("thoi")) AnThanhCu(s.gameObject);
             }
         }
 
-        if (spriteDia == null) spriteDia = TaoSpriteTron(0f);
-        if (spriteVong == null) spriteVong = TaoSpriteTron(0.84f);
-
-        float kt = kichThuocDongHo;
+        float w = kichThuocThanh.x, h = kichThuocThanh.y;
+        float bw = h * 2.2f; // chỗ chứa số, đủ cho 3 chữ số
 
         hudRoot = new GameObject("HudThoiGian", typeof(RectTransform));
         hudRoot.transform.SetParent(canvas.transform, false);
@@ -1668,45 +1647,44 @@ public class GameManager : MonoBehaviourPunCallbacks
         rr.anchorMin = rr.anchorMax = new Vector2(0.5f, 1f);
         rr.pivot = new Vector2(0.5f, 1f);
         rr.anchoredPosition = new Vector2(0f, -16f);
-        rr.sizeDelta = new Vector2(kt, kt);
+        rr.sizeDelta = new Vector2(w, h);
 
-        // Quầng sáng (nhấp nháy khi sắp hết giờ / vừa cộng giờ)
-        hudVien = TaoAnhTron("Quang", hudRoot.transform, spriteDia, new Color(0.3f, 0.9f, 0.45f, 0.35f));
-        DatKhung(hudVien.rectTransform, Vector2.zero, Vector2.one, new Vector2(-8f, -8f), new Vector2(8f, 8f));
+        // Quầng sáng
+        hudVien = TaoAnhCon("Quang", hudRoot.transform, new Color(0.3f, 0.9f, 0.45f, 0.35f));
+        DatKhung(hudVien.rectTransform, Vector2.zero, Vector2.one, new Vector2(-6f, -6f), new Vector2(6f, 6f));
 
-        // Nền đồng hồ
-        Image nen = TaoAnhTron("Nen", hudRoot.transform, spriteDia, new Color(0.04f, 0.07f, 0.12f, 0.94f));
+        // Nền
+        Image nen = TaoAnhCon("Nen", hudRoot.transform, new Color(0.04f, 0.07f, 0.12f, 0.94f));
         Stretch(nen.rectTransform);
 
-        // Đường ray của vòng
-        Image ray = TaoAnhTron("VongNen", hudRoot.transform, spriteVong, new Color(1f, 1f, 1f, 0.14f));
-        DatKhung(ray.rectTransform, Vector2.zero, Vector2.one, new Vector2(4f, 4f), new Vector2(-4f, -4f));
+        // Đường ray
+        Image ray = TaoAnhCon("Ray", hudRoot.transform, new Color(1f, 1f, 1f, 0.12f));
+        DatKhung(ray.rectTransform, Vector2.zero, Vector2.one,
+                 new Vector2(12f, h * 0.27f), new Vector2(-(bw + 8f), -h * 0.27f));
 
-        // Vòng thời gian còn lại
-        hudFillImg = TaoAnhTron("VongFill", hudRoot.transform, spriteVong, new Color(0.3f, 0.9f, 0.45f, 1f));
-        DatKhung(hudFillImg.rectTransform, Vector2.zero, Vector2.one, new Vector2(4f, 4f), new Vector2(-4f, -4f));
-        hudFillImg.type = Image.Type.Filled;
-        hudFillImg.fillMethod = Image.FillMethod.Radial360;
-        hudFillImg.fillOrigin = (int)Image.Origin360.Top;
-        hudFillImg.fillClockwise = true;
-        hudFillImg.fillAmount = 1f;
+        // Thanh thời gian (co theo anchorMax.x)
+        hudFillImg = TaoAnhCon("Fill", ray.transform, new Color(0.3f, 0.9f, 0.45f, 1f));
+        hudFillRect = hudFillImg.rectTransform;
+        Stretch(hudFillRect);
 
-        // Số giây
-        hudSo = TaoChuCon("So", hudRoot.transform, kt * 0.42f, Color.white, true);
-        RectTransform rs = hudSo.rectTransform;
-        rs.anchorMin = rs.anchorMax = new Vector2(0.5f, 0.5f);
-        rs.pivot = new Vector2(0.5f, 0.5f);
-        rs.anchoredPosition = new Vector2(0f, kt * 0.06f);
-        rs.sizeDelta = new Vector2(kt * 0.7f, kt * 0.5f);
+        // Vệt bóng nửa trên
+        Image gloss = TaoAnhCon("Bong", hudFillImg.transform, new Color(1f, 1f, 1f, 0.22f));
+        DatKhung(gloss.rectTransform, new Vector2(0f, 0.5f), Vector2.one, new Vector2(5f, 0f), new Vector2(-5f, -2f));
 
-        // Nhãn nhỏ
-        TMP_Text nhan = TaoChuCon("Nhan", hudRoot.transform, kt * 0.12f, new Color(0.75f, 0.85f, 0.95f, 0.85f), false);
-        nhan.text = "GIÂY";
-        RectTransform rn = nhan.rectTransform;
-        rn.anchorMin = rn.anchorMax = new Vector2(0.5f, 0.5f);
-        rn.pivot = new Vector2(0.5f, 0.5f);
-        rn.anchoredPosition = new Vector2(0f, -kt * 0.27f);
-        rn.sizeDelta = new Vector2(kt * 0.5f, kt * 0.18f);
+        // Ô số bên phải
+        Image badge = TaoAnhCon("Badge", hudRoot.transform, new Color(1f, 1f, 1f, 0.08f));
+        RectTransform rb = badge.rectTransform;
+        rb.anchorMin = new Vector2(1f, 0f);
+        rb.anchorMax = new Vector2(1f, 1f);
+        rb.offsetMin = new Vector2(-bw - 6f, 6f);
+        rb.offsetMax = new Vector2(-6f, -6f);
+
+        hudSo = TaoChuCon("So", badge.transform, h * 0.6f, Color.white, true);
+        hudSo.enableAutoSizing = true;
+        hudSo.fontSizeMin = 14f;
+        hudSo.fontSizeMax = h * 0.6f;
+        hudSo.textWrappingMode = TextWrappingModes.NoWrap;
+        DatKhung(hudSo.rectTransform, Vector2.zero, Vector2.one, new Vector2(4f, 0f), new Vector2(-4f, 0f));
 
         hudFillHienTai = 1f;
         hudDaTao = true;
@@ -1737,7 +1715,7 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         if (hudFillImg != null)
         {
-            hudFillImg.fillAmount = hudFillHienTai;
+            hudFillRect.anchorMax = new Vector2(Mathf.Clamp01(hudFillHienTai), 1f);
             hudFillImg.color = mau;
             hudFillImg.enabled = hudFillHienTai > 0.01f;
         }
@@ -1754,12 +1732,12 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         if (hudSo != null)
         {
-            hudSo.text = Mathf.CeilToInt(t).ToString();
+            hudSo.text = $"{Mathf.CeilToInt(t)}<size=55%>s</size>";
             hudSo.color = dangNhay ? new Color(1f, 0.9f, 0.35f) : (sapHet ? mau : Color.white);
 
             float xung = 1f;
-            if (dangNhay) xung = 1f + 0.25f * Mathf.Clamp01((hudFlashDen - Time.unscaledTime) / 0.5f);
-            else if (sapHet && t > 0f) xung = 1f + 0.1f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 6f));
+            if (dangNhay) xung = 1f + 0.2f * Mathf.Clamp01((hudFlashDen - Time.unscaledTime) / 0.5f);
+            else if (sapHet && t > 0f) xung = 1f + 0.08f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 6f));
             hudSo.rectTransform.localScale = Vector3.one * xung;
         }
     }
