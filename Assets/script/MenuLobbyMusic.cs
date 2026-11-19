@@ -2,6 +2,9 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem.UI;
+#endif
 
 public class MenuLobbyMusic : MonoBehaviour
 {
@@ -13,14 +16,13 @@ public class MenuLobbyMusic : MonoBehaviour
 
     [Header("Nút mute (tự tạo, không cần làm UI)")]
     public bool tuTaoNutMute = true;
-    public bool hienNutTrongTran = false;                          // trong trận đã có nút loa của GameManager
+    public bool hienNutTrongTran = false;
     public Vector2 viTriNut = new Vector2(-30f, -30f);
     public float kichThuocNut = 70f;
     [Tooltip("Để trống thì tự vẽ icon loa bằng code")]
     public Sprite iconLoaBat;
     public Sprite iconLoaTat;
 
-    // Cùng key với GameManager -> mọi scene đồng bộ
     private const string KEY_NHAC_TAT = "NhacBiTat";
 
     private static MenuLobbyMusic instance;
@@ -28,7 +30,6 @@ public class MenuLobbyMusic : MonoBehaviour
     private static Sprite spriteTatCache;
 
     private AudioSource audioSource;
-    private bool daTamDung = false;
     private bool nhacBiTat = false;
     private float thoiDiemKiemTra = 0f;
 
@@ -64,7 +65,7 @@ public class MenuLobbyMusic : MonoBehaviour
         if (tuTaoNutMute) TaoNutMute();
         ApDungNhac();
 
-        if (nhacMenuLobby != null) audioSource.Play();
+        XuLyNhacTheoScene(SceneManager.GetActiveScene().name);
     }
 
     private void OnEnable()
@@ -82,11 +83,10 @@ public class MenuLobbyMusic : MonoBehaviour
         if (instance == this) instance = null;
     }
 
-    // Tự đồng bộ khi nơi khác (nút loa trong game...) đổi key
     private void Update()
     {
         if (Time.unscaledTime < thoiDiemKiemTra) return;
-        thoiDiemKiemTra = Time.unscaledTime + 0.1f;
+        thoiDiemKiemTra = Time.unscaledTime + 0.15f;
 
         bool tat = NhacBiTat;
         float mong = tat ? 0f : 1f;
@@ -96,12 +96,17 @@ public class MenuLobbyMusic : MonoBehaviour
             nhacBiTat = tat;
             ApDungNhac();
         }
+
+        // Đảm bảo chắc chắn không bao giờ phát nhạc sảnh khi đang ở trong trận đua
+        if (audioSource != null && audioSource.isPlaying && !LaSceneSanh(SceneManager.GetActiveScene().name))
+        {
+            audioSource.Stop();
+        }
     }
 
     // =========================================================================
-    // BẬT / TẮT NHẠC (mute toàn bộ âm thanh)
+    // BẬT / TẮT NHẠC
     // =========================================================================
-    // Gắn vào nút loa của menu nếu bạn tự làm nút: MenuLobbyMusic.BatTat()
     public static void BatTat()
     {
         if (instance != null) instance.BatTatNhac();
@@ -132,15 +137,25 @@ public class MenuLobbyMusic : MonoBehaviour
     // =========================================================================
     private bool LaSceneSanh(string tenScene)
     {
-        return System.Array.IndexOf(danhSachSceneSanh, tenScene) >= 0;
+        if (string.IsNullOrEmpty(tenScene)) return false;
+        for (int i = 0; i < danhSachSceneSanh.Length; i++)
+        {
+            if (string.Equals(danhSachSceneSanh[i], tenScene, System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private void KhiChuyenScene(Scene scene, LoadSceneMode mode)
     {
         nhacBiTat = NhacBiTat;
         ApDungNhac();
+        XuLyNhacTheoScene(scene.name);
+    }
 
-        bool laSanh = LaSceneSanh(scene.name);
+    private void XuLyNhacTheoScene(string tenScene)
+    {
+        bool laSanh = LaSceneSanh(tenScene);
 
         if (canvasNut != null)
         {
@@ -149,26 +164,32 @@ public class MenuLobbyMusic : MonoBehaviour
             if (hien) DamBaoEventSystem();
         }
 
-        if (audioSource == null || nhacMenuLobby == null) return;
+        if (audioSource == null) return;
 
         if (laSanh)
         {
-            if (daTamDung)
+            // Tắt các AudioSource nhạc nền loop khác trong scene sảnh để tránh chồng nhạc
+            foreach (AudioSource src in FindObjectsByType<AudioSource>(FindObjectsSortMode.None))
             {
-                audioSource.UnPause();
-                daTamDung = false;
+                if (src != null && src != audioSource && src.loop && src.isPlaying)
+                {
+                    src.Stop();
+                }
             }
-            else if (!audioSource.isPlaying)
+
+            if (nhacMenuLobby != null && !audioSource.isPlaying)
             {
+                audioSource.clip = nhacMenuLobby;
+                audioSource.volume = amLuong;
                 audioSource.Play();
             }
         }
         else
         {
+            // Dừng hẳn nhạc sảnh khi bước vào đường đua
             if (audioSource.isPlaying)
             {
-                audioSource.Pause();
-                daTamDung = true;
+                audioSource.Stop();
             }
         }
     }
@@ -176,7 +197,13 @@ public class MenuLobbyMusic : MonoBehaviour
     private void DamBaoEventSystem()
     {
         if (FindFirstObjectByType<EventSystem>() != null) return;
-        new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+        GameObject es = new GameObject("EventSystem");
+        es.AddComponent<EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+        es.AddComponent<InputSystemUIInputModule>();
+#else
+        es.AddComponent<StandaloneInputModule>();
+#endif
     }
 
     // =========================================================================

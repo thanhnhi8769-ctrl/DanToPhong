@@ -51,8 +51,13 @@ public static class VehicleCatalog
         new VehicleData("Emerald", 420, "ElectricScooterDefault", new Color32(0,145,85,255))
     };
 
-    private static readonly Dictionary<int, Texture> cacheTextureGoc = new Dictionary<int, Texture>();
     private const string KEY_EQUIPPED_BACKUP = "VC_Equipped_Scooter";
+
+    // Lưu riêng trong RAM của từng cửa sổ game đang chạy, tránh 2 cửa sổ trên 1 PC ghi đè PlayerPrefs của nhau
+    private static int selectedIndexTrongPhien = -1;
+
+    public static bool ghiLogToMau = false;
+    public static string thongTinToCuoi = "(chưa gọi ApplyPaint)";
 
     public static int Count => vehicles.Length;
 
@@ -94,15 +99,16 @@ public static class VehicleCatalog
         if (index < 0 || index >= Count) return false;
         if (!IsOwned(index)) return false;
 
-        // Mở khóa miễn phí index 0 trong PlayerInventory nếu chưa có
         if (index == 0 && !PlayerInventory.IsUnlocked("Scooter", 0))
             PlayerInventory.TryBuyItem("Scooter", 0, 0);
+
+        selectedIndexTrongPhien = index;
 
         PlayerInventory.SetEquippedIndex("Scooter", index);
         PlayerPrefs.SetInt(KEY_EQUIPPED_BACKUP, index);
         PlayerPrefs.Save();
 
-        if (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer != null)
+        if (PhotonNetwork.LocalPlayer != null)
         {
             Hashtable properties = new Hashtable { ["Scooter"] = index };
             PhotonNetwork.LocalPlayer.SetCustomProperties(properties);
@@ -113,21 +119,24 @@ public static class VehicleCatalog
 
     public static int GetSelectedIndex()
     {
-        int invIndex = PlayerInventory.GetEquippedIndex("Scooter");
-        if (PlayerPrefs.HasKey(KEY_EQUIPPED_BACKUP))
-        {
-            int backupIndex = PlayerPrefs.GetInt(KEY_EQUIPPED_BACKUP, 0);
-            if (IsOwned(backupIndex))
-                invIndex = backupIndex;
-        }
-        return Mathf.Clamp(invIndex, 0, Count - 1);
+        if (selectedIndexTrongPhien >= 0 && selectedIndexTrongPhien < Count)
+            return selectedIndexTrongPhien;
+
+        int invIndex = Mathf.Clamp(PlayerInventory.GetEquippedIndex("Scooter"), 0, Count - 1);
+        int backupIndex = PlayerPrefs.HasKey(KEY_EQUIPPED_BACKUP)
+            ? Mathf.Clamp(PlayerPrefs.GetInt(KEY_EQUIPPED_BACKUP, 0), 0, Count - 1)
+            : 0;
+
+        int ketQua = (invIndex > 0) ? invIndex : backupIndex;
+        selectedIndexTrongPhien = ketQua;
+        return ketQua;
     }
 
     public static int GetPlayerVehicleIndex(Player player)
     {
         if (player == null) return 0;
-        if (player.CustomProperties.TryGetValue("Scooter", out object value) && value is int)
-            return Mathf.Clamp((int)value, 0, Count - 1);
+        if (player.CustomProperties.TryGetValue("Scooter", out object value) && value != null)
+            return Mathf.Clamp(System.Convert.ToInt32(value), 0, Count - 1);
         return 0;
     }
 
@@ -170,6 +179,9 @@ public static class VehicleCatalog
         bool laXeDenGoc = color.r < 0.16f && color.g < 0.16f && color.b < 0.16f;
         Color mauApDung = laXeDenGoc ? Color.white : color;
 
+        int soDaTo = 0;
+        MaterialPropertyBlock propBlock = new MaterialPropertyBlock();
+
         foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>(true))
         {
             if (renderer == null) continue;
@@ -178,37 +190,40 @@ public static class VehicleCatalog
             if (tenObj.Contains("minimap") || tenObj.Contains("vetphanh"))
                 continue;
 
-            Material[] materials = renderer.materials;
+            bool laBanhXe = tenObj.Contains("wheel") || tenObj.Contains("tire");
 
-            for (int i = 0; i < materials.Length; i++)
+            Material[] sharedMats = renderer.sharedMaterials;
+            Material[] newMats = new Material[sharedMats.Length];
+
+            for (int i = 0; i < sharedMats.Length; i++)
             {
-                Material mat = materials[i];
-                if (mat == null) continue;
+                Material srcMat = sharedMats[i];
+                if (srcMat == null) continue;
 
-                string tenMat = mat.name.ToLower();
-                if (tenMat.Contains("black") || tenMat.Contains("tire") || tenMat.Contains("wheel") || tenMat.Contains("rubber"))
+                string tenMat = srcMat.name.ToLower();
+                if (laBanhXe || tenMat.Contains("tire") || tenMat.Contains("wheel") || tenMat.Contains("rubber"))
+                {
+                    newMats[i] = srcMat;
                     continue;
-
-                int matId = mat.GetInstanceID();
-                if (!cacheTextureGoc.ContainsKey(matId))
-                {
-                    Texture tex = mat.HasProperty("_BaseMap") ? mat.GetTexture("_BaseMap") : null;
-                    if (tex == null && mat.HasProperty("_MainTex")) tex = mat.GetTexture("_MainTex");
-                    cacheTextureGoc[matId] = tex;
                 }
 
-                Texture texGoc = cacheTextureGoc[matId];
-                if (texGoc != null)
-                {
-                    if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", texGoc);
-                    if (mat.HasProperty("_MainTex")) mat.SetTexture("_MainTex", texGoc);
-                }
-
+                Material mat = new Material(srcMat);
                 if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", mauApDung);
                 if (mat.HasProperty("_Color")) mat.SetColor("_Color", mauApDung);
+                mat.color = mauApDung;
+                newMats[i] = mat;
+
+                renderer.GetPropertyBlock(propBlock, i);
+                propBlock.SetColor("_BaseColor", mauApDung);
+                propBlock.SetColor("_Color", mauApDung);
+                renderer.SetPropertyBlock(propBlock, i);
+
+                soDaTo++;
             }
 
-            renderer.materials = materials;
+            renderer.materials = newMats;
         }
+
+        thongTinToCuoi = $"ApplyPaint '{model.name}' màu={color} -> đã tô {soDaTo} material";
     }
 }

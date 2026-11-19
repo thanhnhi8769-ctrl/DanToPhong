@@ -7,6 +7,10 @@ using Photon.Voice.PUN;
 using Photon.Voice.Unity;
 using ExitGames.Client.Photon;
 using System.Collections.Generic;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.UI;
+#endif
 
 [DisallowMultipleComponent]
 public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
@@ -14,12 +18,12 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     private const byte CHAT_EVENT = 77;
     private const int MAX_MESSAGES = 40;
 
-    // Scooter và GameManager/SelectManager đọc cờ này: đang gõ chat thì không xử lý phím tắt/di chuyển
     public static bool DangGoChat { get; private set; }
 
     [Header("Cài đặt UI")]
-    [Tooltip("Kéo thả font chữ vào đây. Nếu để trống, hệ thống sẽ tự tìm font mặc định.")]
     public Font customFont;
+    [Tooltip("Bật: vừa vào scene game là mở sẵn khung chat luôn.")]
+    public bool moSanKhungChatKhiVaoGame = true;
 
     [Header("Photon Voice")]
     private PunVoiceClient voiceClient;
@@ -39,7 +43,6 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     private ScrollRect scrollRect;
     private Text roomStatusText;
 
-    // THÔNG BÁO TIN NHẮN MỚI
     private int unreadCount = 0;
     private GameObject notifBadge;
     private Text notifText;
@@ -49,10 +52,14 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     private Sprite roundedSprite;
     private Texture2D roundedTexture;
 
+    private string trangThaiCuoi;
+    private bool scrollDirty = false;
+    private bool historyDirty = false;
+
     private readonly Color hudGray = new Color(0.15f, 0.15f, 0.15f, 0.85f);
-    private readonly Color hudPanel = new Color(0.1f, 0.1f, 0.1f, 0.9f);
-    private readonly Color hudHeader = new Color(0.2f, 0.2f, 0.2f, 1f);
-    private readonly Color hudInput = new Color(0.05f, 0.05f, 0.05f, 0.9f);
+    private readonly Color hudPanel = new Color(0.08f, 0.08f, 0.10f, 0.94f);
+    private readonly Color hudHeader = new Color(0.18f, 0.18f, 0.22f, 1f);
+    private readonly Color hudInput = new Color(0.04f, 0.04f, 0.05f, 0.95f);
     private readonly Color micActive = new Color(0.2f, 0.65f, 0.3f, 0.9f);
     private readonly Color white = new Color(0.95f, 0.95f, 0.95f, 1f);
     private readonly Color softText = new Color(0.7f, 0.75f, 0.8f, 1f);
@@ -61,7 +68,6 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     private const string TEXT_MIC_ON = "MIC ON";
     private const string TEXT_MIC_OFF = "MIC OFF";
 
-    // Sprite bo góc tự vẽ bằng code
     private Sprite TaoSpriteBoGoc(int size, int bk)
     {
         roundedTexture = new Texture2D(size, size, TextureFormat.RGBA32, false);
@@ -125,14 +131,31 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         DangGoChat = false;
     }
 
+    private static bool NhanPhimEnter()
+    {
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        var kb = Keyboard.current;
+        return kb != null && (kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame);
+#else
+        return Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
+#endif
+    }
+
     private void Update()
     {
         bool dangMo = chatPanel != null && chatPanel.activeSelf;
         bool dangGo = dangMo && inputField != null && inputField.isFocused;
         DangGoChat = dangGo;
 
-        // Hỗ trợ nhấn Enter / Numpad Enter để gửi ngay hoặc focus vào ô nhập
-        if (dangMo && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)))
+        // ESC khi đang gõ chat: thoát ô nhập để các phím game / menu dùng lại được
+        if (dangGo && Input.GetKeyDown(KeyCode.Escape))
+        {
+            inputField.DeactivateInputField();
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+            return;
+        }
+
+        if (dangMo && NhanPhimEnter())
         {
             if (inputField != null && !string.IsNullOrWhiteSpace(inputField.text))
             {
@@ -145,6 +168,16 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         }
     }
 
+    // Gom mọi yêu cầu cuộn/đo layout trong frame thành 1 lần duy nhất
+    private void LateUpdate()
+    {
+        if (!scrollDirty || scrollRect == null || chatPanel == null || !chatPanel.activeInHierarchy) return;
+
+        scrollDirty = false;
+        LayoutRebuilder.ForceRebuildLayoutImmediate(scrollRect.content);
+        scrollRect.verticalNormalizedPosition = 0f;
+    }
+
     private void FocusOChat()
     {
         if (inputField == null) return;
@@ -154,10 +187,23 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
     private void TaoEventSystem()
     {
-        if (FindFirstObjectByType<EventSystem>() != null) return;
+        EventSystem[] all = FindObjectsByType<EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        if (all != null && all.Length > 0)
+        {
+            all[0].gameObject.SetActive(true);
+            all[0].enabled = true;
+            for (int i = 1; i < all.Length; i++)
+                Destroy(all[i].gameObject);
+            return;
+        }
+
         GameObject obj = new GameObject("MultiplayerEventSystem");
         obj.AddComponent<EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+        obj.AddComponent<InputSystemUIInputModule>();
+#else
         obj.AddComponent<StandaloneInputModule>();
+#endif
     }
 
     private void TaoVoice()
@@ -170,7 +216,9 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         recorder = FindFirstObjectByType<Recorder>();
         if (recorder == null) recorder = gameObject.AddComponent<Recorder>();
         recorder.SourceType = Recorder.InputSourceType.Microphone;
-        recorder.RecordWhenJoined = true;
+        // Không thu micro liên tục khi chưa bật MIC (đỡ tốn CPU + rác bộ nhớ)
+        recorder.RecordWhenJoined = false;
+        recorder.RecordingEnabled = false;
         recorder.TransmitEnabled = false;
 
         recorder.SamplingRate = POpusCodec.Enums.SamplingRate.Sampling48000;
@@ -195,7 +243,7 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         if (recorder == null) { ThemTinNhanHeThong("Không tìm thấy thiết bị ghi âm."); return; }
 
         voiceOn = !voiceOn;
-        if (voiceOn) recorder.RecordingEnabled = true;
+        recorder.RecordingEnabled = voiceOn;
         recorder.TransmitEnabled = voiceOn;
 
         CapNhatNutMic();
@@ -248,10 +296,19 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         return string.IsNullOrEmpty(p.NickName) ? "Người chơi #" + p.ActorNumber : p.NickName;
     }
 
+    // Chỉ gọi khi có sự kiện phòng (vào / ra / có người vào / ra), không gọi mỗi frame
     private void CapNhatTrangThaiPhong()
     {
         if (roomStatusText == null) return;
-        roomStatusText.text = PhotonNetwork.InRoom ? "TRONG PHÒNG: " + PhotonNetwork.CurrentRoom.PlayerCount : "CHƯA KẾT NỐI";
+
+        string trangThai = PhotonNetwork.InRoom
+            ? "TRONG PHÒNG: " + PhotonNetwork.CurrentRoom.PlayerCount
+            : "CHƯA KẾT NỐI";
+
+        if (trangThai == trangThaiCuoi) return;
+
+        trangThaiCuoi = trangThai;
+        roomStatusText.text = trangThai;
     }
 
     private void TaoCanvas()
@@ -259,15 +316,16 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         GameObject obj = new GameObject("MultiplayerOverlay", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         canvas = obj.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 999;
+        canvas.sortingOrder = 5000;
 
         CanvasScaler scaler = obj.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920, 1080);
         scaler.matchWidthOrHeight = 0.5f;
 
-        TaoNutMic(new Vector2(20, 20));
-        TaoNutChat(new Vector2(100, 20));
+        // Dời sang phải 76px để chừa góc trái dưới cho nút "?" (HelpSystem) cố định ở mọi scene
+        TaoNutMic(new Vector2(96, 20));
+        TaoNutChat(new Vector2(176, 20));
 
         TaoKhungChat();
     }
@@ -277,8 +335,8 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         chatButton = TaoIconButton(TEXT_CHAT, position, new Vector2(70, 40), hudGray, canvas.transform, 15, Vector2.zero);
         chatButtonText = chatButton.GetComponentInChildren<Text>();
 
-        // Chấm đỏ thông báo tin nhắn (góc trên bên phải nút Chat)
         notifBadge = TaoPanelCon("NotifBadge", chatButton.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(0.5f, 0.5f), new Vector2(-5, -5), new Vector2(22, 22), new Color(0.9f, 0.2f, 0.2f, 1f));
+        notifBadge.GetComponent<Image>().raycastTarget = false;
         notifText = TaoText(notifBadge.transform, "0", 12, Vector2.zero, Vector2.zero, TextAnchor.MiddleCenter);
         Stretch(notifText.rectTransform, 0, 0, 0, 0);
         notifText.fontStyle = FontStyle.Bold;
@@ -292,7 +350,9 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
             if (show)
             {
-                CapNhatScroll();
+                if (historyDirty) LamMoiLichSu();
+                else CapNhatScroll();
+
                 FocusOChat();
 
                 unreadCount = 0;
@@ -314,27 +374,24 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
     private void TaoKhungChat()
     {
-        chatPanel = TaoPanel("ChatPanel", new Vector2(20, 70), new Vector2(375, 400), hudPanel, Vector2.zero);
+        chatPanel = TaoPanel("ChatPanel", new Vector2(96, 70), new Vector2(360, 280), hudPanel, Vector2.zero);
 
-        GameObject header = TaoPanelCon("Header", chatPanel.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0.5f, 1), new Vector2(0, 0), new Vector2(0, 40), hudHeader);
+        GameObject header = TaoPanelCon("Header", chatPanel.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0.5f, 1), new Vector2(0, 0), new Vector2(0, 38), hudHeader);
 
         Text title = TaoText(header.transform, "PHÒNG CHAT", 14, Vector2.zero, Vector2.zero, TextAnchor.MiddleCenter);
         Stretch(title.rectTransform, 0, 0, 0, 10);
         title.fontStyle = FontStyle.Bold;
 
-        roomStatusText = TaoText(header.transform, "CHƯA KẾT NỐI", 11, new Vector2(0, -22), new Vector2(375, 20), TextAnchor.MiddleCenter);
+        roomStatusText = TaoText(header.transform, "CHƯA KẾT NỐI", 11, new Vector2(0, -20), new Vector2(360, 18), TextAnchor.MiddleCenter);
         roomStatusText.color = softText;
 
-        GameObject viewport = new GameObject("ChatViewport", typeof(RectTransform), typeof(Image), typeof(Mask));
+        GameObject viewport = new GameObject("ChatViewport", typeof(RectTransform), typeof(RectMask2D));
         viewport.transform.SetParent(chatPanel.transform, false);
         RectTransform viewportRect = viewport.GetComponent<RectTransform>();
         viewportRect.anchorMin = new Vector2(0, 0);
         viewportRect.anchorMax = new Vector2(1, 1);
-        viewportRect.offsetMin = new Vector2(10, 55);
-        viewportRect.offsetMax = new Vector2(-10, -45);
-
-        viewport.GetComponent<Image>().color = Color.white;
-        viewport.GetComponent<Mask>().showMaskGraphic = false;
+        viewportRect.offsetMin = new Vector2(10, 52);
+        viewportRect.offsetMax = new Vector2(-10, -42);
 
         GameObject scrollObj = new GameObject("ChatScroll", typeof(RectTransform), typeof(ScrollRect));
         scrollObj.transform.SetParent(viewport.transform, false);
@@ -354,7 +411,7 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         contentRect.anchorMax = new Vector2(1, 1);
         contentRect.pivot = new Vector2(0.5f, 1);
         contentRect.anchoredPosition = Vector2.zero;
-        contentRect.sizeDelta = new Vector2(-10, 0);
+        contentRect.sizeDelta = new Vector2(0, 0);
         content.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         GameObject history = new GameObject("HistoryText", typeof(RectTransform), typeof(Text), typeof(ContentSizeFitter));
@@ -363,27 +420,28 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         historyRect.anchorMin = new Vector2(0, 1);
         historyRect.anchorMax = new Vector2(1, 1);
         historyRect.pivot = new Vector2(0.5f, 1);
-        historyRect.anchoredPosition = new Vector2(0, -5);
+        historyRect.anchoredPosition = new Vector2(0, -4);
         historyRect.sizeDelta = new Vector2(0, 0);
 
         historyText = history.GetComponent<Text>();
         historyText.font = defaultFont;
-        historyText.fontSize = 14;
+        historyText.fontSize = 15;
         historyText.color = white;
         historyText.alignment = TextAnchor.UpperLeft;
         historyText.horizontalOverflow = HorizontalWrapMode.Wrap;
         historyText.verticalOverflow = VerticalWrapMode.Overflow;
         historyText.supportRichText = true;
         historyText.lineSpacing = 1.2f;
+        historyText.raycastTarget = false;
         history.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         scrollRect.content = contentRect;
 
-        GameObject inputBg = TaoPanelCon("InputBackground", chatPanel.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0.5f, 0), new Vector2(0, 8), new Vector2(-75, 40), hudInput);
+        GameObject inputBg = TaoPanelCon("InputBackground", chatPanel.transform, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0.5f, 0), new Vector2(0, 8), new Vector2(-75, 38), hudInput);
+        inputBg.GetComponent<Image>().raycastTarget = true;
 
         inputField = inputBg.AddComponent<InputField>();
         inputField.lineType = InputField.LineType.SingleLine;
 
-        // Bật con trỏ nhấp nháy (caret) rõ nét màu trắng
         inputField.customCaretColor = true;
         inputField.caretColor = Color.white;
         inputField.caretWidth = 3;
@@ -393,26 +451,25 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         Text inputText = TaoText(inputBg.transform, "", 14, new Vector2(10, 0), Vector2.zero, TextAnchor.MiddleLeft);
         Stretch(inputText.rectTransform, 10, 0, -10, 0);
 
-        Text placeholder = TaoText(inputBg.transform, "Nhập...", 14, new Vector2(10, 0), Vector2.zero, TextAnchor.MiddleLeft);
+        Text placeholder = TaoText(inputBg.transform, "Nhập tin nhắn...", 14, new Vector2(10, 0), Vector2.zero, TextAnchor.MiddleLeft);
         Stretch(placeholder.rectTransform, 10, 0, -10, 0);
         placeholder.color = softText;
 
         inputField.textComponent = inputText;
         inputField.placeholder = placeholder;
 
-        // Gửi tin nhắn ngay khi nhấn Enter (kể cả khi InputField vừa mất focus)
         inputField.onEndEdit.AddListener((text) =>
         {
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
-            {
+            if (NhanPhimEnter())
                 GuiTinNhan();
-            }
         });
 
-        Button sendButton = TaoIconButton("GỬI", new Vector2(-8, 8), new Vector2(55, 40), hudHeader, chatPanel.transform, 13, new Vector2(1, 0));
+        Button sendButton = TaoIconButton("GỬI", new Vector2(-8, 8), new Vector2(55, 38), hudHeader, chatPanel.transform, 13, new Vector2(1, 0));
         sendButton.onClick.AddListener(GuiTinNhan);
 
-        chatPanel.SetActive(false);
+        // Chơi 1 người thì không cần mở sẵn khung chat (đỡ che giao diện); có từ 2 người trở lên mới tự mở
+        bool coNhieuNguoi = PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.PlayerCount > 1;
+        chatPanel.SetActive(moSanKhungChatKhiVaoGame && coNhieuNguoi);
     }
 
     private void GuiTinNhan()
@@ -453,18 +510,15 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
         string line = systemMessage
             ? $"<color=#AAAAAA><i>● {playerName}: {message}</i></color>"
-            : $"<b>{playerName}</b>\n{message}";
+            : $"<color=#FFD54F><b>{playerName}:</b></color> {message}";
 
         messages.Add(line);
         if (messages.Count > MAX_MESSAGES) messages.RemoveAt(0);
 
-        if (historyText != null)
-        {
-            historyText.text = string.Join("\n\n", messages);
-            CapNhatScroll();
-        }
+        // Khung chat đang đóng thì chưa cần dựng lại chữ / layout, đợi lúc mở
+        if (chatPanel != null && chatPanel.activeSelf) LamMoiLichSu();
+        else historyDirty = true;
 
-        // Tăng bộ đếm tin chưa đọc nếu khung chat đang đóng
         if (!systemMessage && chatPanel != null && !chatPanel.activeSelf)
         {
             unreadCount++;
@@ -476,11 +530,18 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         }
     }
 
+    private void LamMoiLichSu()
+    {
+        historyDirty = false;
+        if (historyText == null) return;
+
+        historyText.text = string.Join("\n", messages);
+        scrollDirty = true;
+    }
+
     private void CapNhatScroll()
     {
-        if (scrollRect == null) return;
-        Canvas.ForceUpdateCanvases();
-        scrollRect.verticalNormalizedPosition = 0f;
+        scrollDirty = true;
     }
 
     private Button TaoIconButton(string textVal, Vector2 position, Vector2 size, Color color, Transform parent, int fontSize, Vector2 anchorPivot)
@@ -529,6 +590,7 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         txt.color = white;
         txt.alignment = alignment;
         txt.supportRichText = true;
+        txt.raycastTarget = false;
         return txt;
     }
 
@@ -543,6 +605,7 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
         Image image = obj.GetComponent<Image>();
         image.color = color;
+        image.raycastTarget = false;
         if (roundedSprite != null) { image.sprite = roundedSprite; image.type = Image.Type.Sliced; }
         return obj;
     }
@@ -560,6 +623,7 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
         Image image = obj.GetComponent<Image>();
         image.color = color;
+        image.raycastTarget = false;
         if (roundedSprite != null) { image.sprite = roundedSprite; image.type = Image.Type.Sliced; }
         return obj;
     }

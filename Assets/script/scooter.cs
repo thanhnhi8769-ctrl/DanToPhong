@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -9,6 +10,8 @@ using Unity.Cinemachine;
 [RequireComponent(typeof(Rigidbody))]
 public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 {
+    public static readonly List<scooter> TatCaXe = new List<scooter>();
+
     [System.Serializable]
     public class MauXe
     {
@@ -31,6 +34,10 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     [SerializeField] private float lucNhay = 8f;
     [SerializeField] private float thoiGianCoyote = 0.15f;
     [SerializeField] private float thoiGianDemNhay = 0.15f;
+    [SerializeField, Tooltip("Hệ số trọng lực lúc đang rơi (>1: rơi nhanh hơn, cú nhảy gọn hơn, bớt lơ lửng)")]
+    private float heSoRoiNhanh = 1.5f;
+    [SerializeField, Tooltip("Chân xe cao hơn đỉnh vật cản chừng này thì coi như đã nhảy qua, không bị chặn (m)")]
+    private float doCaoVuotVatCan = 0.05f;
 
     [Header("Bám đường (tia dò)")]
     [SerializeField] private float maxDepenetration = 2f;
@@ -43,6 +50,10 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private float toiDaHutDat = 4f;
     [SerializeField, Tooltip("Tia dò thấy mặt đường lệch quá mức này thì bỏ qua")]
     private float doLechToiDaTiaDo = 0.6f;
+
+    [Header("Chống bay lên")]
+    [SerializeField, Tooltip("Khi không nhảy mà vận tốc bay lên vượt mức này thì bị cắt lại (m/s)")]
+    private float vanTocLenToiDa = 3f;
 
     [Header("Mẫu xe (thứ tự = thứ tự trong Shop)")]
     [SerializeField, Tooltip("Để trống = tự dò từ cây prefab. Mẫu nào hiện thiếu bánh/thân thì khai báo ở đây: mỗi phần tử liệt kê MỌI object cần bật cho mẫu đó.")]
@@ -59,7 +70,28 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     [SerializeField] private float doCaoGoBoQua = 0.12f;
 
     [Tooltip("Xe xuyên qua vật có tên chứa các từ này, cách nhau bằng dấu phẩy.")]
-    [SerializeField] private string tuKhoaBoQuaVaCham = "obstacle,barricade,cone,prop,decor,tree,grass";
+    [SerializeField] private string tuKhoaBoQuaVaCham = "tree,grass,prop,decor";
+
+    [Header("Vật cản cứng")]
+    [SerializeField, Tooltip("Bật: vật cản là vật CỨNG, xe đâm vào bị chặn. Tắt: xe xuyên qua như cũ.")]
+    private bool vatCanLaVatCung = true;
+    [SerializeField, Tooltip("Tên (hoặc tên object cha) chứa các từ này = vật cứng. Cách nhau bằng dấu phẩy.")]
+    private string tuKhoaVatCung = "obstacle,barricade,cone,guardrail,fence,barrier";
+    [SerializeField, Tooltip("Tên chứa các từ này thì KHÔNG BAO GIỜ là vật cứng (checkpoint, đích, cổng...).")]
+    private string tuKhoaKhongCung = "checkpoint,finish,goal,gate,trigger,start";
+    [SerializeField, Tooltip("Quét trước mặt xe để chặn vật cản cứng, chống xuyên khi chạy nhanh")]
+    private bool quetChanTruoc = true;
+    [SerializeField] private float banKinhQuet = 0.35f;
+    [SerializeField, Tooltip("Độ cao tia quét so với chân xe")]
+    private float doCaoQuet = 0.3f;
+
+    [Header("Chặn mép đường (tường vô hình)")]
+    [SerializeField, Tooltip("Bật: xe sắp chạy ra khỏi mặt đường (chỗ không có đường bên dưới) thì bị chặn như có lan can. Tắt nếu map có đoạn nhảy qua vực.")]
+    private bool chanMepDuong = true;
+    [SerializeField, Tooltip("Khoảng dò phía trước xe (m), cộng thêm theo tốc độ")]
+    private float khoangDoMepTruoc = 0.8f;
+    [SerializeField, Tooltip("Khoảng dò sang hai bên xe (m)")]
+    private float khoangDoMepNgang = 0.6f;
 
     [Header("Hồi sinh khi rơi nước")]
     [SerializeField] private float nhacLenKhiHoiSinh = 0.5f;
@@ -71,11 +103,12 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     [SerializeField] private bool tuHaMoHinhChamDat = false;
     [SerializeField] private float moHinhHaThem = 0f;
 
-    [Header("Chẩn đoán")]
-    [SerializeField] private bool ghiLogVaCham = true;
+    [Header("Chẩn đoán (TẮT khi chơi: ghi log trong lúc lái gây giật)")]
+    [SerializeField] private bool ghiLogChanDoan = false;
 
     private const float NGUONG_BI_CHAN = 5f;
     private const float THOI_GIAN_BI_CHAN = 0.3f;
+    private const int SO_COLLIDER_MOI_DOT = 150;
 
     private bool xeDangBat = false;
     private bool dangLui = false;
@@ -92,6 +125,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private Vector3 phapTuyenDat = Vector3.up;
     private bool dangBamDat = false;
     private readonly RaycastHit[] bufferRay = new RaycastHit[16];
+    private readonly RaycastHit[] bufferMep = new RaycastHit[8];
     private float chieuCaoPivot = 0f;
     private float suaCaoDo = 0f;
 
@@ -104,9 +138,16 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private bool daLuuLucBatDau = false;
     private int soLanCanMoHinh = 0;
     private float thoiDiemLogChan = -10f;
+    private float thoiDiemLogMat = -10f;
+    private bool daBamDatTruoc = false;
 
     private string[] tuKhoaVat = new string[0];
+    private string[] tuKhoaCung = new string[0];
+    private string[] tuKhoaLoaiTru = new string[0];
     private readonly Dictionary<Collider, bool> cacheMatDuong = new Dictionary<Collider, bool>();
+    private readonly Dictionary<Collider, bool> cacheVatCung = new Dictionary<Collider, bool>();
+    private readonly Dictionary<Collider, bool> cacheNuoc = new Dictionary<Collider, bool>();
+    private readonly HashSet<Collider> daBoQuaCollider = new HashSet<Collider>();
 
     private List<GameObject[]> mauXeRuntime;
     private int mauTuMang = -1;
@@ -119,6 +160,18 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private Mesh meshMuiTen;
     private Material matMuiTen;
 
+    private GameNetworkManager gnmCache;
+    private GameManager gmCache;
+    private float thoiDiemTimGM = 0f;
+
+    private static PhysicsMaterial matKhongMaSat;
+    private static int cachedLayerMinimap = -2;
+
+    // Cache ô đang chọn trong EventSystem: không gọi GetComponent mỗi frame
+    private static GameObject selCache;
+    private static InputField selInput;
+    private static TMP_InputField selTmp;
+
     private bool LaXeCuaMinh
     {
         get { return !PhotonNetwork.IsConnected || pv == null || pv.IsMine; }
@@ -129,6 +182,33 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     public bool DangLui { get { return dangLui; } }
     public int SoMauXe { get { return 2; } }
     public int MauDangDung { get { return mauDangDung; } }
+
+    private static int LayLayerMinimap()
+    {
+        if (cachedLayerMinimap == -2)
+            cachedLayerMinimap = LayerMask.NameToLayer("Minimap");
+        return cachedLayerMinimap;
+    }
+
+    private GameManager LayGM()
+    {
+        if (gmCache == null && Time.unscaledTime >= thoiDiemTimGM)
+        {
+            thoiDiemTimGM = Time.unscaledTime + 1f;
+            gmCache = GameManager.Instance;
+        }
+        return gmCache;
+    }
+
+    private void OnEnable()
+    {
+        if (!TatCaXe.Contains(this)) TatCaXe.Add(this);
+    }
+
+    private void OnDisable()
+    {
+        TatCaXe.Remove(this);
+    }
 
     // =========================================================================
     // MẪU XE
@@ -142,13 +222,17 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         ApDungMauXe(mauTuMang);
     }
 
-    public void ApDungMauXe(int indexXe)
+    // Mặc định bỏ qua nếu xe đã đúng mẫu này (nhiều script cùng gọi, chỉ làm 1 lần).
+    // ep = true để dựng lại (sau khi nâng xe lên mặt đường...).
+    public void ApDungMauXe(int indexXe, bool ep = false)
     {
         if (indexXe < 0) indexXe = 0;
+        if (!ep && indexXe == mauDangDung) return;
+
         mauDangDung = indexXe;
 
-        GameNetworkManager gnm = FindFirstObjectByType<GameNetworkManager>();
-        float kichThuoc = (gnm != null) ? gnm.kichThuocXeChuan : 1.6f;
+        if (gnmCache == null) gnmCache = FindFirstObjectByType<GameNetworkManager>();
+        float kichThuoc = (gnmCache != null) ? gnmCache.kichThuocXeChuan : 1.6f;
 
         GameNetworkManager.KichHoatDungMauXe(gameObject, indexXe, kichThuoc);
     }
@@ -156,6 +240,19 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     // =========================================================================
     // KHỞI TẠO
     // =========================================================================
+    private static string[] TachTuKhoa(string chuoi)
+    {
+        var ds = new List<string>();
+        if (string.IsNullOrWhiteSpace(chuoi)) return ds.ToArray();
+
+        foreach (string k in chuoi.ToLower().Split(','))
+        {
+            string s = k.Trim();
+            if (s.Length > 0) ds.Add(s);
+        }
+        return ds.ToArray();
+    }
+
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
@@ -163,11 +260,16 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         DonColliderXe();
 
-        if (!string.IsNullOrWhiteSpace(tuKhoaBoQuaVaCham))
+        tuKhoaCung = vatCanLaVatCung ? TachTuKhoa(tuKhoaVatCung) : new string[0];
+        tuKhoaLoaiTru = TachTuKhoa(tuKhoaKhongCung);
+
+        var dsXuyen = new List<string>();
+        foreach (string s in TachTuKhoa(tuKhoaBoQuaVaCham))
         {
-            tuKhoaVat = tuKhoaBoQuaVaCham.ToLower().Split(',');
-            for (int i = 0; i < tuKhoaVat.Length; i++) tuKhoaVat[i] = tuKhoaVat[i].Trim();
+            if (vatCanLaVatCung && System.Array.IndexOf(tuKhoaCung, s) >= 0) continue;
+            dsXuyen.Add(s);
         }
+        tuKhoaVat = dsXuyen.ToArray();
 
         if (hieuUngPhanh != null) hieuUngPhanh.SetActive(false);
 
@@ -179,7 +281,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         if (LaXeCuaMinh)
         {
-            int indexTrangBi = mauTuMang >= 0 ? mauTuMang : PlayerInventory.GetEquippedIndex("Scooter");
+            int indexTrangBi = mauTuMang >= 0 ? mauTuMang : VehicleCatalog.GetSelectedIndex();
             ApDungMauXe(indexTrangBi);
             LuuDiemXuatPhat();
 
@@ -192,7 +294,12 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
             TinhChieuCaoPivot();
             ThietLapColliderXe();
-            BoQuaVatCanNho();
+
+            if (ghiLogChanDoan)
+                Debug.Log($"[XE] scooter v5 | vatCung={vatCanLaVatCung} quet={quetChanTruoc} mepDuong={chanMepDuong} chieuCaoPivot={chieuCaoPivot:F2} tuKhoaCung=[{tuKhoaVatCung}] tuKhoaXuyen=[{tuKhoaBoQuaVaCham}]");
+
+            // Quét toàn bộ collider của scene rất nặng: chia nhỏ ra nhiều frame thay vì dồn vào 1 frame
+            StartCoroutine(BoQuaVatCanNhoTheoDot());
             if (boQuaVaChamMatDuong) XuyenMatDuong();
 
             CinemachineCamera cam = FindFirstObjectByType<CinemachineCamera>();
@@ -218,6 +325,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
     private void OnDestroy()
     {
+        TatCaXe.Remove(this);
         if (matMuiTen != null) Destroy(matMuiTen);
         if (meshMuiTen != null) Destroy(meshMuiTen);
     }
@@ -268,7 +376,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         Camera cam = Camera.main;
         if (cam == null) return;
 
-        int layerMinimap = LayerMask.NameToLayer("Minimap");
+        int layerMinimap = LayLayerMinimap();
         int canBat = 0;
 
         foreach (Renderer r in GetComponentsInChildren<Renderer>(true))
@@ -340,6 +448,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         if (Time.time - thoiDiemHoiSinh < thoiGianChoHoiSinh) return;
         thoiDiemHoiSinh = Time.time;
 
+        if (ghiLogChanDoan)
+            Debug.LogWarning($"[XE HỒI SINH] tại {transform.position}, bamDat={dangBamDat}, tốc độ={tocDoDangChay:F1}");
+
         if (!rb.isKinematic)
         {
             rb.linearVelocity = Vector3.zero;
@@ -377,7 +488,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         muiTenObj.transform.localRotation = Quaternion.identity;
         muiTenObj.transform.localScale = new Vector3(4.5f, 1f, 4.5f);
 
-        int layerMinimap = LayerMask.NameToLayer("Minimap");
+        int layerMinimap = LayLayerMinimap();
         if (layerMinimap != -1) muiTenObj.layer = layerMinimap;
 
         MeshFilter mf = muiTenObj.AddComponent<MeshFilter>();
@@ -413,10 +524,19 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         matMuiTen.color = mau;
     }
 
-    private bool LaNuoc(GameObject go)
+    // =========================================================================
+    // NƯỚC / VA CHẠM
+    // =========================================================================
+    // gameObject.name tạo chuỗi mới mỗi lần đọc: cache theo collider để không sinh rác trong OnCollisionStay / OnTriggerStay
+    private bool LaNuoc(Collider c)
     {
-        string ten = go.name;
-        return ten.Contains("Sea_Plane") || ten.Contains("Water");
+        if (c == null) return false;
+        if (cacheNuoc.TryGetValue(c, out bool kq)) return kq;
+
+        string ten = c.gameObject.name;
+        kq = ten.Contains("Sea_Plane") || ten.Contains("Water");
+        cacheNuoc[c] = kq;
+        return kq;
     }
 
     private bool XeDaXuongNuoc()
@@ -427,20 +547,38 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private void OnTriggerEnter(Collider other)
     {
         if (!LaXeCuaMinh) return;
-        if (LaNuoc(other.gameObject) && XeDaXuongNuoc()) HoiSinh();
+        if (LaNuoc(other) && XeDaXuongNuoc()) HoiSinh();
     }
 
     private void OnTriggerStay(Collider other)
     {
         if (!LaXeCuaMinh) return;
-        if (LaNuoc(other.gameObject) && XeDaXuongNuoc()) HoiSinh();
+        if (LaNuoc(other) && XeDaXuongNuoc()) HoiSinh();
+    }
+
+    // Xe người khác không được đẩy / hất xe mình: bỏ va chạm giữa các xe (mỗi collider chỉ xử lý 1 lần)
+    private void BoQuaXeKhac(Collision c)
+    {
+        Rigidbody orb = c.rigidbody;
+        if (orb == null || orb == rb) return;
+
+        Collider oc = c.collider;
+        if (oc == null || daBoQuaCollider.Contains(oc)) return;
+
+        if (orb.TryGetComponent(out scooter khac) && khac != this)
+        {
+            daBoQuaCollider.Add(oc);
+            IgnoreVoiXe(oc);
+        }
     }
 
     private void OnCollisionEnter(Collision collision)
     {
         if (!LaXeCuaMinh) return;
 
-        if (LaNuoc(collision.gameObject) && XeDaXuongNuoc())
+        BoQuaXeKhac(collision);
+
+        if (LaNuoc(collision.collider) && XeDaXuongNuoc())
         {
             HoiSinh();
             return;
@@ -454,34 +592,81 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     {
         if (!LaXeCuaMinh) return;
 
+        BoQuaXeKhac(collision);
+
         GhiNhanTuong(collision);
         GhiLogNeuBiChan(collision);
     }
 
+    private bool LaVatCanCung(Collider c)
+    {
+        if (!vatCanLaVatCung || c == null || tuKhoaCung.Length == 0) return false;
+        if (c.isTrigger) return false;
+        if (cacheVatCung.TryGetValue(c, out bool kq)) return kq;
+
+        bool cung = false;
+        for (Transform t = c.transform; t != null && !cung; t = t.parent)
+        {
+            string ten = t.name.ToLower();
+
+            bool loaiTru = false;
+            for (int i = 0; i < tuKhoaLoaiTru.Length; i++)
+            {
+                if (ten.Contains(tuKhoaLoaiTru[i])) { loaiTru = true; break; }
+            }
+            if (loaiTru) break;
+
+            for (int i = 0; i < tuKhoaCung.Length; i++)
+            {
+                if (ten.Contains(tuKhoaCung[i])) { cung = true; break; }
+            }
+        }
+
+        cacheVatCung[c] = cung;
+        return cung;
+    }
+
     private bool LaGoThap(ContactPoint cp)
     {
+        if (LaVatCanCung(cp.otherCollider)) return false;
+
         float duoiXe = rb.position.y - chieuCaoPivot;
         return cp.point.y < duoiXe + doCaoGoBoQua;
     }
 
+    private void ThemPhapTuyenTuong(Vector3 n)
+    {
+        n.y = 0f;
+        if (n.sqrMagnitude < 0.01f) return;
+        n.Normalize();
+
+        if (soTuong < phapTuyenTuong.Length)
+            phapTuyenTuong[soTuong++] = n;
+    }
+
     private void GhiNhanTuong(Collision c)
     {
-        if (LaNuoc(c.gameObject)) return;
+        if (LaNuoc(c.collider)) return;
 
         for (int i = 0; i < c.contactCount; i++)
         {
             ContactPoint cp = c.GetContact(i);
-            Vector3 n = cp.normal;
-            if (n.y > 0.5f) continue;
+            // Tường dốc trên ~75 độ mới tính là tường chặn
+            if (cp.normal.y > 0.25f) continue;
             if (LaGoThap(cp)) continue;
+            if (XeNamTrenVat(cp.otherCollider)) continue;
 
-            n.y = 0f;
-            if (n.sqrMagnitude < 0.01f) continue;
-            n.Normalize();
-
-            if (soTuong < phapTuyenTuong.Length)
-                phapTuyenTuong[soTuong++] = n;
+            ThemPhapTuyenTuong(cp.normal);
         }
+    }
+
+    // Chân xe đã cao hơn đỉnh vật cản => đang nhảy qua nó: không coi là tường, không quét chặn
+    private bool XeNamTrenVat(Collider c)
+    {
+        if (c == null) return false;
+
+        float chanXe = rb.position.y - chieuCaoPivot;
+        return c.bounds.max.y <= chanXe + doCaoVuotVatCan;
     }
 
     private Vector3 TruVaoTuong(Vector3 v)
@@ -509,8 +694,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
     private void GhiLogNeuBiChan(Collision c)
     {
-        if (!ghiLogVaCham || Time.time - thoiDiemLogChan < 0.5f) return;
-        if (tocDoDangChay < 5f || LaNuoc(c.gameObject)) return;
+        if (!ghiLogChanDoan) return;
+        if (Time.time - thoiDiemLogChan < 0.5f) return;
+        if (tocDoDangChay < 5f || LaNuoc(c.collider)) return;
 
         for (int i = 0; i < c.contactCount; i++)
         {
@@ -528,19 +714,22 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     {
         if (!taoMaterialKhongMaSat) return;
 
-        PhysicsMaterial mat = new PhysicsMaterial("ScooterRuntime")
+        if (matKhongMaSat == null)
         {
-            bounciness = 0f,
-            dynamicFriction = 0f,
-            staticFriction = 0f,
-            frictionCombine = PhysicsMaterialCombine.Minimum,
-            bounceCombine = PhysicsMaterialCombine.Minimum
-        };
+            matKhongMaSat = new PhysicsMaterial("ScooterRuntime")
+            {
+                bounciness = 0f,
+                dynamicFriction = 0f,
+                staticFriction = 0f,
+                frictionCombine = PhysicsMaterialCombine.Minimum,
+                bounceCombine = PhysicsMaterialCombine.Minimum
+            };
+        }
 
         foreach (Collider c in tatCaColliderXe)
         {
             if (c != null && !c.isTrigger)
-                c.sharedMaterial = mat;
+                c.sharedMaterial = matKhongMaSat;
         }
     }
 
@@ -565,34 +754,50 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         }
     }
 
-    private void BoQuaVatCanNho()
+    // Quét từng đợt SO_COLLIDER_MOI_DOT collider mỗi frame (trước đây quét hết trong 1 frame gây khựng lúc vào trận)
+    private IEnumerator BoQuaVatCanNhoTheoDot()
     {
-        if (tuKhoaVat.Length == 0) return;
+        if (tuKhoaVat.Length == 0) yield break;
 
-        foreach (Collider vat in FindObjectsByType<Collider>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        Collider[] tatCa = FindObjectsByType<Collider>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        int dem = 0;
+
+        for (int i = 0; i < tatCa.Length; i++)
         {
-            if (!ColliderDungDuoc(vat) || vat.isTrigger) continue;
-            if (vat.transform.IsChildOf(transform)) continue;
-            if (vat.GetComponentInParent<Rigidbody>() != null) continue;
+            XuLyBoQuaVatCanNho(tatCa[i]);
 
-            string tenRieng = vat.gameObject.name.ToLower();
-            if (tenRieng.Contains("road") || tenRieng.Contains("sea") || tenRieng.Contains("water"))
-                continue;
-
-            bool khop = false;
-            for (Transform t = vat.transform; t != null && !khop; t = t.parent)
+            if (++dem >= SO_COLLIDER_MOI_DOT)
             {
-                string ten = t.name.ToLower();
-                if (ten.Contains("road")) break;
-
-                foreach (string k in tuKhoaVat)
-                {
-                    if (KhopDauTu(ten, k)) { khop = true; break; }
-                }
+                dem = 0;
+                yield return null;
             }
-
-            if (khop) IgnoreVoiXe(vat);
         }
+    }
+
+    private void XuLyBoQuaVatCanNho(Collider vat)
+    {
+        if (!ColliderDungDuoc(vat) || vat.isTrigger) return;
+        if (vat.transform.IsChildOf(transform)) return;
+        if (vat.GetComponentInParent<Rigidbody>() != null) return;
+        if (LaVatCanCung(vat)) return;
+
+        string tenRieng = vat.gameObject.name.ToLower();
+        if (tenRieng.Contains("road") || tenRieng.Contains("sea") || tenRieng.Contains("water"))
+            return;
+
+        bool khop = false;
+        for (Transform t = vat.transform; t != null && !khop; t = t.parent)
+        {
+            string ten = t.name.ToLower();
+            if (ten.Contains("road")) break;
+
+            foreach (string k in tuKhoaVat)
+            {
+                if (KhopDauTu(ten, k)) { khop = true; break; }
+            }
+        }
+
+        if (khop) IgnoreVoiXe(vat);
     }
 
     private void XuyenMatDuong()
@@ -602,6 +807,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
             if (!ColliderDungDuoc(vat) || vat.isTrigger) continue;
             if (vat.transform.IsChildOf(transform)) continue;
             if (vat.attachedRigidbody != null) continue;
+            if (LaVatCanCung(vat)) continue;
 
             string ten = vat.gameObject.name.ToLower();
             if (ten.Contains("road_") || ten.Contains("platform") || ten.Contains("ramp"))
@@ -615,15 +821,23 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         if (cacheMatDuong.TryGetValue(c, out bool kq)) return kq;
 
         bool ok = true;
-        for (Transform t = c.transform; t != null && ok; t = t.parent)
-        {
-            string ten = t.name.ToLower();
-            if (ten.Contains("sea_plane") || ten.Contains("water")) { ok = false; break; }
-            if (ten.Contains("road")) { ok = true; break; }
 
-            foreach (string k in tuKhoaVat)
+        if (LaVatCanCung(c))
+        {
+            ok = false;
+        }
+        else
+        {
+            for (Transform t = c.transform; t != null && ok; t = t.parent)
             {
-                if (KhopDauTu(ten, k)) { ok = false; break; }
+                string ten = t.name.ToLower();
+                if (ten.Contains("sea_plane") || ten.Contains("water")) { ok = false; break; }
+                if (ten.Contains("road")) { ok = true; break; }
+
+                foreach (string k in tuKhoaVat)
+                {
+                    if (KhopDauTu(ten, k)) { ok = false; break; }
+                }
             }
         }
 
@@ -668,23 +882,136 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         return co;
     }
 
+    private void QuetVatCanCungPhiaTruoc(Vector3 huongTien, float dt)
+    {
+        if (!quetChanTruoc || !vatCanLaVatCung) return;
+        if (Mathf.Abs(tocDoDangChay) < 0.5f) return;
+
+        Vector3 huong = huongTien * Mathf.Sign(tocDoDangChay);
+        huong.y = 0f;
+        if (huong.sqrMagnitude < 0.0001f) return;
+        huong.Normalize();
+
+        float quang = Mathf.Abs(tocDoDangChay) * dt + 0.15f;
+        Vector3 goc = rb.position + Vector3.up * doCaoQuet;
+
+        int n = Physics.SphereCastNonAlloc(
+            goc, banKinhQuet, huong, bufferRay, quang, ~0,
+            QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < n; i++)
+        {
+            RaycastHit h = bufferRay[i];
+            Collider c = h.collider;
+
+            if (c == null || c.transform.IsChildOf(transform)) continue;
+            if (!LaVatCanCung(c)) continue;
+            if (XeNamTrenVat(c)) continue;
+
+            Vector3 phap = h.normal;
+            if (phap.sqrMagnitude < 0.0001f) phap = -huong;
+
+            ThemPhapTuyenTuong(phap);
+
+            Vector3 pn = phap; pn.y = 0f;
+            if (pn.sqrMagnitude > 0.01f && Vector3.Dot(huong, -pn.normalized) > 0.9f)
+                tocDoDangChay = 0f;
+        }
+    }
+
+    private bool CoMatDuongTai(Vector3 diem)
+    {
+        Vector3 goc = diem + Vector3.up * doCaoTiaRay;
+
+        int n = Physics.RaycastNonAlloc(
+            goc, Vector3.down, bufferMep,
+            doCaoTiaRay + khoangBamDat + 0.6f, ~0,
+            QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < n; i++)
+        {
+            Collider c = bufferMep[i].collider;
+            if (c == null || c.attachedRigidbody != null) continue;
+            if (bufferMep[i].normal.y < 0.7f) continue;
+            if (LaMatDuong(c)) return true;
+        }
+        return false;
+    }
+
+    private void ChanMepDuong(Vector3 huongTien)
+    {
+        if (!chanMepDuong || !dangBamDat) return;
+        if (Mathf.Abs(tocDoDangChay) < 0.5f) return;
+
+        Vector3 huong = huongTien * Mathf.Sign(tocDoDangChay);
+        huong.y = 0f;
+        if (huong.sqrMagnitude < 0.0001f) return;
+        huong.Normalize();
+
+        Vector3 ngang = Vector3.Cross(Vector3.up, huong);
+        Vector3 vt = rb.position;
+        float nhin = khoangDoMepTruoc + Mathf.Abs(tocDoDangChay) * Time.fixedDeltaTime * 2f;
+
+        if (!CoMatDuongTai(vt + huong * nhin)) ThemPhapTuyenTuong(-huong);
+
+        Vector3 giua = vt + huong * 0.3f;
+        if (!CoMatDuongTai(giua + ngang * khoangDoMepNgang)) ThemPhapTuyenTuong(-ngang);
+        if (!CoMatDuongTai(giua - ngang * khoangDoMepNgang)) ThemPhapTuyenTuong(ngang);
+    }
+
+    private void GhiLogMatDat(bool coMat, float loi)
+    {
+        if (!ghiLogChanDoan || Time.time - thoiDiemLogMat < 0.5f) return;
+        thoiDiemLogMat = Time.time;
+
+        int n = Physics.RaycastNonAlloc(
+            rb.position + Vector3.up * doCaoTiaRay, Vector3.down, bufferMep, 6f, ~0,
+            QueryTriggerInteraction.Ignore);
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < n; i++)
+        {
+            RaycastHit h = bufferMep[i];
+            if (h.collider == null) continue;
+            sb.Append(DuongDan(h.collider.transform))
+              .Append(" (y=").Append(h.point.y.ToString("F2"))
+              .Append(", ny=").Append(h.normal.y.ToString("F2"))
+              .Append(", matDuong=").Append(LaMatDuong(h.collider)).Append("); ");
+        }
+
+        Debug.LogWarning($"[XE MẤT ĐƯỜNG] pos={rb.position} tốc độ={tocDoDangChay:F1} coMat={coMat} loi={loi:F2} soTuong={soTuong} | dưới chân: {sb}");
+    }
+
+    // Không GetComponent mỗi frame (trong Editor GetComponent trả null còn sinh rác): chỉ tra lại khi ô được chọn đổi
     private static bool DangGoChu()
     {
+        if (MultiplayerAllInOne.DangGoChat) return true;
+
         EventSystem es = EventSystem.current;
-        if (es == null || es.currentSelectedGameObject == null) return false;
+        if (es == null) return false;
 
         GameObject sel = es.currentSelectedGameObject;
+        if (sel == null)
+        {
+            selCache = null;
+            selInput = null;
+            selTmp = null;
+            return false;
+        }
 
-        InputField inp = sel.GetComponent<InputField>();
-        if (inp != null && inp.isFocused) return true;
+        if (sel != selCache)
+        {
+            selCache = sel;
+            sel.TryGetComponent(out selInput);
+            sel.TryGetComponent(out selTmp);
+        }
 
-        TMP_InputField tmp = sel.GetComponent<TMP_InputField>();
-        return tmp != null && tmp.isFocused;
+        return (selInput != null && selInput.isFocused) || (selTmp != null && selTmp.isFocused);
     }
 
     private bool DuocPhepDieuKhien()
     {
-        GameManager gm = GameManager.Instance;
+        GameManager gm = LayGM();
         if (gm != null && (!gm.daBatDauDua || gm.daBiLoai || gm.ketThucGame || gm.winGame)) return false;
         return !DangGoChu();
     }
@@ -699,7 +1026,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
             dangLui = false;
             dauVaoRe = 0f;
 
-            GameManager gm = GameManager.Instance;
+            GameManager gm = LayGM();
             if (gm != null && (gm.ketThucGame || gm.winGame || gm.daBiLoai))
                 xeDangBat = false;
             return;
@@ -727,9 +1054,8 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     {
         if (!LaXeCuaMinh || rb == null || rb.isKinematic) return;
 
-        if (GameManager.Instance != null &&
-            GameManager.Instance.daBatDauDua &&
-            rb.position.y < docaoRoiNuoc)
+        GameManager gm = LayGM();
+        if (gm != null && gm.daBatDauDua && rb.position.y < docaoRoiNuoc)
         {
             HoiSinh();
             return;
@@ -745,6 +1071,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         dangBamDat = coMat && !vuaNhay;
 
+        if (ghiLogChanDoan && daBamDatTruoc && !dangBamDat && !vuaNhay) GhiLogMatDat(coMat, loi);
+        daBamDatTruoc = dangBamDat;
+
         phapTuyenDat = coMat
             ? Vector3.Slerp(phapTuyenDat, phapTuyenRay, doMuotPhapTuyen).normalized
             : Vector3.Slerp(phapTuyenDat, Vector3.up, 0.2f).normalized;
@@ -754,13 +1083,21 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         {
             thoiDiemChamDat = Time.time;
             if (loi < -0.02f)
-            {
                 suaCaoDo = Mathf.Clamp(loi * heSoHutDat, -toiDaHutDat, 0f);
-            }
         }
 
         rb.useGravity = !dangBamDat;
         rb.angularVelocity = Vector3.zero;
+
+        // Rơi nhanh hơn lúc đi xuống để cú nhảy gọn và vào đường nhanh sau khi qua vật cản
+        if (!dangBamDat && heSoRoiNhanh > 1f && rb.linearVelocity.y < 0f)
+            rb.AddForce(Physics.gravity * (heSoRoiNhanh - 1f), ForceMode.Acceleration);
+
+        if (!dangBamDat && !vuaNhay && rb.linearVelocity.y > vanTocLenToiDa)
+        {
+            Vector3 vv = rb.linearVelocity;
+            rb.linearVelocity = new Vector3(vv.x, vanTocLenToiDa, vv.z);
+        }
 
         DiChuyenXe();
         ReXe();
@@ -794,6 +1131,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         tocDoDangChay = Mathf.Lerp(tocDoDangChay, tocDoMucTieu, Mathf.Clamp01(giaToc * dt));
 
+        QuetVatCanCungPhiaTruoc(huongTien, dt);
+        ChanMepDuong(huongTien);
+
         if (dangBamDat)
         {
             Vector3 huongDoc = Vector3.ProjectOnPlane(huongTien, phapTuyenDat).normalized;
@@ -801,7 +1141,8 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
             huongDoc.Normalize();
 
             Vector3 v = TruVaoTuong(huongDoc * tocDoDangChay);
-            float vY = Mathf.Clamp(suaCaoDo, -3f, 0f);
+            // Cho phép giữ lại vận tốc hướng lên (vHienTai.y) nếu xe đang trèo qua gờ
+            float vY = (vHienTai.y > 0.05f) ? Mathf.Min(vHienTai.y, 3f) : Mathf.Clamp(suaCaoDo, -3f, 0f);
             rb.linearVelocity = new Vector3(v.x, vY, v.z);
         }
         else

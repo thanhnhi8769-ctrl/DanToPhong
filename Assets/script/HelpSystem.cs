@@ -1,3 +1,4 @@
+using Photon.Pun;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -8,15 +9,18 @@ public class HelpSystem : MonoBehaviour
 {
     private const float HELP_LEFT = 28f;
     private const float HELP_BOTTOM = 28f;
-    private const float HELP_GAME_BOTTOM = 88f;
     private const float HELP_SIZE = 54f;
 
-    // Tông màu xám bạc chủ đạo
-    private static readonly Color MAU_CHU_DAO = new Color(0.75f, 0.79f, 0.84f, 1f);
-    private static readonly Color MAU_NEN_KHUNG = new Color(0.11f, 0.12f, 0.14f, 0.98f);
-    private static readonly Color MAU_NUT_XAM = new Color(0.28f, 0.31f, 0.36f, 0.96f);
-    private static readonly Color MAU_CHU_NOI_DUNG = new Color(0.92f, 0.93f, 0.95f, 1f);
-    private const string HEX_SO_THU_TU = "#B8C0C8";
+    // Nút "?" CỐ ĐỊNH ở góc trái dưới của MỌI scene.
+    // MIC / CHAT / khung chat của MultiplayerAllInOne nằm bên phải nút này (từ x = 96).
+
+    // Bảng màu tối tương phản cao: nền đậm, chữ trắng rõ nét, số thứ tự vàng
+    private static readonly Color MAU_CHU_DAO = new Color(0.95f, 0.97f, 1f, 1f);
+    private static readonly Color MAU_VIEN_KHUNG = new Color(0.35f, 0.41f, 0.52f, 1f);
+    private static readonly Color MAU_NEN_KHUNG = new Color(0.08f, 0.10f, 0.14f, 0.99f);
+    private static readonly Color MAU_NUT_XAM = new Color(0.22f, 0.26f, 0.34f, 1f);
+    private static readonly Color MAU_CHU_NOI_DUNG = new Color(1f, 1f, 1f, 1f);
+    private const string HEX_SO_THU_TU = "#FFC83D";
 
     private class NoiDungHelp
     {
@@ -25,19 +29,49 @@ public class HelpSystem : MonoBehaviour
         public bool laGame;
     }
 
-    private static NoiDungHelp LayNoiDung(string tenScene)
+    // =========================================================================
+    // NỘI DUNG THEO SCENE + CHẾ ĐỘ (1 NGƯỜI / NHIỀU NGƯỜI)
+    // =========================================================================
+    private static NoiDungHelp LayNoiDung(string tenScene, bool nhieuNguoi)
     {
         string t = tenScene.ToLowerInvariant();
 
         if (t.Contains("game"))
         {
+            if (nhieuNguoi)
+            {
+                return new NoiDungHelp
+                {
+                    laGame = true,
+                    tieuDe = "IN-GAME GUIDE - MULTIPLAYER",
+                    cacBuoc = new[]
+                    {
+                        "<b>STARTING:</b> Press <b>START RACE</b> (or <b>Enter</b>). The race begins once <b>every player</b> in the room is ready.",
+
+                        "<b>CONTROLS:</b> <b>W / Up Arrow</b> accelerate; <b>S / Down Arrow</b> brake or reverse; <b>A / Left Arrow</b> turn left; <b>D / Right Arrow</b> turn right; <b>Space</b> jump.",
+
+                        "<b>CHECKPOINTS:</b> Passing each checkpoint adds <b>+5 seconds</b> to your own timer.",
+
+                        "<b>WATER HAZARD:</b> Falling into water removes <b>5 seconds</b> and respawns you back at the start.",
+
+                        "<b>HOW TO WIN:</b> Be the <b>first to cross the finish line</b>, or be the <b>last racer left</b> in the race. The winner earns <b>+50 coins</b>. Use coins in the <b>SHOP</b> to unlock new scooter colors.",
+
+                        "<b>ELIMINATION & SPECTATING:</b> When your timer reaches zero you are eliminated. Use <b>Q / E</b> or <b>Left / Right Arrow</b> to spectate other racers until the race ends.",
+
+                        "<b>CHAT & VOICE:</b> Use the <b>CHAT</b> and <b>MIC</b> buttons at the bottom-left to talk with other racers. Press <b>Enter</b> to start typing.",
+
+                        "<b>SHORTCUTS:</b> <b>M</b> toggles background music, <b>F1</b> opens or closes this guide, <b>ESC</b> opens the menu (the race keeps running for everyone)."
+                    }
+                };
+            }
+
             return new NoiDungHelp
             {
                 laGame = true,
-                tieuDe = "IN-GAME GUIDE",
+                tieuDe = "IN-GAME GUIDE - SOLO",
                 cacBuoc = new[]
                 {
-                    "<b>STARTING:</b> Press <b>START RACE</b>. In multiplayer, all players must be ready before the race begins.",
+                    "<b>STARTING:</b> Press <b>START RACE</b> (or <b>Enter</b>) to begin. Your timer only runs once the race has started.",
 
                     "<b>CONTROLS:</b> <b>W / Up Arrow</b> accelerate; <b>S / Down Arrow</b> brake or reverse; <b>A / Left Arrow</b> turn left; <b>D / Right Arrow</b> turn right; <b>Space</b> jump.",
 
@@ -45,11 +79,11 @@ public class HelpSystem : MonoBehaviour
 
                     "<b>WATER HAZARD:</b> Falling into water removes <b>5 seconds</b> and respawns you back at the start.",
 
-                    "<b>COINS & REWARDS:</b> Win a multiplayer race to earn <b>+50 coins</b>, or win a solo race to earn <b>+10 coins</b>. Use coins in the <b>SHOP</b> to unlock new scooter colors.",
+                    "<b>HOW TO WIN:</b> Cross the finish line before your timer reaches zero to earn <b>+10 coins</b>. Use coins in the <b>SHOP</b> to unlock new scooter colors.",
 
-                    "<b>ELIMINATION & SPECTATING:</b> When your timer reaches zero, you are eliminated. In multiplayer, use <b>Q / E</b> or <b>Left / Right Arrow</b> to spectate other racers.",
+                    "<b>TIME'S UP:</b> If your timer reaches zero, the race ends and you can restart or return to the menu.",
 
-                    "<b>SHORTCUTS:</b> Press <b>M</b> to toggle background music, <b>F1</b> to open or close this guide, and <b>ESC</b> to open the menu."
+                    "<b>SHORTCUTS:</b> <b>M</b> toggles background music, <b>F1</b> opens or closes this guide, <b>ESC</b> pauses the game."
                 }
             };
         }
@@ -76,6 +110,24 @@ public class HelpSystem : MonoBehaviour
 
         if (t.Contains("select"))
         {
+            if (nhieuNguoi)
+            {
+                return new NoiDungHelp
+                {
+                    tieuDe = "VEHICLE & MAP SELECTION",
+                    cacBuoc = new[]
+                    {
+                        "Use the <b>LEFT / RIGHT ARROW</b> buttons or <b>A / D</b> keys to choose among your unlocked scooters. Each player picks their own scooter color.",
+
+                        "Only scooters marked <b>OWNED - READY</b> can be confirmed. Locked scooters can be purchased in the <b>SHOP</b>.",
+
+                        "Only the <b>ROOM HOST</b> can change the race map. Everyone else races on the map the host selects.",
+
+                        "Press <b>CONFIRM</b> (or <b>Enter</b>) to save your selection and proceed to the lobby. Press <b>ESC</b> to return to the menu."
+                    }
+                };
+            }
+
             return new NoiDungHelp
             {
                 tieuDe = "VEHICLE & MAP SELECTION",
@@ -85,7 +137,7 @@ public class HelpSystem : MonoBehaviour
 
                     "Only scooters marked <b>OWNED - READY</b> can be confirmed. Locked scooters can be purchased in the <b>SHOP</b>.",
 
-                    "The <b>ROOM HOST</b> selects the race map using the arrows below the map preview.",
+                    "Choose the race map with the arrows below the map preview.",
 
                     "Press <b>CONFIRM</b> (or <b>Enter</b>) to save your selection and proceed to the lobby. Press <b>ESC</b> to return to the menu."
                 }
@@ -94,6 +146,24 @@ public class HelpSystem : MonoBehaviour
 
         if (t.Contains("lobby"))
         {
+            if (nhieuNguoi)
+            {
+                return new NoiDungHelp
+                {
+                    tieuDe = "LOBBY GUIDE - MULTIPLAYER",
+                    cacBuoc = new[]
+                    {
+                        "Share the <b>5-character room code</b> with friends. Use <b>COPY CODE</b> anytime to copy it again (up to 4 players per room).",
+
+                        "Friends enter the code and press <b>JOIN ROOM</b> to join your lobby.",
+
+                        "The <b>ROOM HOST</b> presses <b>START GAME</b> to load the race for everyone.",
+
+                        "In the race, every player must press <b>START RACE</b> before it begins. Press <b>EXIT</b> or <b>ESC</b> to leave the room."
+                    }
+                };
+            }
+
             return new NoiDungHelp
             {
                 tieuDe = "LOBBY GUIDE",
@@ -105,7 +175,7 @@ public class HelpSystem : MonoBehaviour
 
                     "Use <b>COPY CODE</b> anytime to copy the current room code again.",
 
-                    "The <b>ROOM HOST</b> presses <b>START GAME</b> to launch the race for everyone. Press <b>EXIT</b> or <b>ESC</b> to leave."
+                    "Press <b>START GAME</b> to load the race. If nobody else has joined, you will race solo. Press <b>EXIT</b> or <b>ESC</b> to leave."
                 }
             };
         }
@@ -117,15 +187,15 @@ public class HelpSystem : MonoBehaviour
                 tieuDe = "HOW TO PLAY",
                 cacBuoc = new[]
                 {
-                    "Press <b>PLAY</b> to pick your scooter and map, then enter the multiplayer lobby.",
+                    "Press <b>PLAY</b> to pick your scooter and map, then enter the lobby.",
 
-                    "Create a room or join with a friend's 5-character room code to race together.",
+                    "Race <b>solo</b>, or create a room / join with a friend's 5-character room code to race with up to 4 players.",
 
                     "Open the <b>SHOP</b> to spend earned coins on 25 custom-painted scooters.",
 
                     "During a race, checkpoints add <b>+5 seconds</b> while touching water removes <b>5 seconds</b>.",
 
-                    "Cross the finish line first or be the last racer remaining to win (+50 coins multiplayer / +10 coins solo)."
+                    "Solo: cross the finish line before time runs out (<b>+10 coins</b>). Multiplayer: cross the finish line first or be the last racer remaining (<b>+50 coins</b>)."
                 }
             };
         }
@@ -142,12 +212,56 @@ public class HelpSystem : MonoBehaviour
         };
     }
 
+    // Trong scene game: lấy đúng chế độ của GameManager. Scene khác: dựa vào phòng Photon hiện tại.
+    private static bool LaNhieuNguoi()
+    {
+        GameManager gm = GameManager.Instance;
+        if (gm != null) return gm.CheDoNhieuNguoi;
+
+        if (!PhotonNetwork.IsConnected || !PhotonNetwork.InRoom) return false;
+
+        int soNguoi = PhotonNetwork.CurrentRoom.PlayerCount;
+        if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue("SoNguoi", out object v) && v != null)
+            soNguoi = Mathf.Max(soNguoi, System.Convert.ToInt32(v));
+
+        return soNguoi > 1;
+    }
+
+    private static string DungChuoiNoiDung(string[] cacBuoc)
+    {
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+        for (int i = 0; i < cacBuoc.Length; i++)
+        {
+            sb.Append("<b><color=").Append(HEX_SO_THU_TU).Append(">")
+                .Append(i + 1)
+                .Append(".</color></b>  ")
+                .Append(cacBuoc[i]);
+
+            if (i < cacBuoc.Length - 1)
+                sb.Append("\n");
+        }
+
+        return sb.ToString();
+    }
+
     private static bool daDangKy = false;
     private static Sprite spriteTron;
     private static Sprite spriteBo;
 
+    private static HelpSystem hienTai;
+
     private GameObject panel;
     private bool laGame = false;
+    private string tenScene;
+
+    private TMP_Text tieuDeText;
+    private TMP_Text noiDungText;
+    private RectTransform khungRect;
+    private RectTransform nutHelpRect;
+
+    private float thoiDiemTao;
+    private bool daTaoNutXemThem = false;
 
     private CursorLockMode lockCu;
     private bool hienCu;
@@ -168,7 +282,7 @@ public class HelpSystem : MonoBehaviour
 
     private static void TaoChoScene(Scene scene)
     {
-        NoiDungHelp nd = LayNoiDung(scene.name);
+        NoiDungHelp nd = LayNoiDung(scene.name, false);
         if (nd == null) return;
 
         foreach (HelpSystem h in FindObjectsByType<HelpSystem>(
@@ -181,7 +295,7 @@ public class HelpSystem : MonoBehaviour
         GameObject go = new GameObject("HelpSystem");
         SceneManager.MoveGameObjectToScene(go, scene);
 
-        go.AddComponent<HelpSystem>().XayDung(nd);
+        go.AddComponent<HelpSystem>().XayDung(scene.name, nd);
     }
 
     private void Update()
@@ -195,6 +309,20 @@ public class HelpSystem : MonoBehaviour
     private void OnDisable()
     {
         KhoiPhucChuot();
+    }
+
+    private void OnDestroy()
+    {
+        if (hienTai == this) hienTai = null;
+    }
+
+    // GameManager gọi khi bấm ESC: nếu bảng F1 đang mở thì đóng nó và báo đã xử lý xong phím ESC
+    public static bool DongNeuDangMo()
+    {
+        if (hienTai == null || hienTai.panel == null || !hienTai.panel.activeSelf) return false;
+
+        hienTai.Dong();
+        return true;
     }
 
     private void Chuyen()
@@ -212,6 +340,9 @@ public class HelpSystem : MonoBehaviour
     private void DatHienThi(bool bat)
     {
         if (panel == null) return;
+
+        // Nội dung được dựng lại mỗi lần mở để đúng với chế độ 1 người / nhiều người lúc đó
+        if (bat) LamMoiNoiDung();
 
         panel.SetActive(bat);
 
@@ -244,9 +375,39 @@ public class HelpSystem : MonoBehaviour
         Cursor.visible = hienCu;
     }
 
-    private void XayDung(NoiDungHelp nd)
+    private void LamMoiNoiDung()
     {
+        NoiDungHelp nd = LayNoiDung(tenScene, LaNhieuNguoi());
+        if (nd == null) return;
+
         laGame = nd.laGame;
+
+        if (tieuDeText != null) tieuDeText.text = nd.tieuDe;
+        if (noiDungText != null)
+        {
+            noiDungText.text = DungChuoiNoiDung(nd.cacBuoc);
+            noiDungText.color = MAU_CHU_NOI_DUNG;
+            noiDungText.lineSpacing = 10f;
+            noiDungText.paragraphSpacing = nd.laGame ? 16f : 24f;
+        }
+
+        if (khungRect != null)
+            khungRect.sizeDelta = new Vector2(1080f, nd.laGame ? 780f : 660f);
+    }
+
+    private void CanViTriNutHelp()
+    {
+        if (nutHelpRect == null) return;
+
+        nutHelpRect.anchoredPosition = new Vector2(HELP_LEFT, HELP_BOTTOM);
+    }
+
+    private void XayDung(string ten, NoiDungHelp nd)
+    {
+        hienTai = this;
+        tenScene = ten;
+        laGame = nd.laGame;
+        thoiDiemTao = Time.unscaledTime;
         DamBaoEventSystem();
 
         if (spriteTron == null)
@@ -267,14 +428,15 @@ public class HelpSystem : MonoBehaviour
 
         Canvas canvas = canvasObj.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 500;
+        // Cao hơn mọi canvas của scene (kể cả khung chat = 5000) để bảng hướng dẫn / nút "?" không bao giờ bị che
+        canvas.sortingOrder = 6000;
 
         CanvasScaler scaler = canvasObj.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
 
-        // NÚT HELP (?) - Tông màu xám
+        // NÚT HELP (?)
         Image nutImg = TaoAnh(
             "NutHelp",
             canvasObj.transform,
@@ -287,13 +449,9 @@ public class HelpSystem : MonoBehaviour
         RectTransform nr = nutImg.rectTransform;
         nr.anchorMin = nr.anchorMax = Vector2.zero;
         nr.pivot = Vector2.zero;
-
-        nr.anchoredPosition = new Vector2(
-            HELP_LEFT,
-            nd.laGame ? HELP_GAME_BOTTOM : HELP_BOTTOM
-        );
-
         nr.sizeDelta = new Vector2(HELP_SIZE, HELP_SIZE);
+        nutHelpRect = nr;
+        CanViTriNutHelp();
 
         Button nut = nutImg.gameObject.AddComponent<Button>();
         nut.targetGraphic = nutImg;
@@ -324,7 +482,7 @@ public class HelpSystem : MonoBehaviour
         Image nen = TaoAnh(
             "NenMo",
             panel.transform,
-            new Color(0f, 0f, 0f, 0.72f),
+            new Color(0f, 0f, 0f, 0.78f),
             null
         );
 
@@ -335,6 +493,22 @@ public class HelpSystem : MonoBehaviour
         nenBtn.targetGraphic = nen;
         nenBtn.transition = Selectable.Transition.None;
         nenBtn.onClick.AddListener(Dong);
+
+        Image vien = TaoAnh(
+            "Vien",
+            panel.transform,
+            MAU_VIEN_KHUNG,
+            spriteBo
+        );
+
+        RectTransform vr = vien.rectTransform;
+        vr.anchorMin = vr.anchorMax = new Vector2(0.5f, 0.5f);
+        vr.pivot = new Vector2(0.5f, 0.5f);
+        vr.anchoredPosition = Vector2.zero;
+        vr.sizeDelta = new Vector2(
+            1086f,
+            (nd.laGame ? 780f : 660f) + 6f
+        );
 
         Image khung = TaoAnh(
             "Khung",
@@ -350,79 +524,59 @@ public class HelpSystem : MonoBehaviour
         kr.pivot = new Vector2(0.5f, 0.5f);
         kr.anchoredPosition = Vector2.zero;
         kr.sizeDelta = new Vector2(
-            1040f,
-            nd.laGame ? 760f : 640f
+            1080f,
+            nd.laGame ? 780f : 660f
         );
-
-        Image vien = TaoAnh(
-            "Vien",
-            khung.transform,
-            MAU_CHU_DAO,
-            spriteBo
-        );
-
-        vien.transform.SetAsFirstSibling();
-        Giang(vien.rectTransform, -3f, -3f, -3f, -3f);
+        khungRect = kr;
 
         TMP_Text tieuDe = TaoChu(
             "TieuDe",
             khung.transform,
-            46f,
+            44f,
             MAU_CHU_DAO,
             TextAlignmentOptions.Center
         );
 
         tieuDe.text = nd.tieuDe;
+        tieuDeText = tieuDe;
 
         RectTransform tr = tieuDe.rectTransform;
         tr.anchorMin = new Vector2(0f, 1f);
         tr.anchorMax = new Vector2(1f, 1f);
         tr.pivot = new Vector2(0.5f, 1f);
-        tr.anchoredPosition = new Vector2(0f, -28f);
-        tr.sizeDelta = new Vector2(-80f, 70f);
+        tr.anchoredPosition = new Vector2(0f, -24f);
+        tr.sizeDelta = new Vector2(-80f, 64f);
 
         tieuDe.enableAutoSizing = true;
         tieuDe.fontSizeMin = 24f;
-        tieuDe.fontSizeMax = 46f;
+        tieuDe.fontSizeMax = 44f;
         tieuDe.textWrappingMode = TextWrappingModes.NoWrap;
-
-        System.Text.StringBuilder sb =
-            new System.Text.StringBuilder();
-
-        for (int i = 0; i < nd.cacBuoc.Length; i++)
-        {
-            sb.Append($"<b><color={HEX_SO_THU_TU}>")
-                .Append(i + 1)
-                .Append(".</color></b>  ")
-                .Append(nd.cacBuoc[i]);
-
-            if (i < nd.cacBuoc.Length - 1)
-                sb.Append("\n");
-        }
 
         TMP_Text noiDung = TaoChu(
             "NoiDung",
             khung.transform,
-            30f,
+            28f,
             MAU_CHU_NOI_DUNG,
             TextAlignmentOptions.TopLeft
         );
 
         noiDung.fontStyle = FontStyles.Normal;
-        noiDung.text = sb.ToString();
+        noiDung.text = DungChuoiNoiDung(nd.cacBuoc);
         noiDung.textWrappingMode = TextWrappingModes.Normal;
         noiDung.enableAutoSizing = true;
         noiDung.fontSizeMin = 18f;
-        noiDung.fontSizeMax = 30f;
-        noiDung.paragraphSpacing = nd.laGame ? 14f : 22f;
+        noiDung.fontSizeMax = 28f;
+        noiDung.lineSpacing = 10f;
+        noiDung.paragraphSpacing = nd.laGame ? 16f : 24f;
+        noiDungText = noiDung;
 
         RectTransform nrr = noiDung.rectTransform;
         nrr.anchorMin = Vector2.zero;
         nrr.anchorMax = Vector2.one;
-        nrr.offsetMin = new Vector2(60f, 120f);
-        nrr.offsetMax = new Vector2(-60f, -115f);
+        nrr.offsetMin = new Vector2(64f, 125f);
+        nrr.offsetMax = new Vector2(-64f, -105f);
 
-        // NÚT CLOSE - Tông màu xám
+        // NÚT CLOSE
         Image dongImg = TaoAnh(
             "NutDong",
             khung.transform,
@@ -435,8 +589,8 @@ public class HelpSystem : MonoBehaviour
         RectTransform dr = dongImg.rectTransform;
         dr.anchorMin = dr.anchorMax = new Vector2(0.5f, 0f);
         dr.pivot = new Vector2(0.5f, 0f);
-        dr.anchoredPosition = new Vector2(0f, 30f);
-        dr.sizeDelta = new Vector2(260f, 70f);
+        dr.anchoredPosition = new Vector2(0f, 28f);
+        dr.sizeDelta = new Vector2(260f, 68f);
 
         Button dong = dongImg.gameObject.AddComponent<Button>();
         dong.targetGraphic = dongImg;
@@ -447,7 +601,7 @@ public class HelpSystem : MonoBehaviour
         TMP_Text dongChu = TaoChu(
             "Label",
             dongImg.transform,
-            34f,
+            32f,
             MAU_CHU_NOI_DUNG,
             TextAlignmentOptions.Center
         );
@@ -456,9 +610,6 @@ public class HelpSystem : MonoBehaviour
         Giang(dongChu.rectTransform, 0f, 0f, 0f, 0f);
 
         panel.SetActive(false);
-
-        if (laGame)
-            TaoNutXemThemTutorial();
     }
 
     private void TaoNutXemThemTutorial()
@@ -469,20 +620,49 @@ public class HelpSystem : MonoBehaviour
             FindObjectsInactive.Include,
             FindObjectsSortMode.None))
         {
-            if (t != null && t.name == "TutorialPanel")
+            if (t != null && t.name == "TutorialPanel" && t.gameObject.scene == gameObject.scene)
             {
                 tutorial = t;
                 break;
             }
         }
 
-        if (tutorial == null ||
-            tutorial.Find("NutXemThemHelp") != null)
-            return;
+        if (tutorial == null) return;
+
+        // Tìm nút START RACE (cùng cách chấm điểm như GameManager)
+        RectTransform nutStart = null;
+        int diemTot = 0;
+
+        foreach (Button b in tutorial.GetComponentsInChildren<Button>(true))
+        {
+            if (b == null || b.gameObject.name == "NutXemThemHelp") continue;
+
+            int diem = 1;
+            string ten = b.gameObject.name.ToLowerInvariant();
+            if (ten == "button") diem += 20;
+            if (ten.Contains("start") || ten.Contains("begin")) diem += 30;
+
+            foreach (TMP_Text label in b.GetComponentsInChildren<TMP_Text>(true))
+            {
+                if (label == null) continue;
+                string chu = label.text.ToUpperInvariant();
+                if (chu.Contains("START") || chu.Contains("BẮT ĐẦU") || chu.Contains("WAITING"))
+                    diem += 100;
+            }
+
+            if (diem > diemTot)
+            {
+                diemTot = diem;
+                nutStart = b.transform as RectTransform;
+            }
+        }
+
+        RectTransform cha = (nutStart != null ? nutStart.parent : tutorial) as RectTransform;
+        if (cha == null) return;
 
         Image nen = TaoAnh(
             "NutXemThemHelp",
-            tutorial,
+            cha,
             MAU_NUT_XAM,
             spriteBo
         );
@@ -490,65 +670,30 @@ public class HelpSystem : MonoBehaviour
         nen.raycastTarget = true;
 
         RectTransform r = nen.rectTransform;
-        r.anchorMin = r.anchorMax = new Vector2(0f, 0f);
-        r.pivot = new Vector2(0f, 0f);
-
-        float leftEdge = 110f;
-        TMP_Text content = null;
-
-        foreach (TMP_Text txt in tutorial.GetComponentsInChildren<TMP_Text>(true))
-        {
-            if (txt != null &&
-                txt.gameObject.name.Equals(
-                    "ContentText",
-                    System.StringComparison.OrdinalIgnoreCase))
-            {
-                content = txt;
-                break;
-            }
-        }
-
-        RectTransform tutorialRect = tutorial as RectTransform;
-
-        if (content != null && tutorialRect != null)
-        {
-            RectTransform contentRect = content.rectTransform;
-            Vector3[] corners = new Vector3[4];
-
-            contentRect.GetWorldCorners(corners);
-
-            Canvas parentCanvas = tutorial.GetComponentInParent<Canvas>();
-
-            Camera uiCamera =
-                parentCanvas != null &&
-                parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay
-                    ? parentCanvas.worldCamera
-                    : null;
-
-            Vector2 screenPoint =
-                RectTransformUtility.WorldToScreenPoint(
-                    uiCamera,
-                    corners[0]
-                );
-
-            Vector2 localPoint;
-
-            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                tutorialRect,
-                screenPoint,
-                uiCamera,
-                out localPoint))
-            {
-                leftEdge = localPoint.x - tutorialRect.rect.xMin;
-            }
-        }
-
-        r.anchoredPosition = new Vector2(
-            Mathf.Max(24f, leftEdge),
-            72f
-        );
-
         r.sizeDelta = new Vector2(210f, 58f);
+
+        if (nutStart != null)
+        {
+            // Tính vị trí theo toạ độ thế giới nên đúng với mọi kiểu anchor / pivot của nút START RACE
+            Vector3[] goc = new Vector3[4];
+            nutStart.GetWorldCorners(goc);
+
+            Vector3 duoiGiua = (goc[0] + goc[3]) * 0.5f;
+            Vector3 local = cha.InverseTransformPoint(duoiGiua);
+
+            r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f);
+            r.pivot = new Vector2(0.5f, 1f);
+            r.anchoredPosition = new Vector2(
+                local.x - cha.rect.center.x,
+                local.y - cha.rect.center.y - 16f
+            );
+        }
+        else
+        {
+            r.anchorMin = r.anchorMax = new Vector2(1f, 0f);
+            r.pivot = new Vector2(1f, 0f);
+            r.anchoredPosition = new Vector2(-60f, 40f);
+        }
 
         Button btn = nen.gameObject.AddComponent<Button>();
         btn.targetGraphic = nen;
@@ -556,7 +701,7 @@ public class HelpSystem : MonoBehaviour
 
         nen.gameObject.AddComponent<ButtonFx>();
 
-        TMP_Text chu = TaoChu(
+        TMP_Text chu2 = TaoChu(
             "Label",
             nen.transform,
             23f,
@@ -564,8 +709,8 @@ public class HelpSystem : MonoBehaviour
             TextAlignmentOptions.Center
         );
 
-        chu.text = "MORE INFO";
-        Giang(chu.rectTransform, 0f, 0f, 0f, 0f);
+        chu2.text = "MORE HELP";
+        Giang(chu2.rectTransform, 0f, 0f, 0f, 0f);
 
         nen.transform.SetAsLastSibling();
     }

@@ -7,10 +7,17 @@ using TMPro;
 using UnityEngine.SceneManagement;
 using Photon.Pun;
 using Photon.Realtime;
+using ExitGames.Client.Photon;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem.UI;
+#endif
 
-public class GameManager : MonoBehaviourPunCallbacks
+public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 {
+    private const byte EVENT_READY = 88;
+    private const byte EVENT_START_RACE = 89;
+
     [Header("Thời gian")]
     public float thoiGianChoPhepVeDich = 30f;
     public float thoiGianHoiKhiQuaCheckPoint = 5f;
@@ -94,11 +101,26 @@ public class GameManager : MonoBehaviourPunCallbacks
 
     private bool cheDoNhieuNguoi = false;
 
+    // Cho các script khác (HelpSystem...) biết đang chơi 1 người hay nhiều người
+    public bool CheDoNhieuNguoi { get { return cheDoNhieuNguoi; } }
+
     private float thoiGianCoTheQuaLai = 0f;
     private float thoiGianCoTheBiTruNuoc = 0f;
     private float thoiDiemBatDauDua = -1f;
     private bool isPaused = false;
     private bool banThanDaBam = false;
+    private readonly HashSet<int> dsActorDaSanSang = new HashSet<int>();
+    private Button nutStartRaceCache;
+    private TMP_Text chuNutStartRaceCache;
+
+    // Cache trạng thái panel "sẵn sàng" để chỉ dựng lại chữ khi thật sự thay đổi
+    private int ssCuoi = -1;
+    private int tongCuoi = -1;
+    private bool ssBamCuoi = false;
+
+    // Chế độ mà nội dung TutorialPanel đang hiển thị (-1 = chưa vẽ, 0 = solo, 1 = nhiều người)
+    private int cheDoTutorialDaVe = -1;
+
     private bool daCoNguoiThang = false;
     private bool daDuyetThang = false;
     private bool daNhanThuongTranNay = false;
@@ -115,9 +137,6 @@ public class GameManager : MonoBehaviourPunCallbacks
     private Image nutNhacIcon;
     private static Sprite spriteLoaBat, spriteLoaTat;
 
-    private readonly List<GameObject> dsPanel = new List<GameObject>();
-    private GameObject panelDangHien;
-
     private GameObject hudRoot;
     private TMP_Text hudSo;
     private Image hudFillImg;
@@ -128,6 +147,7 @@ public class GameManager : MonoBehaviourPunCallbacks
     private static Sprite spriteBoTron;
     private Image hudVien;
     private float hudFlashDen = 0f;
+    private int hudGiayCuoi = -1;
 
     private GameObject bannerRoot;
     private Image bannerVach;
@@ -172,6 +192,7 @@ public class GameManager : MonoBehaviourPunCallbacks
 
     private float thoiDiemCapNhatXu = 0f;
     private float thoiDiemKiemTraPanel = 0f;
+    private float thoiDiemKiemTraEs = 0f;
     private Transform scooterCuaMinh;
     private float thoiDiemTimScooter = 0f;
 
@@ -190,6 +211,21 @@ public class GameManager : MonoBehaviourPunCallbacks
     // =========================================================================
     private void Awake()
     {
+        if (instance != null && instance != this)
+        {
+            // Nạp scene bất đồng bộ (PhotonNetwork.LoadLevel): bản GameManager của scene cũ có thể chưa kịp bị huỷ.
+            // Khi đó bản MỚI phải thay thế bản cũ, không được tự xoá mình (trước đây xoá luôn cả GameObject
+            // nên map mới mất hết bảng hướng dẫn / HUD / kết quả).
+            // Chỉ bỏ bản thừa khi có 2 GameManager trong CÙNG 1 scene, và chỉ bỏ component.
+            if (instance.gameObject.scene == gameObject.scene)
+            {
+                Debug.LogWarning("[GameManager] Có 2 GameManager trong cùng scene, bỏ bản thừa trên object: " + name);
+                enabled = false;
+                Destroy(this);
+                return;
+            }
+        }
+
         instance = this;
         Time.timeScale = 1f;
         Debug.developerConsoleVisible = false;
@@ -210,12 +246,14 @@ public class GameManager : MonoBehaviourPunCallbacks
     public override void OnEnable()
     {
         base.OnEnable();
-        instance = this;
+        if (instance == null) instance = this;
+        PhotonNetwork.AddCallbackTarget(this);
     }
 
     public override void OnDisable()
     {
         base.OnDisable();
+        PhotonNetwork.RemoveCallbackTarget(this);
         if (instance == this) instance = null;
     }
 
@@ -246,6 +284,44 @@ public class GameManager : MonoBehaviourPunCallbacks
         return null;
     }
 
+    // Tìm panel UI cấp cao nhất trong scene này có tên chứa từ khoá (kể cả đang ẩn).
+    // Dùng khi map khác đặt tên panel không đúng như map gốc.
+    private GameObject TimPanelTheoTuKhoa(params string[] tuKhoa)
+    {
+        GameObject tot = null;
+        int doSauTot = int.MaxValue;
+
+        foreach (Transform t in FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (t == null || t.gameObject.scene != gameObject.scene) continue;
+            if (!(t is RectTransform)) continue;
+
+            string n = t.name.ToLowerInvariant();
+            if (n.Contains("text") || n.Contains("button") || n.Contains("btn") || n.Contains("label")) continue;
+
+            bool khop = false;
+            for (int i = 0; i < tuKhoa.Length; i++)
+            {
+                if (n.Contains(tuKhoa[i])) { khop = true; break; }
+            }
+            if (!khop) continue;
+
+            if (t.GetComponentsInChildren<TMP_Text>(true).Length < 2) continue;
+
+            int doSau = 0;
+            for (Transform p = t.parent; p != null; p = p.parent) doSau++;
+
+            if (doSau < doSauTot)
+            {
+                doSauTot = doSau;
+                tot = t.gameObject;
+            }
+        }
+
+        return tot;
+    }
+
+    // Nội dung bảng hướng dẫn trước trận: khác nhau giữa 1 người và nhiều người
     private void CapNhatNoiDungTutorial()
     {
         if (tutorialPanelObject == null) return;
@@ -265,23 +341,45 @@ public class GameManager : MonoBehaviourPunCallbacks
                 title = t;
         }
 
-        if (title != null) title.text = "HOW TO PLAY";
+        if (title != null) title.text = cheDoNhieuNguoi ? "HOW TO PLAY - MULTIPLAYER" : "HOW TO PLAY - SOLO";
         if (content == null) return;
 
-        content.text =
+        const string CONTROLS =
             "<b><color=#B8C0C8>CONTROLS</color></b>\n" +
             "W / ↑: Accelerate     S / ↓: Brake or reverse\n" +
-            "A / ←: Turn left       D / →: Turn right       SPACE: Jump\n\n" +
-            "<b><color=#B8C0C8>OBJECTIVE</color></b>\n" +
-            "Avoid obstacles and reach the finish before time runs out.\n\n" +
+            "A / ←: Turn left       D / →: Turn right       SPACE: Jump\n\n";
+
+        const string CHECKPOINT =
             "<b><color=#B8C0C8>CHECKPOINT BONUS</color></b>\n" +
             "Pass a checkpoint: <color=#FFD633><b>+5 SECONDS</b></color>\n" +
-            "Touch water: <color=#FF7777><b>-5 SECONDS</b></color> and return to the start.\n\n" +
-            "<b><color=#B8C0C8>COINS & REWARDS</color></b>\n" +
-            "Multiplayer win: <color=#FFD633><b>+50 COINS</b></color>   |   Solo win: <color=#FFD633><b>+10 COINS</b></color>\n" +
-            "Spend coins in the SHOP to unlock 25 custom scooter colors.\n\n" +
-            "<b><color=#B8C0C8>MULTIPLAYER</color></b>\n" +
-            "Everyone must press START RACE before the race begins.";
+            "Touch water: <color=#FF7777><b>-5 SECONDS</b></color> and return to the start.\n\n";
+
+        if (cheDoNhieuNguoi)
+        {
+            content.text =
+                CONTROLS +
+                "<b><color=#B8C0C8>OBJECTIVE</color></b>\n" +
+                "Be the first to cross the finish line, or be the last racer left. When your timer hits zero you are eliminated and can spectate (Q / E).\n\n" +
+                CHECKPOINT +
+                "<b><color=#B8C0C8>COINS & REWARDS</color></b>\n" +
+                "Win the race: <color=#FFD633><b>+50 COINS</b></color>\n" +
+                "Spend coins in the SHOP to unlock 25 custom scooter colors.\n\n" +
+                "<b><color=#B8C0C8>MULTIPLAYER</color></b>\n" +
+                "Everyone must press START RACE before the race begins. ESC opens the menu but the race keeps running.";
+        }
+        else
+        {
+            content.text =
+                CONTROLS +
+                "<b><color=#B8C0C8>OBJECTIVE</color></b>\n" +
+                "Avoid obstacles and reach the finish line before time runs out.\n\n" +
+                CHECKPOINT +
+                "<b><color=#B8C0C8>COINS & REWARDS</color></b>\n" +
+                "Finish the race: <color=#FFD633><b>+10 COINS</b></color>\n" +
+                "Spend coins in the SHOP to unlock 25 custom scooter colors.\n\n" +
+                "<b><color=#B8C0C8>SOLO</color></b>\n" +
+                "Press START RACE to begin. ESC pauses the game.";
+        }
 
         content.fontStyle = FontStyles.Normal;
         content.alignment = TextAlignmentOptions.TopLeft;
@@ -290,29 +388,43 @@ public class GameManager : MonoBehaviourPunCallbacks
         content.fontSizeMin = 16f;
         content.fontSizeMax = 25f;
         content.paragraphSpacing = 5f;
+
+        cheDoTutorialDaVe = cheDoNhieuNguoi ? 1 : 0;
     }
 
-    private void DamBaoEventSystemChoTutorial()
+    private void DamBaoEventSystemDuyNhat()
     {
-        EventSystem es = EventSystem.current ?? FindFirstObjectByType<EventSystem>(FindObjectsInactive.Include);
+        EventSystem[] allEs = FindObjectsByType<EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        EventSystem es = null;
+
+        for (int i = 0; i < allEs.Length; i++)
+        {
+            if (allEs[i] == null) continue;
+            if (es == null)
+            {
+                es = allEs[i];
+                es.gameObject.SetActive(true);
+                es.enabled = true;
+            }
+            else
+            {
+                Destroy(allEs[i].gameObject);
+            }
+        }
 
         if (es == null)
         {
-            GameObject esObject = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+            GameObject esObject = new GameObject("EventSystem", typeof(EventSystem));
+#if ENABLE_INPUT_SYSTEM
+            esObject.AddComponent<InputSystemUIInputModule>();
+#else
+            esObject.AddComponent<StandaloneInputModule>();
+#endif
             es = esObject.GetComponent<EventSystem>();
         }
-        else if (!es.gameObject.activeInHierarchy)
-        {
-            es.gameObject.SetActive(true);
-        }
 
-        if (es != null)
-        {
-            BaseInputModule inputModule = es.GetComponent<BaseInputModule>();
-            if (inputModule == null)
-                inputModule = es.gameObject.AddComponent<StandaloneInputModule>();
-            inputModule.enabled = true;
-        }
+        BaseInputModule inputModule = es.GetComponent<BaseInputModule>();
+        if (inputModule != null) inputModule.enabled = true;
     }
 
     private void DamBaoRaycasterChoPanel(GameObject panel)
@@ -323,9 +435,35 @@ public class GameManager : MonoBehaviourPunCallbacks
             canvas.gameObject.AddComponent<GraphicRaycaster>();
     }
 
+    private static void KichHoatClickChoNut(Button btn)
+    {
+        if (btn == null) return;
+        btn.gameObject.SetActive(true);
+        btn.enabled = true;
+        btn.interactable = true;
+
+        foreach (Graphic g in btn.GetComponentsInChildren<Graphic>(true))
+        {
+            if (g != null) g.raycastTarget = true;
+        }
+    }
+
+    // Chỉ đưa lên cuối danh sách con khi chưa ở cuối (tránh làm bẩn canvas vô ích)
+    private static void DatCuoi(Transform t)
+    {
+        if (t == null || t.parent == null) return;
+        if (t.GetSiblingIndex() != t.parent.childCount - 1) t.SetAsLastSibling();
+    }
+
     private void KetNoiNutPausePanel()
     {
         if (pausePanelObject == null) return;
+
+        foreach (Graphic g in pausePanelObject.GetComponentsInChildren<Graphic>(true))
+        {
+            if (g != null && g.GetComponentInParent<Button>() == null)
+                g.raycastTarget = false;
+        }
 
         foreach (Button button in pausePanelObject.GetComponentsInChildren<Button>(true))
         {
@@ -337,16 +475,16 @@ public class GameManager : MonoBehaviourPunCallbacks
 
             if (key.Contains("resume") || key.Contains("continue") || key.Contains("back to game"))
             {
-                button.onClick.RemoveListener(ResumeGame);
+                button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(ResumeGame);
-                button.interactable = true;
+                KichHoatClickChoNut(button);
             }
             else if (key.Contains("main menu") || key.Contains("back to menu") ||
                      key.Contains("quit") || key.Contains("exit") || key.Contains("menu"))
             {
-                button.onClick.RemoveListener(QuitGame);
+                button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(QuitGame);
-                button.interactable = true;
+                KichHoatClickChoNut(button);
             }
         }
     }
@@ -354,6 +492,12 @@ public class GameManager : MonoBehaviourPunCallbacks
     private void KetNoiNutResultPanel()
     {
         if (resultPanelObject == null) return;
+
+        foreach (Graphic g in resultPanelObject.GetComponentsInChildren<Graphic>(true))
+        {
+            if (g != null && g.GetComponentInParent<Button>() == null)
+                g.raycastTarget = false;
+        }
 
         foreach (Button button in resultPanelObject.GetComponentsInChildren<Button>(true))
         {
@@ -365,22 +509,110 @@ public class GameManager : MonoBehaviourPunCallbacks
 
             if (key.Contains("restart") || key.Contains("again") || key.Contains("retry"))
             {
-                button.onClick.RemoveListener(RestartGame);
+                button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(RestartGame);
-                button.interactable = true;
+                KichHoatClickChoNut(button);
             }
             else if (key.Contains("menu") || key.Contains("quit") || key.Contains("exit") || key.Contains("lobby"))
             {
-                button.onClick.RemoveListener(QuitGame);
+                button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(QuitGame);
-                button.interactable = true;
+                KichHoatClickChoNut(button);
             }
         }
+    }
+
+    // Bảng "bị loại": STAY & WATCH = ẩn bảng để xem tiếp, LEAVE MATCH = rời trận về menu
+    private void KetNoiNutEliminatePanel()
+    {
+        if (eliminatePanelObject == null) return;
+
+        DamBaoRaycasterChoPanel(eliminatePanelObject);
+
+        foreach (Graphic g in eliminatePanelObject.GetComponentsInChildren<Graphic>(true))
+        {
+            if (g != null && g.GetComponentInParent<Button>() == null)
+                g.raycastTarget = false;
+        }
+
+        foreach (Button button in eliminatePanelObject.GetComponentsInChildren<Button>(true))
+        {
+            if (button == null) continue;
+
+            string key = button.gameObject.name.ToLowerInvariant();
+            foreach (TMP_Text label in button.GetComponentsInChildren<TMP_Text>(true))
+                if (label != null) key += " " + label.text.ToLowerInvariant();
+
+            if (key.Contains("stay") || key.Contains("watch") || key.Contains("spectate"))
+            {
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(AnBangLoaiVaXem);
+                KichHoatClickChoNut(button);
+            }
+            else if (key.Contains("leave") || key.Contains("quit") || key.Contains("exit") || key.Contains("menu"))
+            {
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(QuitGame);
+                KichHoatClickChoNut(button);
+            }
+        }
+    }
+
+    private void CapNhatChuEliminatePanel()
+    {
+        if (eliminatePanelObject == null) return;
+
+        TMP_Text tieuDe = null;
+        float yCao = float.MinValue;
+        var cacChuKhac = new List<TMP_Text>();
+
+        foreach (TMP_Text t in eliminatePanelObject.GetComponentsInChildren<TMP_Text>(true))
+        {
+            if (t == null || t.GetComponentInParent<Button>() != null) continue;
+
+            float y = t.rectTransform.position.y;
+            if (tieuDe == null || y > yCao)
+            {
+                if (tieuDe != null) cacChuKhac.Add(tieuDe);
+                tieuDe = t;
+                yCao = y;
+            }
+            else
+            {
+                cacChuKhac.Add(t);
+            }
+        }
+
+        if (tieuDe == null) return;
+
+        tieuDe.gameObject.SetActive(true);
+        tieuDe.text = "YOU'VE BEEN ELIMINATED";
+        tieuDe.enableAutoSizing = true;
+        tieuDe.fontSizeMin = 24f;
+        tieuDe.fontSizeMax = Mathf.Max(36f, tieuDe.fontSize);
+        tieuDe.textWrappingMode = TextWrappingModes.NoWrap;
+
+        foreach (TMP_Text t in cacChuKhac)
+        {
+            if (t != null && t.text.Trim().Equals("NEW TEXT", System.StringComparison.OrdinalIgnoreCase))
+                t.gameObject.SetActive(false);
+        }
+    }
+
+    public void AnBangLoaiVaXem()
+    {
+        if (eliminatePanelObject != null) eliminatePanelObject.SetActive(false);
     }
 
     private void KetNoiNutBatDauTutorial()
     {
         if (tutorialPanelObject == null) return;
+
+        foreach (Graphic g in tutorialPanelObject.GetComponentsInChildren<Graphic>(true))
+        {
+            if (g != null && g.GetComponentInParent<Button>() == null)
+                g.raycastTarget = false;
+        }
 
         Button nutBatDau = null;
         int diemTotNhat = 0;
@@ -398,7 +630,7 @@ public class GameManager : MonoBehaviourPunCallbacks
             {
                 if (label == null) continue;
                 string chu = label.text.ToUpperInvariant();
-                if (chu.Contains("BẮT ĐẦU") || chu.Contains("START RACE") || chu.Contains("START GAME"))
+                if (chu.Contains("BẮT ĐẦU") || chu.Contains("START RACE") || chu.Contains("START GAME") || chu.Contains("WAITING"))
                     diem += 100;
             }
 
@@ -427,22 +659,64 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         if (nutBatDau == null) return;
 
-        nutBatDau.gameObject.SetActive(true);
-        nutBatDau.enabled = true;
-        nutBatDau.interactable = true;
-        nutBatDau.onClick.RemoveListener(BatDauGame);
+        nutStartRaceCache = nutBatDau;
+        KichHoatClickChoNut(nutBatDau);
+        nutBatDau.onClick.RemoveAllListeners();
         nutBatDau.onClick.AddListener(BatDauGame);
 
         foreach (TMP_Text label in nutBatDau.GetComponentsInChildren<TMP_Text>(true))
         {
             if (label != null)
             {
+                chuNutStartRaceCache = label;
                 label.text = "START RACE";
-                label.raycastTarget = false;
             }
         }
 
         nutBatDau.transform.SetAsLastSibling();
+    }
+
+    private void DamBaoTextTrangThaiSanSang()
+    {
+        if (readyStatusText == null)
+        {
+            GameObject objText = TimObjectTheoTenChinhXac("ReadyStatusText");
+            if (objText != null) readyStatusText = objText.GetComponent<TMP_Text>();
+        }
+
+        if (readyStatusText == null && tutorialPanelObject != null)
+        {
+            GameObject go = new GameObject("ReadyStatusText_Auto", typeof(RectTransform));
+            go.transform.SetParent(tutorialPanelObject.transform, false);
+            RectTransform r = go.GetComponent<RectTransform>();
+
+            if (nutStartRaceCache != null)
+            {
+                RectTransform btnRect = nutStartRaceCache.GetComponent<RectTransform>();
+                r.anchorMin = btnRect.anchorMin;
+                r.anchorMax = btnRect.anchorMax;
+                r.pivot = new Vector2(0.5f, 0.5f);
+                r.anchoredPosition = btnRect.anchoredPosition + new Vector2(0f, btnRect.sizeDelta.y * 0.5f + 36f);
+                r.sizeDelta = new Vector2(560f, 44f);
+            }
+            else
+            {
+                r.anchorMin = r.anchorMax = new Vector2(0.75f, 0.35f);
+                r.pivot = new Vector2(0.5f, 0.5f);
+                r.anchoredPosition = Vector2.zero;
+                r.sizeDelta = new Vector2(560f, 44f);
+            }
+
+            TextMeshProUGUI tmp = go.AddComponent<TextMeshProUGUI>();
+            tmp.fontSize = 24f;
+            tmp.fontStyle = FontStyles.Bold;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.color = new Color(1f, 0.88f, 0.25f);
+            tmp.outlineWidth = 0.25f;
+            tmp.outlineColor = Color.black;
+            tmp.raycastTarget = false;
+            readyStatusText = tmp;
+        }
     }
 
     private GameObject TimObjectTrongCanvas(string tuKhoa)
@@ -494,10 +768,15 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (PhotonNetwork.IsConnected && PhotonNetwork.InRoom)
         {
             soNguoi = PhotonNetwork.CurrentRoom.PlayerCount;
-            if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(KEY_SO_NGUOI, out object v))
-                soNguoi = System.Convert.ToInt32(v);
+            if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(KEY_SO_NGUOI, out object v) && v != null)
+                soNguoi = Mathf.Max(soNguoi, System.Convert.ToInt32(v));
         }
         cheDoNhieuNguoi = soNguoi > 1;
+
+        // Có người vào/ra phòng làm đổi chế độ khi bảng hướng dẫn đang mở: vẽ lại nội dung cho đúng
+        int cheDo = cheDoNhieuNguoi ? 1 : 0;
+        if (tutorialPanelObject != null && cheDo != cheDoTutorialDaVe)
+            CapNhatNoiDungTutorial();
     }
 
     private void Start()
@@ -516,13 +795,26 @@ public class GameManager : MonoBehaviourPunCallbacks
         GameObject eliminatePanelTrongScene = TimObjectTheoTenChinhXac("EliminatedPanel");
         if (eliminatePanelTrongScene != null) eliminatePanelObject = eliminatePanelTrongScene;
 
+        // Map khác đặt tên panel khác: tìm thêm theo từ khoá để không sót panel mẫu ("New Text") đang bật sẵn
+        if (tutorialPanelObject == null) tutorialPanelObject = TimPanelTheoTuKhoa("tutorial");
+        if (resultPanelObject == null) resultPanelObject = TimPanelTheoTuKhoa("result");
+        if (pausePanelObject == null) pausePanelObject = TimPanelTheoTuKhoa("pause");
+        if (gameOverObject == null) gameOverObject = TimPanelTheoTuKhoa("gameover", "game_over");
+        if (winGameObject == null) winGameObject = TimPanelTheoTuKhoa("wingame", "winpanel", "win_game");
+
+        Debug.Log($"[GameManager] scene={gameObject.scene.name} | tutorial={(tutorialPanelObject != null)} result={(resultPanelObject != null)} " +
+                  $"pause={(pausePanelObject != null)} gameOver={(gameOverObject != null)} win={(winGameObject != null)} | nhieuNguoi={cheDoNhieuNguoi}");
+
         if (timeGameObject == null)
             timeGameObject = TimObjectTheoTenChinhXac("time");
 
         CapNhatNoiDungTutorial();
-        DamBaoEventSystemChoTutorial();
+        DamBaoEventSystemDuyNhat();
+        DamBaoRaycasterChoPanel(tutorialPanelObject);
         DamBaoRaycasterChoPanel(pausePanelObject);
+        DamBaoRaycasterChoPanel(resultPanelObject);
         KetNoiNutBatDauTutorial();
+        DamBaoTextTrangThaiSanSang();
         KetNoiNutPausePanel();
         KetNoiNutResultPanel();
 
@@ -531,9 +823,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (eliminatePanelObject == null)
             eliminatePanelObject = TimObjectTrongCanvas("eliminate");
 
-        if (resultPanelObject != null) resultPanelObject.SetActive(false);
-
-        DangKyDanhSachPanel();
+        KetNoiNutEliminatePanel();
 
         if (timeGameObject != null) timeGameObject.SetActive(tutorialPanelObject == null);
         if (gameOverObject != null) gameOverObject.SetActive(false);
@@ -542,11 +832,6 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (eliminatePanelObject != null) eliminatePanelObject.SetActive(false);
         if (pausePanelObject != null) pausePanelObject.SetActive(false);
 
-        if (readyStatusText == null)
-        {
-            GameObject objText = GameObject.Find("ReadyStatusText");
-            if (objText != null) readyStatusText = objText.GetComponent<TMP_Text>();
-        }
         if (readyStatusText != null) readyStatusText.gameObject.SetActive(false);
 
         KhoiTaoHienThiXu();
@@ -572,6 +857,8 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (tutorialPanelObject != null)
         {
             tutorialPanelObject.SetActive(true);
+            tutorialPanelObject.transform.SetAsLastSibling();
+            MoKhoaChuot();
             BatNhacNen();
 
             if (!cheDoNhieuNguoi) Time.timeScale = 0f;
@@ -590,6 +877,8 @@ public class GameManager : MonoBehaviourPunCallbacks
     {
         if (daBatDauDua) return;
 
+        XacDinhCheDo();
+
         if (!cheDoNhieuNguoi || !PhotonNetwork.InRoom)
         {
             BatDauDua();
@@ -599,43 +888,115 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (banThanDaBam) return;
         banThanDaBam = true;
 
+        int myActor = PhotonNetwork.LocalPlayer.ActorNumber;
+        dsActorDaSanSang.Add(myActor);
+
         PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
         {
             { KEY_READY, true }
         });
 
+        PhotonNetwork.RaiseEvent(
+            EVENT_READY,
+            myActor,
+            new RaiseEventOptions { Receivers = ReceiverGroup.All, CachingOption = EventCaching.AddToRoomCache },
+            SendOptions.SendReliable
+        );
+
         KiemTraSanSang();
+    }
+
+    public void OnEvent(EventData photonEvent)
+    {
+        if (photonEvent.Code == EVENT_READY)
+        {
+            if (photonEvent.CustomData != null)
+            {
+                int actor = System.Convert.ToInt32(photonEvent.CustomData);
+                dsActorDaSanSang.Add(actor);
+            }
+            KiemTraSanSang();
+        }
+        else if (photonEvent.Code == EVENT_START_RACE)
+        {
+            BatDauDua();
+        }
     }
 
     private void KiemTraSanSang()
     {
         if (daBatDauDua) return;
 
+        XacDinhCheDo();
+
         if (!cheDoNhieuNguoi || !PhotonNetwork.InRoom)
         {
-            if (readyStatusText != null) readyStatusText.gameObject.SetActive(false);
+            if (readyStatusText != null && readyStatusText.gameObject.activeSelf)
+                readyStatusText.gameObject.SetActive(false);
+
+            // Về lại 1 người: lần sau vào chế độ nhiều người phải dựng lại chữ
+            ssCuoi = tongCuoi = -1;
             return;
         }
+
+        DamBaoTextTrangThaiSanSang();
 
         int tong = PhotonNetwork.CurrentRoom.PlayerCount;
         int sanSang = 0;
 
         foreach (Player p in PhotonNetwork.PlayerList)
         {
-            if (p.CustomProperties.TryGetValue(KEY_READY, out object v) && v is bool b && b)
+            bool pReady = dsActorDaSanSang.Contains(p.ActorNumber) ||
+                          (p == PhotonNetwork.LocalPlayer && banThanDaBam) ||
+                          (p.CustomProperties.TryGetValue(KEY_READY, out object v) && v is bool b && b);
+            if (pReady)
+            {
+                dsActorDaSanSang.Add(p.ActorNumber);
                 sanSang++;
+            }
         }
 
-        if (readyStatusText != null)
+        // Chỉ cập nhật giao diện khi số liệu thật sự đổi
+        if (sanSang != ssCuoi || tong != tongCuoi || banThanDaBam != ssBamCuoi)
         {
-            readyStatusText.gameObject.SetActive(true);
-            readyStatusText.text = banThanDaBam
-                ? $"WAITING FOR PLAYERS... ({sanSang}/{tong})"
-                : $"PRESS START RACE ({sanSang}/{tong} READY)";
+            ssCuoi = sanSang;
+            tongCuoi = tong;
+            ssBamCuoi = banThanDaBam;
+
+            if (readyStatusText != null)
+            {
+                if (!readyStatusText.gameObject.activeSelf)
+                {
+                    readyStatusText.gameObject.SetActive(true);
+                    readyStatusText.transform.SetAsLastSibling();
+                }
+
+                readyStatusText.text = banThanDaBam
+                    ? $"WAITING FOR PLAYERS... ({sanSang}/{tong} READY)"
+                    : $"PRESS START RACE ({sanSang}/{tong} READY)";
+            }
+
+            if (chuNutStartRaceCache != null)
+            {
+                chuNutStartRaceCache.text = banThanDaBam
+                    ? $"WAITING ({sanSang}/{tong})"
+                    : "START RACE";
+            }
+
+            if (nutStartRaceCache != null)
+            {
+                nutStartRaceCache.interactable = !banThanDaBam;
+            }
         }
 
-        if (sanSang >= tong)
+        if (sanSang >= tong && tong >= 2)
         {
+            PhotonNetwork.RaiseEvent(
+                EVENT_START_RACE,
+                null,
+                new RaiseEventOptions { Receivers = ReceiverGroup.All },
+                SendOptions.SendReliable
+            );
             BatDauDua();
         }
     }
@@ -647,6 +1008,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         thoiDiemBatDauDua = Time.time;
 
         Time.timeScale = 1f;
+        isPaused = false;
 
         if (tutorialPanelObject != null) tutorialPanelObject.SetActive(false);
         if (readyStatusText != null) readyStatusText.gameObject.SetActive(false);
@@ -667,8 +1029,19 @@ public class GameManager : MonoBehaviourPunCallbacks
             KiemTraNguoiSotLaiCuoiCung();
     }
 
+    public override void OnPlayerEnteredRoom(Player newPlayer)
+    {
+        if (!daBatDauDua)
+        {
+            XacDinhCheDo();
+            KiemTraSanSang();
+        }
+    }
+
     public override void OnPlayerLeftRoom(Player otherPlayer)
     {
+        if (otherPlayer != null) dsActorDaSanSang.Remove(otherPlayer.ActorNumber);
+
         if (!daBatDauDua)
         {
             XacDinhCheDo();
@@ -686,70 +1059,6 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (nhacNenSource.clip != nhacNenDuaXe) nhacNenSource.clip = nhacNenDuaXe;
         nhacNenSource.mute = nhacBiTat;
         if (!nhacNenSource.isPlaying) nhacNenSource.Play();
-    }
-
-    // =========================================================================
-    // CHỈ 1 PANEL HIỆN CÙNG LÚC
-    // =========================================================================
-    private void DangKyDanhSachPanel()
-    {
-        dsPanel.Clear();
-        ThemPanel(pausePanelObject);
-        ThemPanel(tutorialPanelObject);
-        ThemPanel(winGameObject);
-        ThemPanel(gameOverObject);
-        ThemPanel(resultPanelObject);
-        ThemPanel(eliminatePanelObject);
-
-        if (panelKhac != null)
-            foreach (GameObject p in panelKhac) ThemPanel(p);
-    }
-
-    private void ThemPanel(GameObject p)
-    {
-        if (p != null && !dsPanel.Contains(p)) dsPanel.Add(p);
-    }
-
-    private static bool LaChaConHoacNguocLai(GameObject a, GameObject b)
-    {
-        return a.transform.IsChildOf(b.transform) || b.transform.IsChildOf(a.transform);
-    }
-
-    private void DamBaoMotPanel()
-    {
-        GameObject moiNhat = null;
-        int dem = 0;
-
-        for (int i = 0; i < dsPanel.Count; i++)
-        {
-            GameObject p = dsPanel[i];
-            if (!DangMo(p)) continue;
-            dem++;
-            if (p != panelDangHien) moiNhat = p;
-        }
-
-        if (dem == 0) { panelDangHien = null; return; }
-
-        if (dem == 1)
-        {
-            for (int i = 0; i < dsPanel.Count; i++)
-                if (DangMo(dsPanel[i])) { panelDangHien = dsPanel[i]; break; }
-            return;
-        }
-
-        if (moiNhat == null) moiNhat = panelDangHien;
-        if (moiNhat == null) return;
-
-        for (int i = 0; i < dsPanel.Count; i++)
-        {
-            GameObject p = dsPanel[i];
-            if (p == moiNhat || !DangMo(p)) continue;
-            if (LaChaConHoacNguocLai(p, moiNhat)) continue;
-            p.SetActive(false);
-        }
-
-        panelDangHien = moiNhat;
-        if (nutNhac != null) nutNhac.transform.SetAsLastSibling();
     }
 
     private void GanHieuUngNut(Button b)
@@ -1258,6 +1567,14 @@ public class GameManager : MonoBehaviourPunCallbacks
     // =========================================================================
     private void Update()
     {
+        // Bảo vệ TutorialPanel: nếu chưa bắt đầu đua thì tuyệt đối không cho script cũ nào tắt mất TutorialPanel
+        if (!daBatDauDua && !ketThucGame && !winGame && tutorialPanelObject != null && !tutorialPanelObject.activeSelf)
+        {
+            tutorialPanelObject.SetActive(true);
+            tutorialPanelObject.transform.SetAsLastSibling();
+            MoKhoaChuot();
+        }
+
         if (!MultiplayerAllInOne.DangGoChat &&
             !daBatDauDua && tutorialPanelObject != null &&
             tutorialPanelObject.activeInHierarchy &&
@@ -1266,10 +1583,11 @@ public class GameManager : MonoBehaviourPunCallbacks
             BatDauGame();
         }
 
-        if (!ketThucGame && !winGame && resultPanelObject != null && resultPanelObject.activeSelf)
+        if (!ketThucGame && !winGame)
         {
-            resultPanelObject.SetActive(false);
-            if (panelDangHien == resultPanelObject) panelDangHien = null;
+            if (resultPanelObject != null && resultPanelObject.activeSelf) resultPanelObject.SetActive(false);
+            if (gameOverObject != null && gameOverObject.activeSelf) gameOverObject.SetActive(false);
+            if (winGameObject != null && winGameObject.activeSelf) winGameObject.SetActive(false);
         }
 
         float unscaledNow = Time.unscaledTime;
@@ -1284,8 +1602,17 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         if (unscaledNow >= thoiDiemKiemTraPanel)
         {
-            thoiDiemKiemTraPanel = unscaledNow + 0.12f;
-            DamBaoMotPanel();
+            thoiDiemKiemTraPanel = unscaledNow + 0.5f;
+
+            // Quét EventSystem toàn scene khá tốn: chỉ làm mỗi 2 giây
+            if (unscaledNow >= thoiDiemKiemTraEs)
+            {
+                thoiDiemKiemTraEs = unscaledNow + 2f;
+                DamBaoEventSystemDuyNhat();
+            }
+
+            if (nutNhac != null) DatCuoi(nutNhac.transform);
+            if (!daBatDauDua && cheDoNhieuNguoi) KiemTraSanSang();
         }
 
         if (!MultiplayerAllInOne.DangGoChat && Input.GetKeyDown(phimTatNhac))
@@ -1303,7 +1630,7 @@ public class GameManager : MonoBehaviourPunCallbacks
                 for (int i = 0; i < danhSachDongXu.Length; i++)
                 {
                     GameObject xu = danhSachDongXu[i];
-                    if (xu != null && xu.activeInHierarchy && (xu.transform.position - camPos).sqrMagnitude < 3600f)
+                    if (xu != null && xu.activeInHierarchy && (xu.transform.position - camPos).sqrMagnitude < 1600f)
                         xu.transform.Rotate(0f, goc, 0f, Space.World);
                 }
             }
@@ -1326,7 +1653,8 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         bool dangDua = daBatDauDua && !daBiLoai && !ketThucGame && !winGame;
 
-        if (dangDua && !isPaused)
+        // Nhiều người: mở menu (ESC) KHÔNG được dừng đồng hồ, vì xe vẫn chạy và người khác vẫn đua
+        if (dangDua && (!isPaused || cheDoNhieuNguoi))
         {
             thoiGianChoPhepVeDich -= Time.deltaTime;
             if (thoiGianChoPhepVeDich <= 0f)
@@ -1482,6 +1810,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         hudRoot.SetActive(timeGameObject == null || timeGameObject.activeInHierarchy);
     }
 
+    // Chỉ chạm vào UI khi giá trị thật sự đổi: không tạo chuỗi / không đổi scale / không đổi anchor mỗi frame
     private void CapNhatHudThoiGian()
     {
         if (!hudDaTao || hudRoot == null) return;
@@ -1498,7 +1827,9 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (t > hudToiDa) hudToiDa = t;
         float tiLe = hudToiDa > 0f ? Mathf.Clamp01(t / hudToiDa) : 0f;
 
-        hudFillHienTai = Mathf.Lerp(hudFillHienTai, tiLe, 10f * Time.unscaledDeltaTime);
+        hudFillHienTai = Mathf.Abs(hudFillHienTai - tiLe) < 0.001f
+            ? tiLe
+            : Mathf.Lerp(hudFillHienTai, tiLe, 10f * Time.unscaledDeltaTime);
 
         Color mau = tiLe > 0.5f ? new Color(0.3f, 0.9f, 0.45f)
                   : tiLe > 0.25f ? new Color(1f, 0.78f, 0.2f)
@@ -1506,9 +1837,13 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         if (hudFillImg != null)
         {
-            hudFillRect.anchorMax = new Vector2(Mathf.Clamp01(hudFillHienTai), 1f);
+            if (Mathf.Abs(hudFillRect.anchorMax.x - hudFillHienTai) > 0.0005f)
+                hudFillRect.anchorMax = new Vector2(Mathf.Clamp01(hudFillHienTai), 1f);
+
             hudFillImg.color = mau;
-            hudFillImg.enabled = hudFillHienTai > 0.01f;
+
+            bool hienFill = hudFillHienTai > 0.01f;
+            if (hudFillImg.enabled != hienFill) hudFillImg.enabled = hienFill;
         }
 
         bool dangNhay = Time.unscaledTime < hudFlashDen;
@@ -1523,13 +1858,21 @@ public class GameManager : MonoBehaviourPunCallbacks
 
         if (hudSo != null)
         {
-            hudSo.text = $"{Mathf.CeilToInt(t)}<size=55%>s</size>";
+            int giay = Mathf.CeilToInt(t);
+            if (giay != hudGiayCuoi)
+            {
+                hudGiayCuoi = giay;
+                hudSo.text = giay + "<size=55%>s</size>";
+            }
+
             hudSo.color = dangNhay ? new Color(1f, 0.9f, 0.35f) : (sapHet ? mau : Color.white);
 
             float xung = 1f;
             if (dangNhay) xung = 1f + 0.14f * Mathf.Sin((hudFlashDen - Time.unscaledTime) * 18f);
             else if (sapHet) xung = 1f + 0.06f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * 6f));
-            hudSo.transform.localScale = Vector3.one * xung;
+
+            if (dangNhay || sapHet || hudSo.transform.localScale.x != 1f)
+                hudSo.transform.localScale = Vector3.one * xung;
         }
     }
 
@@ -1554,7 +1897,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (!daBatDauDua || ketThucGame || winGame || daBiLoai) return;
         if (Time.time < thoiGianCoTheQuaLai) return;
 
-        thoiGianCoTheQuaLai = Time.time + 0.5f;
+        thoiGianCoTheQuaLai = Time.time + 0.005f;
         thoiGianChoPhepVeDich += thoiGianHoiKhiQuaCheckPoint;
         if (thoiGianChoPhepVeDich > hudToiDa) hudToiDa = thoiGianChoPhepVeDich;
         hudFlashDen = Time.unscaledTime + 0.45f;
@@ -1591,7 +1934,13 @@ public class GameManager : MonoBehaviourPunCallbacks
         VeDichThanhCong();
     }
 
+    // Giữ nguyên chữ ký cũ (script khác / SendMessage vẫn gọi được)
     public void VeDichThanhCong()
+    {
+        XuLyThang(false);
+    }
+
+    private void XuLyThang(bool thangVoiLyDoConLaiCuoiCung)
     {
         if (ketThucGame || winGame || daBiLoai || daCoNguoiThang) return;
 
@@ -1617,10 +1966,10 @@ public class GameManager : MonoBehaviourPunCallbacks
             photonView.RPC(nameof(RPC_CoNguoiVeDich), RpcTarget.Others, PhotonNetwork.LocalPlayer.ActorNumber);
         }
 
-        // Phân biệt câu chúc hợp lý cho chế độ 1 người vs nhiều người
-        string loiChucPhuDe = cheDoNhieuNguoi
-            ? "YOU REACHED THE FINISH LINE FIRST!"
-            : "YOU CROSSED THE FINISH LINE!";
+        string loiChucPhuDe;
+        if (!cheDoNhieuNguoi) loiChucPhuDe = "YOU CROSSED THE FINISH LINE!";
+        else if (thangVoiLyDoConLaiCuoiCung) loiChucPhuDe = "YOU ARE THE LAST RACER STANDING!";
+        else loiChucPhuDe = "YOU REACHED THE FINISH LINE FIRST!";
 
         HienBangKetQuaCuoi(true, xuNhan, loiChucPhuDe);
     }
@@ -1646,7 +1995,7 @@ public class GameManager : MonoBehaviourPunCallbacks
             }
         }
 
-        string lyDo = $"{tenThang} FINISHED FIRST!";
+        string lyDo = $"{tenThang} WON THE RACE!";
         if (dangXemTran && !dangChoKetQua)
             StartCoroutine(XemNguoiThangRoiHienKetQua(lyDo));
         else
@@ -1679,7 +2028,12 @@ public class GameManager : MonoBehaviourPunCallbacks
             });
 
             if (eliminatePanelObject != null)
+            {
+                KetNoiNutEliminatePanel();
+                CapNhatChuEliminatePanel();
                 eliminatePanelObject.SetActive(true);
+                DatCuoi(eliminatePanelObject.transform);
+            }
 
             BatDauCheDoXemTran();
             KiemTraNguoiSotLaiCuoiCung();
@@ -1713,7 +2067,14 @@ public class GameManager : MonoBehaviourPunCallbacks
         {
             daDuyetThang = true;
             if (nguoiConSong.IsLocal && !daBiLoai)
-                VeDichThanhCong();
+                XuLyThang(true);
+        }
+        else if (conSong == 0)
+        {
+            // Mọi người đều hết giờ: không ai thắng, tránh kẹt ở chế độ xem mãi mãi
+            daDuyetThang = true;
+            if (eliminatePanelObject != null) eliminatePanelObject.SetActive(false);
+            HienKetQuaThua("NOBODY FINISHED IN TIME!", true);
         }
     }
 
@@ -1787,24 +2148,56 @@ public class GameManager : MonoBehaviourPunCallbacks
         txt.textWrappingMode = TextWrappingModes.NoWrap;
     }
 
+    // Gán các dòng chữ của ResultPanel: ưu tiên theo tên / chữ mẫu, phần còn lại ("New Text") gán theo thứ tự từ trên xuống
+    private void TimTextTrongResultPanel()
+    {
+        var conLai = new List<TMP_Text>();
+
+        foreach (TMP_Text t in resultPanelObject.GetComponentsInChildren<TMP_Text>(true))
+        {
+            if (t == null || t.GetComponentInParent<Button>() != null) continue;
+            if (t == resultTitleText || t == resultSubtitleText || t == resultRewardText || t == resultTotalCoinsText) continue;
+
+            string n = t.gameObject.name.ToLowerInvariant();
+            string s = (t.text ?? "").ToLowerInvariant();
+
+            if (resultSubtitleText == null && n.Contains("sub")) resultSubtitleText = t;
+            else if (resultRewardText == null && n.Contains("reward")) resultRewardText = t;
+            else if (resultTotalCoinsText == null &&
+                     (n.Contains("total") || n.Contains("balance") || n.Contains("tong") || s.Contains("tổng") || s.Contains("total")))
+                resultTotalCoinsText = t;
+            else if (resultTitleText == null &&
+                     (n.Contains("title") || s.Contains("tiêu đề") || s.Contains("tieu de")))
+                resultTitleText = t;
+            else conLai.Add(t);
+        }
+
+        conLai.Sort((a, b) => b.rectTransform.position.y.CompareTo(a.rectTransform.position.y));
+
+        foreach (TMP_Text t in conLai)
+        {
+            if (resultTitleText == null) resultTitleText = t;
+            else if (resultSubtitleText == null) resultSubtitleText = t;
+            else if (resultRewardText == null) resultRewardText = t;
+            else if (resultTotalCoinsText == null) resultTotalCoinsText = t;
+            else if (anChuThuaTrongResult &&
+                     (t.text.Trim().Equals("NEW TEXT", System.StringComparison.OrdinalIgnoreCase) ||
+                      t.gameObject.name.ToLowerInvariant().Contains("detail")))
+                t.gameObject.SetActive(false);
+        }
+    }
+
     private void CapNhatNoiDungResultPanel()
     {
         if (!coKetQua || resultPanelObject == null) return;
 
-        foreach (TMP_Text t in resultPanelObject.GetComponentsInChildren<TMP_Text>(true))
-        {
-            if (t == null) continue;
-            string n = t.gameObject.name.ToLowerInvariant();
-            if (resultTitleText == null && n.Contains("title")) resultTitleText = t;
-            else if (resultSubtitleText == null && n.Contains("sub")) resultSubtitleText = t;
-            else if (resultRewardText == null && n.Contains("reward")) resultRewardText = t;
-            else if (resultTotalCoinsText == null && (n.Contains("total") || n.Contains("balance"))) resultTotalCoinsText = t;
-            else if (anChuThuaTrongResult && t.GetComponentInParent<Button>() == null &&
-                     (t.text.Trim().Equals("NEW TEXT", System.StringComparison.OrdinalIgnoreCase) || n.Contains("detail")))
-                t.gameObject.SetActive(false);
-        }
+        TimTextTrongResultPanel();
 
-        // Tự động sắp xếp lại bố cục dọc gọn gàng, tránh đè chữ TOTAL COINS lên tiêu đề
+        if (resultTitleText != null) resultTitleText.gameObject.SetActive(true);
+        if (resultSubtitleText != null) resultSubtitleText.gameObject.SetActive(true);
+        if (resultRewardText != null) resultRewardText.gameObject.SetActive(true);
+        if (resultTotalCoinsText != null) resultTotalCoinsText.gameObject.SetActive(true);
+
         if (tuSapXepBoCucResult)
         {
             CanChinhDongTextResult(resultTitleText, 145f, 900f, 80f);
@@ -1947,7 +2340,7 @@ public class GameManager : MonoBehaviourPunCallbacks
                 r.anchorMin = r.anchorMax = new Vector2(0.5f, 0f);
                 r.pivot = new Vector2(0.5f, 0f);
                 r.anchoredPosition = new Vector2(0f, 28f);
-                r.sizeDelta = new Vector2(460f, 54f);
+                r.sizeDelta = new Vector2(680f, 54f);
                 thanhXem = nen.gameObject;
 
                 tenXemText = TaoChuCon("TenXem", thanhXem.transform, 22f, Color.white, true);
@@ -1998,39 +2391,60 @@ public class GameManager : MonoBehaviourPunCallbacks
         if (tenXemText == null) return;
         if (mucTieuXem == null)
         {
-            tenXemText.text = "SPECTATING (NO ACTIVE RACERS)";
+            tenXemText.text = "SPECTATING (NO ACTIVE RACERS)   |   [ESC] MENU";
             return;
         }
 
         PhotonView pv = mucTieuXem.GetComponentInParent<PhotonView>();
         string ten = (pv != null && pv.Owner != null) ? LayTenNguoiChoi(pv.Owner) : "RACER";
-        tenXemText.text = $"SPECTATING: {ten.ToUpper()}  [Q / E]";
+        tenXemText.text = $"SPECTATING: {ten.ToUpper()}  [Q / E]   |   [ESC] MENU";
     }
 
     // =========================================================================
     // ESC, PAUSE, RESTART & QUIT
     // =========================================================================
+    // ESC dùng được ở mọi trạng thái: trước trận, đang đua, bị loại / xem trận, màn kết quả
+    // Thứ tự ưu tiên: đóng bảng F1 -> đóng menu tạm dừng -> ẩn bảng "bị loại" -> mở menu
     private void XuLyEscNgoaiTranDua()
     {
-        if (ketThucGame || winGame) return;
+        if (HelpSystem.DongNeuDangMo()) return;
 
-        if (isPaused) ResumeGame();
-        else PauseGame();
+        if (isPaused || DangMo(pausePanelObject))
+        {
+            ResumeGame();
+            return;
+        }
+
+        if (DangMo(eliminatePanelObject))
+        {
+            AnBangLoaiVaXem();
+            return;
+        }
+
+        PauseGame();
     }
 
     public void PauseGame()
     {
-        if (ketThucGame || winGame) return;
         isPaused = true;
         if (!cheDoNhieuNguoi) Time.timeScale = 0f;
-        if (pausePanelObject != null) pausePanelObject.SetActive(true);
+        if (pausePanelObject != null)
+        {
+            pausePanelObject.SetActive(true);
+            pausePanelObject.transform.SetAsLastSibling();
+            KetNoiNutPausePanel();
+        }
         MoKhoaChuot();
     }
 
     public void ResumeGame()
     {
         isPaused = false;
-        Time.timeScale = 1f;
+
+        // 1 người, chưa bấm START RACE: thời gian vẫn phải đứng yên như lúc đầu
+        bool giuDungHinh = !cheDoNhieuNguoi && !daBatDauDua && DangMo(tutorialPanelObject);
+        Time.timeScale = giuDungHinh ? 0f : 1f;
+
         if (pausePanelObject != null) pausePanelObject.SetActive(false);
     }
 

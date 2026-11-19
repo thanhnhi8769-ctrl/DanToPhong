@@ -42,13 +42,24 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     private int soLanThuLai = 0;
     private Coroutine coroutineThongBao;
     private Coroutine coChoLenh;
+    private Button startBtnCache;
+    private readonly StringBuilder sb = new StringBuilder(128);
 
-    // true khi đang đi sang scene Select -> khi về Lobby không rời phòng
     private static bool dangQuaSceneChonXe = false;
 
     private const int DO_DAI_MA_PHONG = 5;
     private const string KY_TU_MA_PHONG = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private const string TIN_NHAN_MAT_MANG = "Không kết nối được Server. Kiểm tra Internet.\nNhấn ESC để quay lại menu.";
+    private const string KEY_DANG_CHON_XE = "DangChonXe";   // SelectManager gắn khi người chơi đang ở màn chọn xe
+
+    private void Awake()
+    {
+        if (GetComponent<PhotonView>() == null)
+        {
+            PhotonView pv = gameObject.AddComponent<PhotonView>();
+            pv.ViewID = 998;
+        }
+    }
 
     void Start()
     {
@@ -60,23 +71,21 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (string.IsNullOrEmpty(PhotonNetwork.NickName))
             PhotonNetwork.NickName = "Player" + Random.Range(1000, 10000);
 
-        if (startButton != null) startButton.SetActive(false);
+        if (startButton != null)
+        {
+            startBtnCache = startButton.GetComponent<Button>();
+            startButton.SetActive(false);
+        }
 
         if (selectButton != null)
         {
-            // Tìm Button ở chính nó hoặc ở object con
-            Button sb = selectButton.GetComponent<Button>();
-            if (sb == null) sb = selectButton.GetComponentInChildren<Button>(true);
+            Button sbtn = selectButton.GetComponent<Button>();
+            if (sbtn == null) sbtn = selectButton.GetComponentInChildren<Button>(true);
 
-            if (sb != null)
+            if (sbtn != null)
             {
-                // Xóa luôn các sự kiện đã gắn sẵn trong Inspector (vd: nút được copy từ nút Create/Exit)
-                sb.onClick = new Button.ButtonClickedEvent();
-                sb.onClick.AddListener(MoSceneChonXe);
-            }
-            else
-            {
-                Debug.LogError("[Lobby] Select Button không có component Button!", selectButton);
+                sbtn.onClick = new Button.ButtonClickedEvent();
+                sbtn.onClick.AddListener(MoSceneChonXe);
             }
             selectButton.SetActive(false);
         }
@@ -90,11 +99,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         if (PhotonNetwork.InRoom)
         {
-            // Phòng còn mở (chưa Start) = vừa từ Select về -> giữ phòng.
-            // Phòng đã đóng = vừa đua xong -> rời phòng như cũ.
             if (dangQuaSceneChonXe || PhotonNetwork.CurrentRoom.IsOpen)
             {
-                // Vừa chọn xe/map xong -> giữ nguyên phòng
                 dangQuaSceneChonXe = false;
                 HienGiaoDienTrongPhong();
                 return;
@@ -108,7 +114,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     void Update()
     {
-        // ESC luôn thoát được, kể cả khi đang chờ server
         if (Input.GetKeyDown(KeyCode.Escape))
         {
             BamNutExit();
@@ -267,8 +272,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     // =========================================================================
     public void MoSceneChonXe()
     {
-        Debug.Log("[Lobby] Bấm CHỌN XE -> " + tenSceneSelect);
-
         if (!PhotonNetwork.InRoom)
         {
             statusText.text = "Hãy TẠO PHÒNG hoặc VÀO PHÒNG trước khi chọn xe!";
@@ -280,21 +283,15 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         {
             string loi = $"Không tìm thấy scene '{tenSceneSelect}'. Thêm nó vào File > Build Settings!";
             statusText.text = loi;
-            Debug.LogError("[Lobby] " + loi);
             return;
         }
 
         dangQuaSceneChonXe = true;
         StopAllCoroutines();
-
-        // Tắt đồng bộ scene tự động: chủ phòng sang Select thì khách KHÔNG bị kéo theo.
-        // (Lobby.Start sẽ bật lại khi quay về.)
         PhotonNetwork.AutomaticallySyncScene = false;
-
         SceneManager.LoadScene(tenSceneSelect);
     }
 
-    // Hiện giao diện "đang ở trong phòng" (dùng khi vừa vào phòng và khi quay về từ Select)
     private void HienGiaoDienTrongPhong()
     {
         dangXuLy = false;
@@ -317,7 +314,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     {
         if (dangThoat) return;
 
-        // Đang trong phòng và còn mạng -> rời phòng trước
         if (PhotonNetwork.InRoom && PhotonNetwork.IsConnected)
         {
             dangXuLy = true;
@@ -326,7 +322,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             return;
         }
 
-        // Còn lại: thoát thẳng về menu
         dangThoat = true;
         StopAllCoroutines();
         if (PhotonNetwork.IsConnected) PhotonNetwork.Disconnect();
@@ -497,26 +492,62 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         }
     }
 
+    // Còn ai đang ở màn chọn xe không? (tenNguoi = danh sách tên, cách nhau bằng dấu phẩy)
+    private bool CoNguoiDangChonXe(out string tenNguoi)
+    {
+        sb.Clear();
+        Player[] ds = PhotonNetwork.PlayerList;
+        for (int i = 0; i < ds.Length; i++)
+        {
+            Player p = ds[i];
+            if (p.CustomProperties.TryGetValue(KEY_DANG_CHON_XE, out object v) && v is bool b && b)
+            {
+                if (sb.Length > 0) sb.Append(", ");
+                sb.Append(LayTen(p));
+            }
+        }
+        tenNguoi = sb.ToString();
+        return tenNguoi.Length > 0;
+    }
+
     public void StartGame()
     {
         if (dangXuLy || !PhotonNetwork.InRoom || !PhotonNetwork.IsMasterClient) return;
+
+        // Mọi người phải chọn xe xong, nếu không họ sẽ vào game lệch pha và không thấy nhau
+        if (CoNguoiDangChonXe(out string dangChon))
+        {
+            statusText.text = $"Chưa thể bắt đầu: {dangChon} vẫn đang chọn xe...";
+            return;
+        }
 
         dangXuLy = true;
         if (startButton != null) startButton.SetActive(false);
         if (copyButton != null) copyButton.SetActive(false);
         if (selectButton != null) selectButton.SetActive(false);
         statusText.text = "Đang tải đường đua...";
+
+        PhotonNetwork.AutomaticallySyncScene = true;
         PhotonNetwork.CurrentRoom.IsOpen = false;
 
-        // Lưu map (do chủ phòng chọn) vào Room Properties để mọi client đọc được
         string map = PlayerInventory.GetSelectedMap();
-        if (!string.IsNullOrEmpty(map))
-        {
-            PhotonNetwork.CurrentRoom.SetCustomProperties(
-                new ExitGames.Client.Photon.Hashtable { { "Map", map } });
-        }
+        if (string.IsNullOrEmpty(map) || map == "game" || !Application.CanStreamedLevelBeLoaded(map))
+            map = GameNetworkManager.LayTenSceneVaoGame();
 
-        PhotonNetwork.LoadLevel(GameNetworkManager.LayTenSceneVaoGame());
+        PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
+        {
+            { "Map", map },
+            { "SoNguoi", PhotonNetwork.CurrentRoom.PlayerCount }
+        });
+
+        StartCoroutine(ChuyenSceneDongBo(map));
+    }
+
+    private IEnumerator ChuyenSceneDongBo(string map)
+    {
+        // Đợi 0.2s để CustomProperties ("Map", "SoNguoi") đồng bộ tới toàn bộ người chơi trước khi chuyển scene
+        yield return new WaitForSecondsRealtime(0.2f);
+        PhotonNetwork.LoadLevel(map);
     }
 
     // =========================================================================
@@ -547,6 +578,13 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         HienThongBaoTamThoi(newMasterClient.IsLocal
             ? "<color=#00FFFF>Bạn là Chủ Phòng mới!</color>"
             : $"<color=#00FFFF>{LayTen(newMasterClient)} là Chủ Phòng mới!</color>");
+    }
+
+    // Có người vào / ra khỏi màn chọn xe -> cập nhật ngay nút Start và dòng trạng thái
+    public override void OnPlayerPropertiesUpdate(Player targetPlayer, ExitGames.Client.Photon.Hashtable changedProps)
+    {
+        if (changedProps != null && changedProps.ContainsKey(KEY_DANG_CHON_XE))
+            HienTrangThaiPhong();
     }
 
     public override void OnCreateRoomFailed(short returnCode, string message)
@@ -588,7 +626,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     private string TaoDanhSachNguoiChoi()
     {
-        StringBuilder sb = new StringBuilder();
+        sb.Clear();
         foreach (Player p in PhotonNetwork.PlayerList)
         {
             if (sb.Length > 0) sb.Append(", ");
@@ -605,17 +643,29 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         Room phong = PhotonNetwork.CurrentRoom;
         bool laChuPhong = PhotonNetwork.IsMasterClient;
+        bool conNguoiChonXe = CoNguoiDangChonXe(out string tenDangChon);
 
-        if (startButton != null) startButton.SetActive(laChuPhong && !dangXuLy);
+        if (startButton != null)
+        {
+            startButton.SetActive(laChuPhong && !dangXuLy);
+            if (startBtnCache == null) startBtnCache = startButton.GetComponent<Button>();
+            if (startBtnCache != null) startBtnCache.interactable = !conNguoiChonXe;
+        }
 
         string dauDong = string.IsNullOrEmpty(thongBao) ? "" : thongBao + "\n";
         string dongCuoi = laChuPhong
             ? "Bấm CHỌN XE để chọn xe + map, gửi mã cho bạn bè rồi bấm START GAME!"
             : "Bấm CHỌN XE để chọn xe. Đang chờ Chủ Phòng bấm START GAME...";
 
+        if (conNguoiChonXe)
+            dongCuoi += $"\n<color=#FFD54F>Đang chờ {tenDangChon} chọn xe xong...</color>";
+
+        // Dựng chuỗi trước khi LayTen/TaoDanhSachNguoiChoi dùng chung StringBuilder
+        string danhSach = TaoDanhSachNguoiChoi();
+
         statusText.text =
             $"{dauDong}MÃ PHÒNG: <color=#00FFFF><b>{phong.Name}</b></color> ({phong.PlayerCount}/{phong.MaxPlayers})\n" +
-            $"Người chơi: {TaoDanhSachNguoiChoi()}\n{dongCuoi}";
+            $"Người chơi: {danhSach}\n{dongCuoi}";
     }
 
     private void HienThongBaoTamThoi(string thongBao)
@@ -637,7 +687,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     }
 }
 
-// Hỗ trợ dán mã phòng bằng chuột phải trong TMP_InputField.
 public class RoomInputPasteHandler : MonoBehaviour, IPointerClickHandler
 {
     public TMP_InputField inputField;

@@ -2,28 +2,34 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using Photon.Pun;
 
-// Đồng hồ đã do GameManager cập nhật, script này chỉ còn lo các nút.
 public class GameUi : MonoBehaviour
 {
-    // Nút Chơi Lại (chỉ dùng khi chơi offline; online nên về Lobby)
     public void ChoiLai()
     {
         Time.timeScale = 1f;
-        SceneManager.LoadScene("game");
+        if (GameManager.Instance != null)
+            GameManager.Instance.RestartGame();
+        else
+            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
-    // Nút Về Menu
     public void VeMenu()
     {
         Time.timeScale = 1f;
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.QuitGame();
+            return;
+        }
+
         if (PhotonNetwork.InRoom)
-        {
-            // GameManager.OnLeftRoom sẽ tự load scene menu
             PhotonNetwork.LeaveRoom();
-        }
-        else
-        {
-            SceneManager.LoadScene("menu");
-        }
+        SceneManager.LoadScene("menu");
+    }
+
+    public void TiepTuc()
+    {
+        if (GameManager.Instance != null)
+            GameManager.Instance.ResumeGame();
     }
 }
