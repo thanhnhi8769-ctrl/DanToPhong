@@ -170,12 +170,41 @@ Sau khi cuộc đua bắt đầu, chỉ cần nhấn phím tăng tốc lần đ�
 
 - **Game Engine:** Unity 6 (Universal Render Pipeline - URP)
 - **Networking & Voice:** Photon PUN 2 & Photon Voice 2 (Asia Region, Room Code, Map/Vehicle Custom Properties Sync & Host Migration)
+- **Launcher & Auth Server:** C# Windows Forms (.NET), TCP Socket Custom Protocol (`MessageFramer` Port `9000`) & Microsoft SQL Server (`DanToPhongDB`)
 - **Camera System:** Unity Cinemachine, Networked Third-Person Spectator Camera & Orthographic Minimap Camera
 - **UI, 3D Showcase & Audio:** TextMeshPro (TMP), GPU Material Tinting (`VehicleCatalog`), Dynamic 3D Bounds Normalization & Multi-channel AudioSource
 
 ---
 
-## 📦 11. Tải Bản Build Game (BuildGame.zip)
+## 🖥️ 11. Hướng Dẫn Chạy Giao Diện Launcher & Đăng Nhập (`UI` & `DanToPhong.Server`)
+
+Hệ thống giao diện đăng nhập/quản lý tài khoản (`UI`) giao tiếp trực tiếp với `DanToPhong.Server` qua **TCP Socket (Port `9000`)** và lưu trữ dữ liệu người dùng trên **SQL Server (`DanToPhongDB`)**. Sau khi clone repo về máy, bạn thực hiện theo 3 bước sau để chạy phần UI:
+
+### Bước 1: Chuẩn Bị Cơ Sở Dữ Liệu (`DanToPhongDB`)
+1. Mở **SQL Server Management Studio (SSMS)**, đăng nhập vào instance SQL Server trên máy (`localhost,1433`).
+2. Tạo database tên **`DanToPhongDB`** và chạy script SQL tạo bảng người dùng (`dbo.NguoiDung`) của nhóm.
+3. Bật tài khoản SQL Authentication **`sa`** (chuột phải `sa` $\rightarrow$ *Properties* $\rightarrow$ *Status* $\rightarrow$ chọn **Enabled**) và đặt mật khẩu đạt chuẩn độ phức tạp của SQL Server (tối thiểu 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt).
+
+### Bước 2: Cấu Hình & Khởi Chạy `DanToPhong.Server`
+1. Mở file `UI/DanToPhong.Server/Program.cs`, cập nhật đúng mật khẩu `sa` của máy bạn ở dòng `ConnectionString`:
+   `Server=localhost,1433;Database=DanToPhongDB;User Id=sa;Password=<MẬT_KHẨU_SA_CỦA_BẠN>;TrustServerCertificate=True;`
+2. Mở terminal tại thư mục `UI/DanToPhong.Server` và chạy lệnh `dotnet run`.
+3. Đợi console hiển thị đủ 2 dòng `[DB] Connected to DanToPhongDB successfully.` và `[TCP] Server listening on port 9000...` là Server đã sẵn sàng nhận kết nối từ UI.
+
+### Bước 3: Mở & Sử Dụng Giao Diện `UI` (WinForms)
+1. Giữ nguyên cửa sổ terminal đang chạy `DanToPhong.Server`.
+2. Mở solution trong thư mục `UI` bằng **Visual Studio** (hoặc chạy project WinForms `UI`), bấm **Start (`F5`)**.
+3. Trên giao diện Launcher, bạn có thể thao tác đầy đủ các tính năng:
+   - **Đăng ký (`Register`):** Tạo tài khoản mới (*Username từ 3–20 ký tự chữ/số/gạch dưới; mật khẩu tối thiểu 8 ký tự gồm cả chữ và số*).
+   - **Đăng nhập (`Login`):** Xác thực tài khoản qua server TCP và tải thông tin hồ sơ người chơi (`GetInfo`).
+   - **Quên mật khẩu (`Reset Password`):** Khôi phục mật khẩu mới bằng cách xác nhận đúng cặp `Username` + `Email` đã đăng ký.
+   - **Vào Game (`Play` / `Launch`):** Mở trực tiếp bản build game **Dân Tổ Phóng** sau khi đăng nhập thành công.
+
+> ⚠️ **Lưu ý:** Luôn bật `DanToPhong.Server` **trước** khi bấm đăng ký/đăng nhập trên `UI` để tránh lỗi mất kết nối tới cổng `9000`.
+
+---
+
+## 📦 12. Tải Bản Build Game (BuildGame.zip)
 
 👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/19mJVw_RUIEru4CHCZbzZtJtPiwsEHSFR?usp=sharing)
 
