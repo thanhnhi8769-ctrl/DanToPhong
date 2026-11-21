@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../DanToPhong.Protocol/DanToPhong.Protocol.csproj" Id="6cd86983-ea92-4a78-9734-3b27cbf18caf" />
+  <Project Path="../DanToPhong.Server/DanToPhong.Server.csproj" Id="97499b3f-67c7-4a1f-9bdf-281e3e83501d" />
+  <Project Path="UI.csproj" />
+</Solution>

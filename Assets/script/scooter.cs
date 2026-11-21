@@ -46,10 +46,14 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     [SerializeField] private float doMuotPhapTuyen = 0.35f;
     [SerializeField, Tooltip("Độ cứng giữ độ cao so với mặt đường")]
     private float heSoHutDat = 12f;
-    [SerializeField, Tooltip("Tốc độ nhấc/hạ xe tối đa để theo mặt đường (m/s)")]
+    [SerializeField, Tooltip("Tốc độ hạ xe tối đa để theo mặt đường (m/s)")]
     private float toiDaHutDat = 4f;
+    [SerializeField, Tooltip("Tốc độ nâng xe tối đa khi hiệu chỉnh độ cao (m/s), nhỏ hơn để hết nảy")]
+    private float toiDaNangLen = 1.5f;
     [SerializeField, Tooltip("Tia dò thấy mặt đường lệch quá mức này thì bỏ qua")]
     private float doLechToiDaTiaDo = 0.6f;
+    [SerializeField, Tooltip("Tia dò hụt ngắn hơn mức này (giây) thì vẫn giữ trạng thái bám đất (khe nối đường)")]
+    private float thoiGianGiuBam = 0.12f;
 
     [Header("Chống bay lên")]
     [SerializeField, Tooltip("Khi không nhảy mà vận tốc bay lên vượt mức này thì bị cắt lại (m/s)")]
@@ -121,6 +125,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private float thoiDiemChamDat = -10f;
     private float thoiDiemBamNhay = -10f;
     private float thoiDiemNhayCuoi = -10f;
+    private float thoiDiemThayMat = -10f;
 
     private Vector3 phapTuyenDat = Vector3.up;
     private bool dangBamDat = false;
@@ -131,6 +136,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
     private readonly Vector3[] phapTuyenTuong = new Vector3[8];
     private int soTuong = 0;
+    private readonly Vector3[] phapTuyenDoc = new Vector3[4];
+    private int soDoc = 0;
+    private bool chamSanVat = false;
 
     private Vector3 viTriXuatPhat;
     private Quaternion huongXuatPhat;
@@ -296,7 +304,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
             ThietLapColliderXe();
 
             if (ghiLogChanDoan)
-                Debug.Log($"[XE] scooter v5 | vatCung={vatCanLaVatCung} quet={quetChanTruoc} mepDuong={chanMepDuong} chieuCaoPivot={chieuCaoPivot:F2} tuKhoaCung=[{tuKhoaVatCung}] tuKhoaXuyen=[{tuKhoaBoQuaVaCham}]");
+                Debug.Log($"[XE] scooter v6 | vatCung={vatCanLaVatCung} quet={quetChanTruoc} mepDuong={chanMepDuong} chieuCaoPivot={chieuCaoPivot:F2} tuKhoaCung=[{tuKhoaVatCung}] tuKhoaXuyen=[{tuKhoaBoQuaVaCham}]");
 
             // Quét toàn bộ collider của scene rất nặng: chia nhỏ ra nhiều frame thay vì dồn vào 1 frame
             StartCoroutine(BoQuaVatCanNhoTheoDot());
@@ -461,11 +469,14 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         gocReHienTai = 0f;
         thoiGianBiChan = 0f;
         soTuong = 0;
+        soDoc = 0;
+        chamSanVat = false;
         xeDangBat = false;
         dangBamDat = false;
         phapTuyenDat = Vector3.up;
         thoiDiemChamDat = -10f;
         thoiDiemBamNhay = -10f;
+        thoiDiemThayMat = -10f;
 
         Vector3 pos = viTriXuatPhat + Vector3.up * nhacLenKhiHoiSinh;
         rb.position = pos;
@@ -640,8 +651,23 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         if (n.sqrMagnitude < 0.01f) return;
         n.Normalize();
 
+        // Bỏ pháp tuyến trùng hướng: đỡ lặp trong TruVaoTuong
+        for (int i = 0; i < soTuong; i++)
+            if (Vector3.Dot(phapTuyenTuong[i], n) > 0.98f) return;
+
         if (soTuong < phapTuyenTuong.Length)
             phapTuyenTuong[soTuong++] = n;
+    }
+
+    private void ThemPhapTuyenDoc(Vector3 n)
+    {
+        n.Normalize();
+
+        for (int i = 0; i < soDoc; i++)
+            if (Vector3.Dot(phapTuyenDoc[i], n) > 0.98f) return;
+
+        if (soDoc < phapTuyenDoc.Length)
+            phapTuyenDoc[soDoc++] = n;
     }
 
     private void GhiNhanTuong(Collision c)
@@ -651,8 +677,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         for (int i = 0; i < c.contactCount; i++)
         {
             ContactPoint cp = c.GetContact(i);
-            // Tường dốc trên ~75 độ mới tính là tường chặn
-            if (cp.normal.y > 0.25f) continue;
+
+            if (cp.normal.y >= 0.7f) { chamSanVat = true; continue; }
+            if (cp.normal.y > 0.25f) { ThemPhapTuyenDoc(cp.normal); continue; }
             if (LaGoThap(cp)) continue;
             if (XeNamTrenVat(cp.otherCollider)) continue;
 
@@ -1069,7 +1096,11 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         float sauNhay = Time.time - thoiDiemNhayCuoi;
         bool vuaNhay = sauNhay < 0.2f || (sauNhay < 0.8f && rb.linearVelocity.y > 1f);
 
-        dangBamDat = coMat && !vuaNhay;
+        // Tia hụt 1-2 frame ở khe nối đường thì không bỏ bám (tránh bật/tắt gravity gây khựng)
+        if (coMat) thoiDiemThayMat = Time.time;
+        bool giuBam = !coMat && Time.time - thoiDiemThayMat < thoiGianGiuBam;
+
+        dangBamDat = (coMat || giuBam) && !vuaNhay;
 
         if (ghiLogChanDoan && daBamDatTruoc && !dangBamDat && !vuaNhay) GhiLogMatDat(coMat, loi);
         daBamDatTruoc = dangBamDat;
@@ -1082,8 +1113,8 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         if (dangBamDat)
         {
             thoiDiemChamDat = Time.time;
-            if (loi < -0.02f)
-                suaCaoDo = Mathf.Clamp(loi * heSoHutDat, -toiDaHutDat, 0f);
+            if (coMat && Mathf.Abs(loi) > 0.02f)   // hút xuống nhanh, nâng lên chậm (hết nảy)
+                suaCaoDo = Mathf.Clamp(loi * heSoHutDat, -toiDaHutDat, toiDaNangLen);
         }
 
         rb.useGravity = !dangBamDat;
@@ -1105,6 +1136,8 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         NhayXe();
 
         soTuong = 0;
+        soDoc = 0;
+        chamSanVat = false;
     }
 
     public void DiChuyenXe()
@@ -1136,21 +1169,40 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         if (dangBamDat)
         {
-            Vector3 huongDoc = Vector3.ProjectOnPlane(huongTien, phapTuyenDat).normalized;
-            huongDoc.y = 0f;
-            huongDoc.Normalize();
+            // Vận tốc đi theo mặt đường (có thành phần Y theo độ dốc)
+            Vector3 v = Vector3.ProjectOnPlane(huongTien, phapTuyenDat).normalized * tocDoDangChay;
+            Vector2 ngang = new Vector2(v.x, v.z);
+            Vector3 vn = TruVaoTuong(new Vector3(v.x, 0f, v.z));
+            float tiLe = ngang.sqrMagnitude > 1e-4f ? new Vector2(vn.x, vn.z).magnitude / ngang.magnitude : 0f;
 
-            Vector3 v = TruVaoTuong(huongDoc * tocDoDangChay);
-            // Cho phép giữ lại vận tốc hướng lên (vHienTai.y) nếu xe đang trèo qua gờ
-            float vY = (vHienTai.y > 0.05f) ? Mathf.Min(vHienTai.y, 3f) : Mathf.Clamp(suaCaoDo, -3f, 0f);
-            rb.linearVelocity = new Vector3(v.x, vY, v.z);
+            // Bị chặn thì giảm tốc độ nội bộ, hết cảnh "dính" đẩy vào vật
+            if (soTuong > 0) tocDoDangChay = Mathf.Lerp(tocDoDangChay, tocDoDangChay * tiLe, 0.5f);
+
+            rb.linearVelocity = new Vector3(vn.x, v.y * tiLe + suaCaoDo, vn.z);
         }
         else
         {
             Vector3 v = huongTien * tocDoDangChay;
             v.y = 0f;
-            v = TruVaoTuong(v);
-            rb.linearVelocity = new Vector3(v.x, vHienTai.y, v.z);
+            Vector3 vn = TruVaoTuong(v);
+
+            if (soTuong > 0 && v.sqrMagnitude > 1e-4f)
+                tocDoDangChay = Mathf.Lerp(tocDoDangChay, tocDoDangChay * (vn.magnitude / v.magnitude), 0.5f);
+
+            Vector3 vf = new Vector3(vn.x, vHienTai.y, vn.z);
+
+            // Mặt dốc/gồ ghề: trượt dọc theo mặt thay vì đẩy vào
+            for (int i = 0; i < soDoc; i++)
+            {
+                float d = Vector3.Dot(vf, phapTuyenDoc[i]);
+                if (d < 0f) vf -= phapTuyenDoc[i] * d;
+            }
+
+            // Tiếp đất lên vật khác: không cho bật ngược lên
+            bool vuaNhay = Time.time - thoiDiemNhayCuoi < 0.2f;
+            if (chamSanVat && !vuaNhay && vf.y > 0f) vf.y = 0f;
+
+            rb.linearVelocity = vf;
         }
     }
 

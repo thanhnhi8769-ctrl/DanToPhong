@@ -52,7 +52,7 @@ public class HelpSystem : MonoBehaviour
 
                         "<b>CHECKPOINTS:</b> Passing each checkpoint adds <b>+5 seconds</b> to your own timer.",
 
-                        "<b>WATER HAZARD:</b> Falling into water removes <b>5 seconds</b> and respawns you back at the start.",
+                        "<b>OFF-TRACK:</b> Going off-track removes <b>5 seconds</b> and respawns you back at the start.",
 
                         "<b>HOW TO WIN:</b> Be the <b>first to cross the finish line</b>, or be the <b>last racer left</b> in the race. The winner earns <b>+50 coins</b>. Use coins in the <b>SHOP</b> to unlock new scooter colors.",
 
@@ -77,7 +77,7 @@ public class HelpSystem : MonoBehaviour
 
                     "<b>CHECKPOINTS:</b> Passing each checkpoint adds <b>+5 seconds</b> to your timer.",
 
-                    "<b>WATER HAZARD:</b> Falling into water removes <b>5 seconds</b> and respawns you back at the start.",
+                    "<b>OFF-TRACK:</b> Going off-track removes <b>5 seconds</b> and respawns you back at the start.",
 
                     "<b>HOW TO WIN:</b> Cross the finish line before your timer reaches zero to earn <b>+10 coins</b>. Use coins in the <b>SHOP</b> to unlock new scooter colors.",
 
@@ -193,7 +193,7 @@ public class HelpSystem : MonoBehaviour
 
                     "Open the <b>SHOP</b> to spend earned coins on 25 custom-painted scooters.",
 
-                    "During a race, checkpoints add <b>+5 seconds</b> while touching water removes <b>5 seconds</b>.",
+                    "During a race, checkpoints add <b>+5 seconds</b> while going off-track removes <b>5 seconds</b>.",
 
                     "Solo: cross the finish line before time runs out (<b>+10 coins</b>). Multiplayer: cross the finish line first or be the last racer remaining (<b>+50 coins</b>)."
                 }

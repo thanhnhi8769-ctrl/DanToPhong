@@ -136,8 +136,8 @@ GameObject:
   - component: {fileID: 2942607413128082378}
   - component: {fileID: 6503655027412933562}
   - component: {fileID: 4653599809934117568}
-  - component: {fileID: -8318643327531712460}
   - component: {fileID: 3024410106219281540}
+  - component: {fileID: 3268479911746001341}
   m_Layer: 3
   m_Name: Scooter
   m_TagString: Untagged
@@ -211,19 +211,23 @@ MonoBehaviour:
   heSoTangToc: 1.6
   lucReXe: 85
   giaToc: 6
-  doMuotLai: 10
+  doMuotLai: 20
   hieuUngPhanh: {fileID: 0}
   lucNhay: 5
   thoiGianCoyote: 0.05
   thoiGianDemNhay: 0.05
-  maxDepenetration: 2
+  heSoRoiNhanh: 1.15
+  doCaoVuotVatCan: 0.1
+  maxDepenetration: 0.8
   doCaoTiaRay: 0.5
-  khoangBamDat: 0.8
-  doMuotPhapTuyen: 0.35
+  khoangBamDat: 0.5
+  doMuotPhapTuyen: 0.6
   heSoHutDat: 8
   toiDaHutDat: 4
+  toiDaNangLen: 1.5
   doLechToiDaTiaDo: 0.6
-  vanTocLenToiDa: 3
+  thoiGianGiuBam: 0.12
+  vanTocLenToiDa: 1.8
   cacMauXe:
   - ten: Scooter_1
     cacManh:
@@ -236,14 +240,14 @@ MonoBehaviour:
   taoMaterialKhongMaSat: 1
   boMeshColliderTrenXe: 1
   boQuaVaChamMatDuong: 0
-  doCaoGoBoQua: 0.12
+  doCaoGoBoQua: 0.3
   tuKhoaBoQuaVaCham: 
   vatCanLaVatCung: 1
   tuKhoaVatCung: obstacle,barricade,cone,guardrail,fence,barrier
   tuKhoaKhongCung: checkpoint,finish,goal,gate,trigger,start
   quetChanTruoc: 1
-  banKinhQuet: 0.35
-  doCaoQuet: 0.3
+  banKinhQuet: 0.2
+  doCaoQuet: 0.15
   chanMepDuong: 0
   khoangDoMepTruoc: 0.8
   khoangDoMepNgang: 0.6
@@ -253,7 +257,7 @@ MonoBehaviour:
   bienChamNuoc: 0.5
   tuHaMoHinhChamDat: 1
   moHinhHaThem: 0
-  ghiLogVaCham: 0
+  ghiLogChanDoan: 0
 --- !u!135 &6503655027412933562
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -294,26 +298,10 @@ MonoBehaviour:
   OwnershipTransfer: 0
   observableSearch: 2
   ObservedComponents:
-  - {fileID: -8318643327531712460}
+  - {fileID: 3268479911746001341}
   sceneViewId: 0
   InstantiationId: 0
   isRuntimeInstantiated: 0
---- !u!114 &-8318643327531712460
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3386653257227138305}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 627855c7f81362d41938ffe0b1475957, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: PhotonUnityNetworking::Photon.Pun.PhotonTransformView
-  m_SynchronizePosition: 1
-  m_SynchronizeRotation: 1
-  m_SynchronizeScale: 0
-  m_UseLocal: 0
 --- !u!114 &3024410106219281540
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -326,6 +314,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ab079318676a7794f91f9a817720310a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::XuLyVaChamChoXe
+--- !u!114 &3268479911746001341
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3386653257227138305}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 54e7f728b5c93f64a9d0f88323fa1c82, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SmoothNetworkTransform
+  doTreNoiSuy: 0.15
+  thoiGianDuDoanToiDa: 0.22
+  khoangCachDichChuyen: 6
+  khoaVatLyXeNguoiKhac: 1
 --- !u!1 &3910131602830119342
 GameObject:
   m_ObjectHideFlags: 0

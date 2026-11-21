@@ -18,8 +18,16 @@ public class GameNetworkManager : MonoBehaviour
     public Vector3 doLechSpawn = Vector3.zero;
     public float doCaoThaXe = 0.05f;
 
+    [Header("Mạng (tăng để xe người khác chạy êm hơn)")]
+    [Tooltip("Số gói gửi lên server mỗi giây (mặc định Photon = 30)")]
+    public int tanSoGui = 30;
+    [Tooltip("Số lần đồng bộ vị trí xe mỗi giây (mặc định Photon = 10 nên xe người khác bị giật)")]
+    public int tanSoDongBo = 30;
+
     [Header("Chẩn đoán")]
     public bool hienThongTinDebugXe = false;
+
+    private const float CHU_KY_QUET_SKIN = 1.5f;
 
     private bool daTaoXe = false;
     private static bool daDangKySceneLoaded = false;
@@ -29,6 +37,7 @@ public class GameNetworkManager : MonoBehaviour
 
     // Renderer đã được tách material riêng (mỗi xe một bản, tránh dùng chung màu giữa các xe)
     private static readonly HashSet<int> rendererDaTachMat = new HashSet<int>();
+    private static readonly RaycastHit[] bufferRay = new RaycastHit[32];
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void KhoiTaoHeThong()
@@ -67,8 +76,7 @@ public class GameNetworkManager : MonoBehaviour
 
         if (!ten.Contains("game")) return;
 
-        // Scene cũ có thể chưa kịp bị huỷ (nạp bất đồng bộ) nên phải kiểm tra theo ĐÚNG scene vừa nạp,
-        // nếu không map mới sẽ không có manager và không sinh xe.
+        // Kiểm tra theo ĐÚNG scene vừa nạp (scene cũ có thể chưa kịp bị huỷ)
         bool daCo = false;
         foreach (GameNetworkManager g in FindObjectsByType<GameNetworkManager>(FindObjectsSortMode.None))
         {
@@ -104,8 +112,16 @@ public class GameNetworkManager : MonoBehaviour
         if (SceneManager.GetActiveScene().name.ToLower().Contains("select")) return;
 
         PhotonNetwork.IsMessageQueueRunning = true;
+        PhotonNetwork.SendRate = Mathf.Clamp(tanSoGui, 10, 60);
+        PhotonNetwork.SerializationRate = Mathf.Clamp(tanSoDongBo, 10, 60);
         TuDongTimSpawnPointsNeuThieu();
         StartCoroutine(ChoVaoPhongVaSinhXe());
+    }
+
+    // Rời game (thoát / về menu / đổi map): bật bộ đếm chờ ở lobby để game kịp dọn và tải lại
+    private void OnDestroy()
+    {
+        if (daTaoXe) VaoGameCooldown.BatDau();
     }
 
     // OnGUI chạy 2 lần mỗi frame và sinh rác ngay cả khi không vẽ gì: chỉ biên dịch khi cần debug
@@ -127,8 +143,13 @@ public class GameNetworkManager : MonoBehaviour
     private void Update()
     {
         if (Time.unscaledTime < thoiDiemQuetTiepTheo) return;
-        thoiDiemQuetTiepTheo = Time.unscaledTime + 1f;
+        thoiDiemQuetTiepTheo = Time.unscaledTime + CHU_KY_QUET_SKIN;
         QuetVaApSkinXeMoi();
+    }
+
+    private static bool ChuaChuoi(string s, string tuKhoa)
+    {
+        return s.IndexOf(tuKhoa, System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private void TuDongTimSpawnPointsNeuThieu()
@@ -138,8 +159,9 @@ public class GameNetworkManager : MonoBehaviour
         var ds = new List<Transform>();
         foreach (Transform t in FindObjectsByType<Transform>(FindObjectsSortMode.None))
         {
-            string ten = t.name.ToLower();
-            if (ten.Contains("spawnpoint") || ten.Contains("spawn_point") || ten == "spawn")
+            string ten = t.name;
+            if (ChuaChuoi(ten, "spawnpoint") || ChuaChuoi(ten, "spawn_point") ||
+                string.Equals(ten, "spawn", System.StringComparison.OrdinalIgnoreCase))
                 ds.Add(t);
         }
 
@@ -153,16 +175,17 @@ public class GameNetworkManager : MonoBehaviour
     private Vector3 DatLenMatDuong(Vector3 goc)
     {
         Vector3 batDau = goc + Vector3.up * 3f;
-        RaycastHit[] cac = Physics.RaycastAll(batDau, Vector3.down, 40f, ~0, QueryTriggerInteraction.Ignore);
+        int n = Physics.RaycastNonAlloc(batDau, Vector3.down, bufferRay, 40f, ~0, QueryTriggerInteraction.Ignore);
 
         float tot = float.MaxValue;
         bool laRoad = false;
         Vector3 diem = goc;
         bool coHit = false;
 
-        foreach (RaycastHit h in cac)
+        for (int i = 0; i < n; i++)
         {
-            bool road = h.collider.name.ToLower().Contains("road");
+            RaycastHit h = bufferRay[i];
+            bool road = ChuaChuoi(h.collider.name, "road");
             if (!coHit || (road && !laRoad) || (road == laRoad && h.distance < tot))
             {
                 diem = h.point;
@@ -267,11 +290,9 @@ public class GameNetworkManager : MonoBehaviour
         }
     }
 
+    // Chỉ áp lại 1 lần sau spawn (trước đây 2 lần, mỗi lần dựng lại bảng node + SyncTransforms)
     private IEnumerator DamBaoMauXeSauKhiSpawn(GameObject xe, int indexXe)
     {
-        yield return null;
-        if (xe != null) KichHoatDungMauXe(xe, indexXe, kichThuocXeChuan);
-
         yield return new WaitForSeconds(0.2f);
         if (xe != null) KichHoatDungMauXe(xe, indexXe, kichThuocXeChuan);
     }
@@ -294,18 +315,24 @@ public class GameNetworkManager : MonoBehaviour
         Physics.SyncTransforms();
     }
 
+    private static readonly List<Collider> bufferCollider = new List<Collider>(16);
+
     private static float DayColliderXe(GameObject xeRoot, Transform boQua)
     {
         float thap = float.MaxValue;
 
         bool gocCoCollider = false;
-        foreach (Collider g in xeRoot.GetComponents<Collider>())
+        xeRoot.GetComponents(bufferCollider);
+        for (int i = 0; i < bufferCollider.Count; i++)
         {
+            Collider g = bufferCollider[i];
             if (g != null && g.enabled && !g.isTrigger) { gocCoCollider = true; break; }
         }
 
-        foreach (Collider c in xeRoot.GetComponentsInChildren<Collider>(true))
+        xeRoot.GetComponentsInChildren(true, bufferCollider);
+        for (int i = 0; i < bufferCollider.Count; i++)
         {
+            Collider c = bufferCollider[i];
             if (c == null || !c.enabled || c.isTrigger) continue;
             if (!c.gameObject.activeInHierarchy) continue;
             if (boQua != null && c.transform.IsChildOf(boQua)) continue;
@@ -313,6 +340,7 @@ public class GameNetworkManager : MonoBehaviour
 
             thap = Mathf.Min(thap, c.bounds.min.y);
         }
+        bufferCollider.Clear();
 
         return thap == float.MaxValue ? float.NaN : thap;
     }
@@ -323,17 +351,21 @@ public class GameNetworkManager : MonoBehaviour
     {
         if (!PhotonNetwork.IsConnectedAndReady || !PhotonNetwork.InRoom) return;
 
-        foreach (scooter sc in scooter.TatCaXe)
+        List<scooter> ds = scooter.TatCaXe;
+        if (ds.Count <= 1) return;
+
+        for (int k = 0; k < ds.Count; k++)
         {
+            scooter sc = ds[k];
             if (sc == null) continue;
 
-            PhotonView pv = sc.GetComponent<PhotonView>();
-            if (pv == null || pv.IsMine) continue;
+            if (!sc.TryGetComponent(out PhotonView pv) || pv.IsMine) continue;
 
             int idx = -1;
-            if (pv.InstantiationData != null && pv.InstantiationData.Length > 0 && pv.InstantiationData[0] != null)
+            object[] dt = pv.InstantiationData;
+            if (dt != null && dt.Length > 0 && dt[0] != null)
             {
-                idx = System.Convert.ToInt32(pv.InstantiationData[0]);
+                idx = System.Convert.ToInt32(dt[0]);
             }
             else if (pv.Owner != null && pv.Owner.CustomProperties != null &&
                      pv.Owner.CustomProperties.TryGetValue("Scooter", out object propVal) && propVal != null)
@@ -351,10 +383,11 @@ public class GameNetworkManager : MonoBehaviour
         }
     }
 
-    // Bảng tên -> node dựng 1 lần cho mỗi lần áp màu (trước đây mỗi lần tìm tên lại quét cả cây xe ~35 lần)
+    // Bảng tên -> node dựng 1 lần cho mỗi lần áp màu
     private static Transform bangGoc;
     private static readonly Dictionary<string, Transform> bangNode = new Dictionary<string, Transform>();
     private static readonly List<Transform> bufferNode = new List<Transform>(256);
+    private static readonly List<Renderer> bufferRenderer = new List<Renderer>(64);
 
     private static void LapBangNode(Transform root)
     {
@@ -384,15 +417,18 @@ public class GameNetworkManager : MonoBehaviour
         {
             bangGoc = null;
             bangNode.Clear();
+            bufferNode.Clear();
+            bufferRenderer.Clear();
         }
     }
 
+    private static readonly string[] doCuTen = { "ElectricScooter", "ElectricScooter_T", "ElectricScooter_wheel1", "ElectricScooter_wheel2" };
+
     private static void KichHoatNoiBo(GameObject xeRoot, int indexXe, float kichThuocMucTieu)
     {
-        string[] doCu = { "ElectricScooter", "ElectricScooter_T", "ElectricScooter_wheel1", "ElectricScooter_wheel2" };
-        foreach (string ten in doCu)
+        for (int i = 0; i < doCuTen.Length; i++)
         {
-            Transform cu = TimNodeTheoTen(xeRoot.transform, ten);
+            Transform cu = TimNodeTheoTen(xeRoot.transform, doCuTen[i]);
             if (cu != null) cu.gameObject.SetActive(false);
         }
 
@@ -441,9 +477,10 @@ public class GameNetworkManager : MonoBehaviour
             danhSachMau.Add(mauDuocChon);
         }
 
-        foreach (Transform m in danhSachMau)
+        for (int i = 0; i < danhSachMau.Count; i++)
         {
-            if (m != null && m != mauDuocChon)
+            Transform m = danhSachMau[i];
+            if (m != null && m != mauDuocChon && m.gameObject.activeSelf)
                 m.gameObject.SetActive(false);
         }
 
@@ -458,14 +495,14 @@ public class GameNetworkManager : MonoBehaviour
                 if (n == null || n == mauDuocChon) continue;
                 if (mauDuocChon.IsChildOf(n) || n.IsChildOf(mauDuocChon)) continue;
 
-                n.gameObject.SetActive(false);
+                if (n.gameObject.activeSelf) n.gameObject.SetActive(false);
             }
         }
 
         Transform p = mauDuocChon;
         while (p != null && p != xeRoot.transform)
         {
-            p.gameObject.SetActive(true);
+            if (!p.gameObject.activeSelf) p.gameObject.SetActive(true);
             p = p.parent;
         }
 
@@ -479,12 +516,16 @@ public class GameNetworkManager : MonoBehaviour
         }
         bufferNode.Clear();
 
-        Renderer[] renderers = mauDuocChon.GetComponentsInChildren<Renderer>(true);
+        mauDuocChon.GetComponentsInChildren(true, bufferRenderer);
+        Renderer[] renderers = bufferRenderer.ToArray();
+        bufferRenderer.Clear();
+
         Bounds b = new Bounds();
         bool coMesh = false;
 
-        foreach (Renderer r in renderers)
+        for (int i = 0; i < renderers.Length; i++)
         {
+            Renderer r = renderers[i];
             r.enabled = true;
             if (!coMesh) { b = r.bounds; coMesh = true; }
             else b.Encapsulate(r.bounds);
@@ -499,8 +540,9 @@ public class GameNetworkManager : MonoBehaviour
                 mauDuocChon.localScale *= heSo;
 
                 coMesh = false;
-                foreach (Renderer r in renderers)
+                for (int i = 0; i < renderers.Length; i++)
                 {
+                    Renderer r = renderers[i];
                     if (!coMesh) { b = r.bounds; coMesh = true; }
                     else b.Encapsulate(r.bounds);
                 }
@@ -528,8 +570,9 @@ public class GameNetworkManager : MonoBehaviour
         if (coDuLieu)
         {
             // Mỗi xe một bản material riêng: đổi màu xe này không làm đổi màu các xe khác
-            foreach (Renderer r in renderers)
+            for (int i = 0; i < renderers.Length; i++)
             {
+                Renderer r = renderers[i];
                 if (r == null || !rendererDaTachMat.Add(r.GetInstanceID())) continue;
                 r.materials = r.materials;
             }
@@ -538,18 +581,21 @@ public class GameNetworkManager : MonoBehaviour
         }
     }
 
+    // Chỉ dùng bounds của renderer (đọc thẳng từ transform) nên không cần SyncTransforms ở đây
     private static void DongBoBoxColliderThanXe(GameObject xeRoot, Transform mauDuocChon)
     {
-        Physics.SyncTransforms();
-
         Bounds bWorld = new Bounds();
         bool co = false;
-        foreach (Renderer r in mauDuocChon.GetComponentsInChildren<Renderer>(true))
+
+        mauDuocChon.GetComponentsInChildren(true, bufferRenderer);
+        for (int i = 0; i < bufferRenderer.Count; i++)
         {
+            Renderer r = bufferRenderer[i];
             if (!r.enabled || r.bounds.size.sqrMagnitude <= 0.0001f) continue;
             if (!co) { bWorld = r.bounds; co = true; }
             else bWorld.Encapsulate(r.bounds);
         }
+        bufferRenderer.Clear();
         if (!co) return;
 
         BoxCollider box = xeRoot.GetComponent<BoxCollider>();

@@ -36,9 +36,17 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public float thoiGianChoKetNoi = 10f;
     public float thoiGianChoLenh = 8f;
 
+    [Header("Đếm ngược trước khi vào scene game")]
+    [Tooltip("Số giây đếm ngược sau khi Chủ Phòng bấm START GAME (mọi người trong phòng đều thấy). Tăng lên nếu máy tải map chậm.")]
+    public float thoiGianDemNguocVaoGame = 3f;
+    public string mauChuDemNguoc = "<color=#FFD54F><b>Game starts in {0}s...</b></color>\nGet ready!";
+
     private TMP_Text nhanCopyText;
     private bool dangXuLy = false;
     private bool dangThoat = false;
+    private bool dangDem = false;
+    private bool daGoiNapScene = false;
+    private int giayDemCuoi = -1;
     private int soLanThuLai = 0;
     private Coroutine coroutineThongBao;
     private Coroutine coChoLenh;
@@ -51,6 +59,9 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     private const string KY_TU_MA_PHONG = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private const string TIN_NHAN_MAT_MANG = "Không kết nối được Server. Kiểm tra Internet.\nNhấn ESC để quay lại menu.";
     private const string KEY_DANG_CHON_XE = "DangChonXe";   // SelectManager gắn khi người chơi đang ở màn chọn xe
+    private const string KEY_DEM_BAT_DAU = "DemBatDau";     // Room property: thời điểm (PhotonNetwork.Time) bắt đầu đếm ngược
+    private const string KEY_DEM_GIAY = "DemGiay";          // Room property: số giây đếm ngược
+    private const string KEY_DA_NAP = "DaNapScene";         // Room property: Chủ phòng đã gọi nạp scene game
 
     private void Awake()
     {
@@ -277,7 +288,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             statusText.text = "Hãy TẠO PHÒNG hoặc VÀO PHÒNG trước khi chọn xe!";
             return;
         }
-        if (dangXuLy || dangThoat) return;
+        if (dangXuLy || dangThoat || dangDem) return;
 
         if (!Application.CanStreamedLevelBeLoaded(tenSceneSelect))
         {
@@ -332,6 +343,9 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public override void OnLeftRoom()
     {
         dangXuLy = false;
+        dangDem = false;
+        daGoiNapScene = false;
+        giayDemCuoi = -1;
         StopAllCoroutines();
         coroutineThongBao = null;
         coChoLenh = null;
@@ -352,6 +366,9 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (dangThoat) return;
 
         dangXuLy = false;
+        dangDem = false;
+        daGoiNapScene = false;
+        giayDemCuoi = -1;
         HuyChoLenh();
         coroutineThongBao = null;
 
@@ -433,6 +450,12 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     {
         if (dangXuLy || PhotonNetwork.InRoom) return;
 
+        if (VaoGameCooldown.ConLai > 0f)
+        {
+            statusText.text = $"Vui lòng đợi {Mathf.CeilToInt(VaoGameCooldown.ConLai)}s để game tải lại...";
+            return;
+        }
+
         if (!PhotonNetwork.IsConnectedAndReady)
         {
             statusText.text = LyDoChuaSanSang();
@@ -464,6 +487,12 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public void JoinRoom()
     {
         if (dangXuLy || PhotonNetwork.InRoom) return;
+
+        if (VaoGameCooldown.ConLai > 0f)
+        {
+            statusText.text = $"Vui lòng đợi {Mathf.CeilToInt(VaoGameCooldown.ConLai)}s để game tải lại...";
+            return;
+        }
 
         if (!PhotonNetwork.IsConnectedAndReady)
         {
@@ -510,9 +539,19 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         return tenNguoi.Length > 0;
     }
 
+    // =========================================================================
+    // START GAME + ĐẾM NGƯỢC TRƯỚC KHI VÀO SCENE GAME
+    // Chủ phòng bấm START -> đóng phòng, báo giờ đếm ngược cho mọi người -> hết giờ mới nạp scene.
+    // =========================================================================
     public void StartGame()
     {
-        if (dangXuLy || !PhotonNetwork.InRoom || !PhotonNetwork.IsMasterClient) return;
+        if (dangXuLy || dangDem || !PhotonNetwork.InRoom || !PhotonNetwork.IsMasterClient) return;
+
+        if (VaoGameCooldown.ConLai > 0f)
+        {
+            statusText.text = $"Vui lòng đợi {Mathf.CeilToInt(VaoGameCooldown.ConLai)}s để game tải lại...";
+            return;
+        }
 
         // Mọi người phải chọn xe xong, nếu không họ sẽ vào game lệch pha và không thấy nhau
         if (CoNguoiDangChonXe(out string dangChon))
@@ -522,10 +561,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         }
 
         dangXuLy = true;
-        if (startButton != null) startButton.SetActive(false);
-        if (copyButton != null) copyButton.SetActive(false);
-        if (selectButton != null) selectButton.SetActive(false);
-        statusText.text = "Đang tải đường đua...";
 
         PhotonNetwork.AutomaticallySyncScene = true;
         PhotonNetwork.CurrentRoom.IsOpen = false;
@@ -534,20 +569,154 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         if (string.IsNullOrEmpty(map) || map == "game" || !Application.CanStreamedLevelBeLoaded(map))
             map = GameNetworkManager.LayTenSceneVaoGame();
 
+        float giayDem = Mathf.Max(0.2f, thoiGianDemNguocVaoGame);
+        double mocBatDau = PhotonNetwork.Time;
+
         PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
         {
             { "Map", map },
-            { "SoNguoi", PhotonNetwork.CurrentRoom.PlayerCount }
+            { "SoNguoi", PhotonNetwork.CurrentRoom.PlayerCount },
+            { KEY_DEM_BAT_DAU, mocBatDau },
+            { KEY_DEM_GIAY, giayDem }
         });
 
-        StartCoroutine(ChuyenSceneDongBo(map));
+        BatGiaoDienDemNguoc();
+        StartCoroutine(DemNguocRoiVaoGame(map, giayDem, mocBatDau));
     }
 
-    private IEnumerator ChuyenSceneDongBo(string map)
+    private void BatGiaoDienDemNguoc()
     {
-        // Đợi 0.2s để CustomProperties ("Map", "SoNguoi") đồng bộ tới toàn bộ người chơi trước khi chuyển scene
-        yield return new WaitForSecondsRealtime(0.2f);
+        dangDem = true;
+        giayDemCuoi = -1;
+
+        HuyChoLenh();
+        if (coroutineThongBao != null) { StopCoroutine(coroutineThongBao); coroutineThongBao = null; }
+
+        if (startButton != null) startButton.SetActive(false);
+        if (copyButton != null) copyButton.SetActive(false);
+        if (selectButton != null) selectButton.SetActive(false);
+    }
+
+    private void CapNhatChuDemNguoc(float conLai)
+    {
+        int giay = Mathf.Max(1, Mathf.CeilToInt(conLai));
+        if (giay == giayDemCuoi) return;
+        giayDemCuoi = giay;
+        statusText.text = string.Format(mauChuDemNguoc, giay);
+    }
+
+    // Chủ phòng: đếm ngược rồi nạp scene cho cả phòng
+    private IEnumerator DemNguocRoiVaoGame(string map, float giayDem, double batDau)
+    {
+        // Dùng giờ Photon để khớp với máy khách; hết giờ mới nạp scene (CustomProperties đã kịp đồng bộ)
+        float conLai = giayDem - (float)(PhotonNetwork.Time - batDau);
+
+        while (conLai > 0f)
+        {
+            CapNhatChuDemNguoc(conLai);
+            yield return null;
+            conLai = giayDem - (float)(PhotonNetwork.Time - batDau);
+        }
+
+        statusText.text = "Đang tải đường đua...";
+
+        // Đánh dấu đã nạp scene: nếu Chủ phòng rớt mạng ngay sau đó, Chủ phòng mới không nạp lần 2
+        daGoiNapScene = true;
+        PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable { { KEY_DA_NAP, true } });
         PhotonNetwork.LoadLevel(map);
+    }
+
+    // Đang đếm ngược mà còn dưới 2 người: hủy trận, mở lại phòng, mọi người về màn phòng chờ như bình thường
+    private void HuyDemNguoc(string lyDo)
+    {
+        StopAllCoroutines();
+        coroutineThongBao = null;
+        coChoLenh = null;
+        dangDem = false;
+        dangXuLy = false;
+        giayDemCuoi = -1;
+
+        if (PhotonNetwork.InRoom)
+        {
+            PhotonNetwork.CurrentRoom.IsOpen = true;
+            PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
+            {
+                { KEY_DEM_BAT_DAU, null },
+                { KEY_DEM_GIAY, null }
+            });
+        }
+
+        HienGiaoDienTrongPhong();
+        HienThongBaoTamThoi(lyDo);
+    }
+
+    private bool KhongDuNguoiDeVaoGame()
+    {
+        return PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.PlayerCount < 2;
+    }
+
+    // Chủ phòng cũ thoát giữa lúc đếm ngược: Chủ phòng MỚI (Photon tự chuyển) làm tiếp phần còn lại
+    private bool TiepQuanDemNguoc()
+    {
+        if (!PhotonNetwork.InRoom || !PhotonNetwork.IsMasterClient) return false;
+
+        var props = PhotonNetwork.CurrentRoom.CustomProperties;
+        if (!props.ContainsKey(KEY_DEM_BAT_DAU) || !props.ContainsKey(KEY_DEM_GIAY) || !props.ContainsKey("Map"))
+            return false;
+        if (props.ContainsKey(KEY_DA_NAP)) return false;
+
+        string map = props["Map"] as string;
+        if (string.IsNullOrEmpty(map) || !Application.CanStreamedLevelBeLoaded(map)) return false;
+
+        if (KhongDuNguoiDeVaoGame())
+        {
+            HuyDemNguoc("<color=#FFFF00>Không đủ người chơi (cần ít nhất 2). Đã hủy đếm ngược!</color>");
+            return true;
+        }
+
+        double batDau = System.Convert.ToDouble(props[KEY_DEM_BAT_DAU]);
+        float giay = System.Convert.ToSingle(props[KEY_DEM_GIAY]);
+
+        StopAllCoroutines();           // dừng phần hiển thị đếm ngược của máy khách
+        coroutineThongBao = null;
+        coChoLenh = null;
+
+        dangXuLy = true;
+        PhotonNetwork.AutomaticallySyncScene = true;
+        BatGiaoDienDemNguoc();
+        StartCoroutine(DemNguocRoiVaoGame(map, giay, batDau));
+        return true;
+    }
+
+    // Máy khách: chỉ hiển thị đếm ngược, việc nạp scene do Chủ phòng làm (AutomaticallySyncScene)
+    private IEnumerator HienDemNguocMayKhach(double batDau, float giayDem)
+    {
+        float conLai = giayDem - (float)(PhotonNetwork.Time - batDau);
+
+        while (conLai > 0f)
+        {
+            CapNhatChuDemNguoc(conLai);
+            yield return null;
+            conLai = giayDem - (float)(PhotonNetwork.Time - batDau);
+        }
+
+        statusText.text = "Đang tải đường đua...";
+    }
+
+    public override void OnRoomPropertiesUpdate(ExitGames.Client.Photon.Hashtable propertiesThatChanged)
+    {
+        if (propertiesThatChanged == null || dangDem) return;
+        if (PhotonNetwork.IsMasterClient) return;      // chủ phòng tự chạy đếm ngược của mình
+        if (!propertiesThatChanged.ContainsKey(KEY_DEM_BAT_DAU)) return;
+
+        object vBatDau = propertiesThatChanged[KEY_DEM_BAT_DAU];
+        object vGiay = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(KEY_DEM_GIAY)
+            ? PhotonNetwork.CurrentRoom.CustomProperties[KEY_DEM_GIAY]
+            : null;
+        if (vBatDau == null || vGiay == null) return;
+
+        BatGiaoDienDemNguoc();
+        StartCoroutine(HienDemNguocMayKhach(System.Convert.ToDouble(vBatDau), System.Convert.ToSingle(vGiay)));
     }
 
     // =========================================================================
@@ -570,11 +739,19 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     public override void OnPlayerLeftRoom(Player otherPlayer)
     {
+        if (dangDem && !daGoiNapScene && KhongDuNguoiDeVaoGame())
+        {
+            HuyDemNguoc($"<color=#FFFF00>{LayTen(otherPlayer)} đã thoát. Không đủ người chơi (cần ít nhất 2), đã hủy đếm ngược!</color>");
+            return;
+        }
+
         HienThongBaoTamThoi($"<color=#FFFF00>{LayTen(otherPlayer)} đã thoát khỏi phòng!</color>");
     }
 
     public override void OnMasterClientSwitched(Player newMasterClient)
     {
+        if (newMasterClient != null && newMasterClient.IsLocal && TiepQuanDemNguoc()) return;
+
         HienThongBaoTamThoi(newMasterClient.IsLocal
             ? "<color=#00FFFF>Bạn là Chủ Phòng mới!</color>"
             : $"<color=#00FFFF>{LayTen(newMasterClient)} là Chủ Phòng mới!</color>");
@@ -640,6 +817,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     private void HienTrangThaiPhong(string thongBao = null)
     {
         if (!PhotonNetwork.InRoom) return;
+        if (dangDem) return;           // đang đếm ngược: không ghi đè chữ đếm ngược
 
         Room phong = PhotonNetwork.CurrentRoom;
         bool laChuPhong = PhotonNetwork.IsMasterClient;
@@ -670,7 +848,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     private void HienThongBaoTamThoi(string thongBao)
     {
-        if (!PhotonNetwork.InRoom) return;
+        if (!PhotonNetwork.InRoom || dangDem) return;
 
         if (coroutineThongBao != null) StopCoroutine(coroutineThongBao);
         coroutineThongBao = StartCoroutine(ChayThongBaoTamThoi(thongBao));
