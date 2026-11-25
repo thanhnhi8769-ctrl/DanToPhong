@@ -204,7 +204,7 @@ Khán giả (sau khi bị loại): `E`/`→`/`Tab` xem tay đua kế, `Q`/`←` 
 
 ## 📦 8. Tải bản build game
 
-👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/19mJVw_RUIEru4CHCZbzZtJtPiwsEHSFR?usp=sharing)
+👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/1ANUCOxf0G78X-D3HPxHhLov1V-iqSMks?usp=sharing)
 
 ---
 
