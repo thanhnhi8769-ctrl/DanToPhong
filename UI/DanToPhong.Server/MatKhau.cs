@@ -5,8 +5,8 @@ namespace DanToPhong.Server
 {
     public static class MatKhau
     {
-        private const int SaltSize = 16;      // 128-bit salt
-        private const int KeySize = 32;       // 256-bit hash
+        private const int SaltSize = 16;
+        private const int KeySize = 32;
         private const int Iterations = 600_000;
 
         public static (string HashBase64, string SaltBase64) BamMatKhau(string plainPassword)

@@ -455,6 +455,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     {
         if (Time.time - thoiDiemHoiSinh < thoiGianChoHoiSinh) return;
         thoiDiemHoiSinh = Time.time;
+        // Bị đưa về vạch xuất phát (rơi nước / ra khỏi đường) thì trừ thời gian giống như chạm nước
+        GameManager gm = GameManager.Instance;
+        if (gm != null) gm.ChamNuoc();
 
         if (ghiLogChanDoan)
             Debug.LogWarning($"[XE HỒI SINH] tại {transform.position}, bamDat={dangBamDat}, tốc độ={tocDoDangChay:F1}");
@@ -495,8 +498,7 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         GameObject muiTenObj = new GameObject("MinimapIcon");
         muiTenObj.transform.SetParent(transform);
-        muiTenObj.transform.localPosition = new Vector3(0f, 3.5f, 0f);
-        muiTenObj.transform.localRotation = Quaternion.identity;
+        muiTenObj.transform.SetLocalPositionAndRotation(new Vector3(0f, 3.5f, 0f), Quaternion.identity);
         muiTenObj.transform.localScale = new Vector3(4.5f, 1f, 4.5f);
 
         int layerMinimap = LayLayerMinimap();
@@ -1223,8 +1225,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
     public void PhanhXe()
     {
-        if (hieuUngPhanh != null)
-            hieuUngPhanh.SetActive(dangLui && Mathf.Abs(tocDoDangChay) > 1f);
+        if (hieuUngPhanh == null) return;
+        bool bat = dangLui && Mathf.Abs(tocDoDangChay) > 1f;
+        if (hieuUngPhanh.activeSelf != bat) hieuUngPhanh.SetActive(bat);
     }
 
     private void NhayXe()

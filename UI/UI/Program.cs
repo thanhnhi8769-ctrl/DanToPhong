@@ -7,10 +7,10 @@ namespace UI
     internal static class Program
     {
         [STAThread]
-        static void Main()
+        private static void Main()
         {
             ApplicationConfiguration.Initialize();
-            using NetworkClientService netClient = new NetworkClientService("127.0.0.1", 9000);
+            var netClient = new NetworkClientService();
             Application.Run(new LoginForm(netClient));
         }
     }

@@ -149,12 +149,49 @@ public class SelectManager : MonoBehaviour
     private float thoiDiemKiemTraVaiTro;
     private Canvas cachedCanvas;
 
+    // FIX: xóa scene đồng bộ cũ (SelectScene) khỏi Room để Lobby không bị PUN kéo ngược về Select
+    private void XoaSceneDongBoCuTrongPhong()
+    {
+        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null)
+        {
+            PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable { { "curScn", null } });
+        }
+    }
+
+    private void DamBaoEventSystemHoatDong()
+    {
+        EventSystem es = FindFirstObjectByType<EventSystem>();
+        if (es == null)
+        {
+            GameObject esObj = new GameObject("EventSystem");
+            es = esObj.AddComponent<EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+            esObj.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+#else
+            esObj.AddComponent<StandaloneInputModule>();
+#endif
+        }
+        es.enabled = true;
+        if (es.gameObject != null && !es.gameObject.activeSelf)
+            es.gameObject.SetActive(true);
+    }
+
     private void Start()
     {
         Time.timeScale = 1f;
         PhotonNetwork.AutomaticallySyncScene = false;
+        XoaSceneDongBoCuTrongPhong(); // FIX
+        DamBaoEventSystemHoatDong();
         cam = Camera.main;
         cachedCanvas = FindFirstObjectByType<Canvas>();
+
+        if (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer != null)
+        {
+            PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
+            {
+                { "DangChonXe", true }
+            });
+        }
 
         ButtonFx.MauChung = Color.white;
         tenCacMauXe = VehicleCatalog.GetAllNames();
@@ -223,8 +260,12 @@ public class SelectManager : MonoBehaviour
         CapNhatGiaoDien();
     }
 
+    private float thoiDiemDongBoUI;
+
     private void LateUpdate()
     {
+        if (Time.unscaledTime < thoiDiemDongBoUI) return;
+        thoiDiemDongBoUI = Time.unscaledTime + 0.25f;
         DongBoLopHienThiUI();
     }
 
@@ -236,22 +277,18 @@ public class SelectManager : MonoBehaviour
         Transform root = cachedCanvas.rootCanvas.transform;
         bool bangHuongDanDangMo = false;
 
-        // Tìm hộp thoại hướng dẫn đang mở (dựa vào khung hộp thoại trung tâm chứa chữ hướng dẫn)
         foreach (Image img in root.GetComponentsInChildren<Image>(false))
         {
             if (img == null || img.GetComponent<Button>() != null) continue;
             if (mapPickerGO != null && img.transform.IsChildOf(mapPickerGO.transform)) continue;
 
             RectTransform rt = img.rectTransform;
-            // Bỏ qua lớp phủ toàn màn hình (giữ nguyên lớp phủ xám toàn màn hình)
             if (rt.anchorMin == Vector2.zero && rt.anchorMax == Vector2.one) continue;
 
-            // Nhận diện khung hộp thoại lớn ở giữa màn hình
             if (rt.rect.width > 500f && rt.rect.height > 300f)
             {
                 bangHuongDanDangMo = true;
 
-                // Đổi màu khung hộp thoại sáng sang nền tối để chữ trắng rõ ràng
                 Color c = img.color;
                 if (c.r > 0.55f && c.g > 0.55f && c.b > 0.55f)
                     img.color = new Color(0.10f, 0.12f, 0.16f, 0.96f);
@@ -264,7 +301,6 @@ public class SelectManager : MonoBehaviour
             if (mapPickerGO.activeSelf != nenHienMap)
                 mapPickerGO.SetActive(nenHienMap);
 
-            // Khi bảng hướng dẫn đã đóng, đưa MapPicker lên trên lớp phủ xám để ảnh map sáng rõ
             if (nenHienMap && mapPickerGO.transform.GetSiblingIndex() != root.childCount - 1)
                 mapPickerGO.transform.SetAsLastSibling();
         }
@@ -520,10 +556,24 @@ public class SelectManager : MonoBehaviour
             GanHieuUngNut(btn);
 
             string tenBtn = btn.gameObject.name.ToLower();
-            TMPro.TMP_Text txt = btn.GetComponentInChildren<TMPro.TMP_Text>(true);
-            string label = txt != null ? txt.text.Trim().ToUpper() : "";
+            TMPro.TMP_Text tmp = btn.GetComponentInChildren<TMPro.TMP_Text>(true);
+            Text uguiTxt = btn.GetComponentInChildren<Text>(true);
+            string label = (tmp != null ? tmp.text : (uguiTxt != null ? uguiTxt.text : "")).Trim().ToUpper();
 
-            if (btn == confirmButton || tenBtn.Contains("confirm") || label == "CONFIRM")
+            bool laNutConfirm = btn == confirmButton
+                || tenBtn.Contains("confirm")
+                || tenBtn.Contains("xacnhan")
+                || tenBtn.Contains("xac_nhan")
+                || tenBtn.Contains("select")
+                || tenBtn.Contains("chon")
+                || label == "CONFIRM"
+                || label == "XÁC NHẬN"
+                || label == "XAC NHAN"
+                || label == "SELECT"
+                || label == "CHỌN"
+                || label == "OK";
+
+            if (laNutConfirm)
             {
                 if (confirmButton == null) confirmButton = btn;
                 btn.onClick.RemoveListener(ConfirmSelection);
@@ -531,7 +581,7 @@ public class SelectManager : MonoBehaviour
                 continue;
             }
 
-            if (tenBtn.Contains("back") || label == "BACK")
+            if (tenBtn.Contains("back") || label == "BACK" || label == "QUAY LẠI")
             {
                 btn.onClick.RemoveListener(BackToMenu);
                 btn.onClick.AddListener(BackToMenu);
@@ -815,24 +865,53 @@ public class SelectManager : MonoBehaviour
             confirmButton.interactable = daSoHuu;
     }
 
+    private string TimTenSceneLobbyHopLe()
+    {
+        if (!string.IsNullOrEmpty(tenSceneLobby) && Application.CanStreamedLevelBeLoaded(tenSceneLobby))
+            return tenSceneLobby;
+
+        int count = SceneManager.sceneCountInBuildSettings;
+        for (int i = 0; i < count; i++)
+        {
+            string path = SceneUtility.GetScenePathByBuildIndex(i);
+            string name = System.IO.Path.GetFileNameWithoutExtension(path);
+            if (!string.IsNullOrEmpty(name) && name.ToLower().Contains("lobby"))
+                return name;
+        }
+
+        return null;
+    }
+
     public void ConfirmSelection()
     {
+        Debug.Log($"[SelectManager] CLICK CONFIRM! index={scooterIndex}, owned={VehicleCatalog.IsOwned(scooterIndex)}, inRoom={PhotonNetwork.InRoom}, lobby={tenSceneLobby}");
         if (dangChuyenScene) return;
 
         if (!VehicleCatalog.IsOwned(scooterIndex))
         {
-            if (warningText != null)
+            int xeSoHuu = TimXeDauTienDaSoHuu();
+            if (VehicleCatalog.IsOwned(xeSoHuu))
             {
-                warningText.gameObject.SetActive(true);
-                warningText.text = "YOU DO NOT OWN THIS SCOOTER!";
+                scooterIndex = xeSoHuu;
+                CapNhatGiaoDien();
             }
-            return;
+            else
+            {
+                if (warningText != null)
+                {
+                    warningText.gameObject.SetActive(true);
+                    warningText.text = "YOU DO NOT OWN THIS SCOOTER!";
+                }
+                return;
+            }
         }
 
         dangChuyenScene = true;
         VehicleCatalog.SelectVehicle(scooterIndex);
 
-        if (laChuPhong && maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
+        bool laChuPhongHienTai = PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient;
+
+        if (laChuPhongHienTai && maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
         {
             PlayerInventory.SetSelectedMap(maps[mapIndex].sceneName);
         }
@@ -843,11 +922,12 @@ public class SelectManager : MonoBehaviour
             {
                 PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
                 {
-                    { "Scooter", scooterIndex }
+                    { "Scooter", scooterIndex },
+                    { "DangChonXe", false }
                 });
             }
 
-            if (PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null &&
+            if (laChuPhongHienTai && PhotonNetwork.CurrentRoom != null &&
                 maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
             {
                 PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
@@ -856,7 +936,19 @@ public class SelectManager : MonoBehaviour
                 });
             }
 
-            SceneManager.LoadScene(tenSceneLobby);
+            XoaSceneDongBoCuTrongPhong(); // FIX
+            LobbyManager.DanhDauCoSanPhongTuVanTruoc();
+
+            string sceneDich = TimTenSceneLobbyHopLe();
+            if (!string.IsNullOrEmpty(sceneDich))
+            {
+                SceneManager.LoadScene(sceneDich);
+            }
+            else
+            {
+                Debug.LogError($"[SelectManager] Không tìm thấy scene Lobby '{tenSceneLobby}' trong Build Settings!");
+                dangChuyenScene = false;
+            }
         }
         else
         {
@@ -867,14 +959,41 @@ public class SelectManager : MonoBehaviour
         }
     }
 
+    // BACK / ESC = quay về PHÒNG CHỜ (Lobby), giữ nguyên phòng, KHÔNG lưu lựa chọn đang xem.
+    // (CONFIRM = lưu lựa chọn rồi về phòng chờ). Chỉ khi không ở trong phòng mới về menu.
+    // Giữ tên BackToMenu để các nút / script đang gọi hàm này vẫn chạy.
     public void BackToMenu()
     {
         if (dangChuyenScene) return;
         dangChuyenScene = true;
 
         if (PhotonNetwork.InRoom)
-            PhotonNetwork.LeaveRoom();
+        {
+            if (PhotonNetwork.LocalPlayer != null)
+            {
+                PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
+                {
+                    { "DangChonXe", false }
+                });
+            }
 
-        SceneManager.LoadScene(tenSceneMenu);
+            XoaSceneDongBoCuTrongPhong();
+            LobbyManager.DanhDauCoSanPhongTuVanTruoc();
+
+            string sceneDich = TimTenSceneLobbyHopLe();
+            if (!string.IsNullOrEmpty(sceneDich))
+            {
+                SceneManager.LoadScene(sceneDich);
+                return;
+            }
+
+            // Không tìm thấy scene Lobby: ở lại màn này, TUYỆT ĐỐI không rời phòng
+            Debug.LogError($"[SelectManager] Không tìm thấy scene Lobby '{tenSceneLobby}' trong Build Settings!");
+            dangChuyenScene = false;
+            return;
+        }
+
+        DieuHuong.VeMenu(tenSceneMenu);
     }
 }
+        

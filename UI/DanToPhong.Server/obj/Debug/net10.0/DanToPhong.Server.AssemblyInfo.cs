@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DanToPhong.Server")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a199fd542d521e382a951c06f17576c87dcdd13f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0d49c13c92107a3e1c7a923436adfe760737abc8")]
 [assembly: System.Reflection.AssemblyProductAttribute("DanToPhong.Server")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DanToPhong.Server")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

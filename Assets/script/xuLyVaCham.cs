@@ -45,6 +45,18 @@ public class XuLyVaChamChoXe : MonoBehaviourPun
         }
     }
 
+    private void OnCollisionEnter(Collision collision)
+    {
+        // 3. Ra khỏi đường đua chạm Ground: trừ thời gian theo cấu hình ChamNuoc()
+        if (collision.gameObject.CompareTag("Ground"))
+        {
+            if (LaXeCuaMinh && GameManager.Instance != null)
+            {
+                GameManager.Instance.ChamNuoc();
+            }
+        }
+    }
+
     // Vật cản (Obstacle / Barricade) là vật cứng: không bỏ va chạm nữa.
     // Việc chặn xe do scooter.cs xử lý.
 }

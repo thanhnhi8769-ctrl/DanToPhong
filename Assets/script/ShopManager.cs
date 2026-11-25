@@ -155,8 +155,12 @@ public class ShopManager : MonoBehaviour
     private readonly List<Transform> danhSachMiniXoay = new List<Transform>();
     private readonly Dictionary<int, GameObject> miniModelsCache = new Dictionary<int, GameObject>();
     private readonly Dictionary<string, GameObject> modelTheoLoai = new Dictionary<string, GameObject>();
+    private readonly Dictionary<string, int> daToMau = new Dictionary<string, int>();   // loại model -> index xe đã tô gần nhất
 
     private GameObject prefabScooterGoc;
+    private GameObject holderNguon;                // object ẩn chứa 1 bản prefab dùng chung
+    private GameObject goiNguon;                   // bản prefab đó (nằm dưới holder ẩn nên script không chạy)
+    private readonly Dictionary<string, Transform> nodeNguon = new Dictionary<string, Transform>();
     private GameObject keMiniRoot;
     private Vector2 viTriThongBao;
 
@@ -169,6 +173,19 @@ public class ShopManager : MonoBehaviour
     private Material matVong;
     private LineRenderer vongSan;
     private TextMesh chuTieuDeMini;
+
+    // Đồng bộ với launcher: ServerClient chỉ báo khi kho thật sự đổi
+    private void OnEnable() { ServerClient.DaCapNhat += KhiKhoDoi; }
+    private void OnDisable() { ServerClient.DaCapNhat -= KhiKhoDoi; }
+
+    private void KhiKhoDoi()
+    {
+        if (scooters == null || scooters.Length == 0) return;
+
+        UpdateCoinsUI();
+        CapNhatToanBoDoSoHuuMini();
+        HienThiXeTaiIndex(currentIndex);
+    }
 
     private void Start()
     {
@@ -229,6 +246,29 @@ public class ShopManager : MonoBehaviour
         }
     }
 
+    // Trả node xe (vd ElectricScooterDefault) trong 1 bản prefab dùng chung. Bản này nằm dưới holder
+    // bị tắt nên Awake/OnEnable của các script trong prefab không chạy; chỉ dùng để nhân bản.
+    private Transform LayNodeNguon(string sourceModel)
+    {
+        if (prefabScooterGoc == null) return null;
+
+        if (goiNguon == null)
+        {
+            holderNguon = new GameObject("ShopSourceHolder");
+            holderNguon.SetActive(false);
+            goiNguon = Instantiate(prefabScooterGoc, holderNguon.transform);
+            nodeNguon.Clear();
+        }
+
+        string key = sourceModel ?? "";
+        if (!nodeNguon.TryGetValue(key, out Transform node) || node == null)
+        {
+            node = TimNodeXeThongMinh(goiNguon.transform, sourceModel);
+            nodeNguon[key] = node;
+        }
+        return node;
+    }
+
     private GameObject LayHoacTaoModelXe(int index)
     {
         if (scooters == null || index < 0 || index >= scooters.Length) return null;
@@ -239,8 +279,7 @@ public class ShopManager : MonoBehaviour
 
         if (!modelTheoLoai.TryGetValue(loai, out GameObject model) || model == null)
         {
-            GameObject tempRoot = Instantiate(prefabScooterGoc);
-            Transform nguon = TimNodeXeThongMinh(tempRoot.transform, item.sourceModel);
+            Transform nguon = LayNodeNguon(item.sourceModel);
 
             if (nguon != null)
             {
@@ -257,9 +296,8 @@ public class ShopManager : MonoBehaviour
 
                 ChuanHoaModelSanKhau(model);
                 modelTheoLoai[loai] = model;
+                daToMau.Remove(loai);
             }
-
-            Destroy(tempRoot);
         }
 
         foreach (var kv in modelTheoLoai)
@@ -268,8 +306,12 @@ public class ShopManager : MonoBehaviour
                 kv.Value.SetActive(kv.Key == loai);
         }
 
-        if (model != null)
+        // Chỉ tô lại khi đổi sang màu khác (làm mới UI không cần tô lại)
+        if (model != null && (!daToMau.TryGetValue(loai, out int daTo) || daTo != index))
+        {
             VehicleCatalog.ApplyPaint(model, item.paintColor);
+            daToMau[loai] = index;
+        }
 
         return model;
     }
@@ -403,6 +445,7 @@ public class ShopManager : MonoBehaviour
     private void OnDestroy()
     {
         if (matVong != null) Destroy(matVong);
+        if (holderNguon != null) Destroy(holderNguon);
     }
 
     private enum Phim { Esc, Trai, Phai }
@@ -676,36 +719,25 @@ public class ShopManager : MonoBehaviour
         ShopItem item = scooters[index];
         if (item == null || prefabScooterGoc == null) return null;
 
-        GameObject tempRoot = Instantiate(prefabScooterGoc);
-        Transform nguon = TimNodeXeThongMinh(tempRoot.transform, item.sourceModel);
-        GameObject miniXe = null;
+        Transform nguon = LayNodeNguon(item.sourceModel);
+        if (nguon == null) return null;
 
-        if (nguon != null)
+        GameObject miniXe = Instantiate(nguon.gameObject);
+        miniXe.name = "MiniModel";
+        miniXe.SetActive(true);
+
+        foreach (Transform t in miniXe.GetComponentsInChildren<Transform>(true))
         {
-            miniXe = Instantiate(nguon.gameObject);
-            miniXe.name = "MiniModel";
-            miniXe.SetActive(true);
-
-            foreach (Transform t in miniXe.GetComponentsInChildren<Transform>(true))
-            {
-                t.gameObject.SetActive(true);
-                if (t.name.Contains("Minimap") || t.name.Contains("vetPhanh"))
-                    t.gameObject.SetActive(false);
-            }
-
-            KhoaVatLyVaChuyenDong(miniXe, this);
-            TatBongDo(miniXe);
-
-            foreach (Renderer r in miniXe.GetComponentsInChildren<Renderer>(true))
-            {
-                if (r != null)
-                    r.materials = r.materials;
-            }
-
-            VehicleCatalog.ApplyPaint(miniXe, item.paintColor);
+            t.gameObject.SetActive(true);
+            if (t.name.Contains("Minimap") || t.name.Contains("vetPhanh"))
+                t.gameObject.SetActive(false);
         }
 
-        Destroy(tempRoot);
+        KhoaVatLyVaChuyenDong(miniXe, this);
+        TatBongDo(miniXe);
+
+        // ApplyPaint tự tạo bản sao Material riêng cho model này
+        VehicleCatalog.ApplyPaint(miniXe, item.paintColor);
         return miniXe;
     }
 
@@ -899,6 +931,6 @@ public class ShopManager : MonoBehaviour
     {
         if (dangThoat) return;
         dangThoat = true;
-        SceneManager.LoadScene(tenSceneMenu);
+        DieuHuong.VeMenu(tenSceneMenu);
     }
 }

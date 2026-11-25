@@ -28,13 +28,13 @@ namespace UI
 
         private readonly NetworkClientService _netClient;
         private bool isPasswordVisible;
-        private string? lastLoginError;
         private bool isNavigating;
 
         public LoginForm(NetworkClientService netClient)
         {
             _netClient = netClient;
             InitializeComponent();
+            CauHinhNutDoExit();
             DoubleBuffered = true;
             AcceptButton = btnLogin;
 
@@ -46,6 +46,55 @@ namespace UI
 
             TaiThongTinGhiNho();
             CanGiuaBoCuc();
+        }
+        private void CauHinhNutDoExit()
+        {
+            if (btnExit == null) return;
+
+            btnExit.FlatStyle = FlatStyle.Flat;
+            btnExit.FlatAppearance.BorderSize = 0;
+            btnExit.UseVisualStyleBackColor = false;
+            btnExit.BackColor = Color.FromArgb(155, 17, 24);
+            btnExit.ForeColor = Color.White;
+            btnExit.FlatAppearance.MouseOverBackColor = Color.FromArgb(185, 24, 32);
+            btnExit.FlatAppearance.MouseDownBackColor = Color.FromArgb(120, 12, 18);
+        }
+
+        private void picAvatar_Paint(object? sender, PaintEventArgs e)
+        {
+            if (picAvatar.Width <= 0 || picAvatar.Height <= 0) return;
+
+            using GraphicsPath path = new GraphicsPath();
+            path.AddEllipse(0, 0, picAvatar.Width - 1, picAvatar.Height - 1);
+
+            Region? oldRegion = picAvatar.Region;
+            picAvatar.Region = new Region(path);
+            oldRegion?.Dispose();
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            if (picAvatar.Image == null)
+            {
+                using SolidBrush fillBrush = new SolidBrush(Color.FromArgb(240, 236, 246));
+                e.Graphics.FillEllipse(fillBrush, 0, 0, picAvatar.Width - 1, picAvatar.Height - 1);
+
+                using Font initialFont = new Font("Segoe UI", 16F, FontStyle.Bold);
+                using SolidBrush textBrush = new SolidBrush(Color.FromArgb(43, 27, 61));
+                string text = string.IsNullOrWhiteSpace(txtUsername.Text)
+                    ? "SR"
+                    : txtUsername.Text.Trim()[0].ToString().ToUpperInvariant();
+
+                SizeF size = e.Graphics.MeasureString(text, initialFont);
+                e.Graphics.DrawString(
+                    text,
+                    initialFont,
+                    textBrush,
+                    (picAvatar.Width - size.Width) / 2f,
+                    (picAvatar.Height - size.Height) / 2f);
+            }
+
+            using Pen borderPen = new Pen(Color.FromArgb(43, 27, 61), 2f);
+            e.Graphics.DrawEllipse(borderPen, 1, 1, picAvatar.Width - 3, picAvatar.Height - 3);
         }
 
         private void TaiThongTinGhiNho()
@@ -64,6 +113,37 @@ namespace UI
             catch
             {
             }
+        }
+        private static string DuongDanAvatarLocal(string username) => Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+    "DanToPhong", "Avatars", $"{username}.png");
+
+        // Hiện avatar tương ứng username đang gõ (nếu máy này đã từng đăng nhập tài khoản đó)
+        private void CapNhatAvatarTheoUsername()
+        {
+            Image? old = picAvatar.Image;
+            Image? neu = null;
+
+            string u = txtUsername.Text.Trim();
+            try
+            {
+                if (UsernameRegex.IsMatch(u))   // regex chặn ký tự lạ nên không lo path traversal
+                {
+                    string path = DuongDanAvatarLocal(u);
+                    if (File.Exists(path))
+                    {
+                        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        using var temp = Image.FromStream(fs);
+                        neu = new Bitmap(temp);
+                    }
+                }
+            }
+            catch { neu = null; }
+
+            picAvatar.SizeMode = PictureBoxSizeMode.StretchImage;
+            picAvatar.Image = neu;
+            old?.Dispose();
+            picAvatar.Invalidate();
         }
 
         private void LuuThongTinGhiNho(string username)
@@ -89,11 +169,11 @@ namespace UI
         private void VeVienDuoiTextBox(object? sender, PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            VeDuongVien(e.Graphics, txtUsername, null, lblErrUsername.Text.Length > 0);
+            VeDuongVien(e.Graphics, txtUsername, btnTogglePassword, lblErrUsername.Text.Length > 0);
             VeDuongVien(e.Graphics, txtPassword, btnTogglePassword, lblErrPassword.Text.Length > 0);
         }
 
-        private void VeDuongVien(Graphics g, TextBox txt, Control? rightControl, bool hasError)
+        private static void VeDuongVien(Graphics g, TextBox txt, Control? rightControl, bool hasError)
         {
             Color borderColor = hasError
                 ? Color.Crimson
@@ -104,7 +184,7 @@ namespace UI
             float thickness = hasError || txt.Focused ? 2.2f : 1.5f;
 
             using Pen pen = new Pen(borderColor, thickness);
-            int y = txt.Bottom + 3;
+            int y = txt.Bottom + 4;
             int rightEdge = rightControl != null ? rightControl.Right : txt.Right;
             g.DrawLine(pen, txt.Left - 1, y, rightEdge, y);
         }
@@ -140,7 +220,7 @@ namespace UI
             int topOffset = pnlTitleBar.Height + pnlHeaderBar.Height;
             int usableHeight = Math.Max(0, ClientSize.Height - topOffset);
 
-            int x = Math.Max(16, (ClientSize.Width - nightPanel1.Width) / 2);
+            int x = Math.Max(20, (ClientSize.Width - nightPanel1.Width) / 2);
             int y = topOffset + Math.Max(16, (usableHeight - nightPanel1.Height) / 2);
 
             nightPanel1.Location = new Point(x, y);
@@ -150,9 +230,33 @@ namespace UI
             panelShadow.SendToBack();
             nightPanel1.BringToFront();
 
-            lblTitle.Location = new Point((nightPanel1.Width - lblTitle.Width) / 2, 16);
-            lblSubtitle.Location = new Point((nightPanel1.Width - lblSubtitle.Width) / 2, lblTitle.Bottom + 2);
-            btnHelp.Location = new Point(nightPanel1.Width - btnHelp.Width - 14, 14);
+            int leftMargin = 42;
+            int contentWidth = nightPanel1.Width - leftMargin * 2;
+
+            lblTitle.Location = new Point((nightPanel1.Width - lblTitle.Width) / 2, 20);
+            lblSubtitle.Location = new Point((nightPanel1.Width - lblSubtitle.Width) / 2, lblTitle.Bottom + 4);
+            btnHelp.Location = new Point(nightPanel1.Width - btnHelp.Width - 18, 20);
+            picAvatar.Location = new Point((nightPanel1.Width - picAvatar.Width) / 2, lblSubtitle.Bottom + 12);
+
+            lblUsername.Location = new Point(leftMargin, picAvatar.Bottom + 18);
+            txtUsername.Location = new Point(leftMargin, lblUsername.Bottom + 8);
+            txtUsername.Width = contentWidth;
+            lblErrUsername.Location = new Point(leftMargin, txtUsername.Bottom + 10);
+
+            lblPassword.Location = new Point(leftMargin, lblErrUsername.Bottom + 14);
+            txtPassword.Location = new Point(leftMargin, lblPassword.Bottom + 8);
+            txtPassword.Width = contentWidth - btnTogglePassword.Width - 8;
+            btnTogglePassword.Location = new Point(leftMargin + contentWidth - btnTogglePassword.Width, txtPassword.Top - 1);
+            lblErrPassword.Location = new Point(leftMargin, txtPassword.Bottom + 10);
+
+            chkRememberMe.Location = new Point(leftMargin, lblErrPassword.Bottom + 18);
+            btnForgotPassword.Location = new Point(leftMargin + contentWidth - btnForgotPassword.Width, chkRememberMe.Top - 2);
+
+            btnLogin.Location = new Point(leftMargin, chkRememberMe.Bottom + 20);
+            btnLogin.Width = contentWidth;
+
+            btnRegister.Location = new Point(leftMargin, btnLogin.Bottom + 16);
+            btnRegister.Width = contentWidth;
 
             BoGocControl(nightPanel1, 16);
             BoGocControl(panelShadow, 16);
@@ -173,8 +277,9 @@ namespace UI
             path.AddArc(0, ctrl.Height - d, d, d, 90, 90);
             path.CloseFigure();
 
-            ctrl.Region?.Dispose();
+            Region? oldRegion = ctrl.Region;
             ctrl.Region = new Region(path);
+            oldRegion?.Dispose();
         }
 
         private static string? ValidateUsername(string username)
@@ -188,15 +293,14 @@ namespace UI
 
         private void txtUsername_TextChanged(object? sender, EventArgs e)
         {
-            lastLoginError = null;
             string u = txtUsername.Text.Trim();
             lblErrUsername.Text = string.IsNullOrEmpty(u) ? "" : (ValidateUsername(u) ?? "");
+            CapNhatAvatarTheoUsername();
             nightPanel1.Invalidate();
         }
 
         private void txtPassword_TextChanged(object? sender, EventArgs e)
         {
-            lastLoginError = null;
             if (!string.IsNullOrEmpty(txtPassword.Text))
                 lblErrPassword.Text = "";
             nightPanel1.Invalidate();
@@ -259,11 +363,18 @@ namespace UI
                     txtUsername.Clear();
                     lblErrUsername.Text = "";
                 }
+                CapNhatAvatarTheoUsername();
 
                 isNavigating = false;
-                Show();
-                CanGiuaBoCuc();
-                nightPanel1.Invalidate();
+                if (!IsDisposed)
+                {
+                    if (!Visible)
+                        Show();
+                    BringToFront();
+                    Activate();
+                    CanGiuaBoCuc();
+                    nightPanel1.Invalidate();
+                }
             };
 
             Hide();
@@ -301,31 +412,32 @@ namespace UI
             nightPanel1.Invalidate();
             if (hasError) return;
 
-            if (!string.IsNullOrEmpty(lastLoginError))
-            {
-                lblErrPassword.Text = lastLoginError;
-                nightPanel1.Invalidate();
-                return;
-            }
-
             btnLogin.Enabled = false;
             try
             {
                 ResponsePacket resp = await _netClient.LoginAsync(username, password);
                 if (!resp.Success)
                 {
-                    lastLoginError = resp.Code == ErrorCodes.AuthFailed
+                    string errMsg = resp.Code == ErrorCodes.AuthFailed
                         ? "Invalid username or password."
                         : string.IsNullOrWhiteSpace(resp.Message)
                             ? "Unable to sign in right now. Please try again."
                             : resp.Message;
 
-                    lblErrPassword.Text = lastLoginError;
+                    lblErrPassword.Text = errMsg;
                     nightPanel1.Invalidate();
+
+                    if (resp.Code != ErrorCodes.AuthFailed)
+                    {
+                        PopupNoticeForm.ShowNotice(
+                            this,
+                            "Login Failed",
+                            errMsg,
+                            PopupNoticeForm.NoticeKind.Warning);
+                    }
                     return;
                 }
 
-                lastLoginError = null;
                 LuuThongTinGhiNho(username);
 
                 UserInfoDto currentUser = resp.User ?? new UserInfoDto
@@ -334,7 +446,8 @@ namespace UI
                     FullName = username
                 };
 
-                MainForm mainForm = new MainForm(_netClient, currentUser);
+                Main mainForm = new Main(_netClient, currentUser);
+                mainForm.AttachLoginForm(this);
                 MoFormConVaTroVe(mainForm, clearPasswordOnReturn: true, syncSizeFromLogin: true);
             }
             finally

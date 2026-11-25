@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using DanToPhong.Protocol;
 using UI.Services;
@@ -17,16 +20,27 @@ namespace UI
         private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
 
         private readonly NetworkClientService _netClient;
+        private readonly System.Windows.Forms.Timer _otpTimer = new();
         private bool isPasswordVisible;
         private bool isConfirmPasswordVisible;
         private bool isReturningToLogin;
+
+        private string? selectedAvatarPath;
+        private bool hasSentCode;
+        private string? otpTargetEmail;
+        private int otpCountdownSeconds;
+        private string? _currentOtpCode;
 
         public RegisterForm(NetworkClientService netClient)
         {
             _netClient = netClient;
             InitializeComponent();
+            CauHinhNutDoExit();
             DoubleBuffered = true;
             AcceptButton = btnRegister;
+
+            txtRacerId.Text = Random.Shared.Next(1, 999999).ToString("D6");
+            cmbGender.SelectedIndex = 0;
 
             dtpBirthday.Format = DateTimePickerFormat.Custom;
             dtpBirthday.CustomFormat = "dd/MM/yyyy";
@@ -34,7 +48,18 @@ namespace UI
             dtpBirthday.MinDate = new DateTime(1920, 1, 1);
             dtpBirthday.Value = new DateTime(2004, 1, 1);
 
-            TextBox[] fields = new[] { txtUsername, txtPassword, txtConfirmPassword, txtFullName, txtEmail };
+            _otpTimer.Interval = 1000;
+            _otpTimer.Tick += OtpTimer_Tick;
+
+            TextBox[] fields = new[]
+            {
+                txtUsername,
+                txtPassword,
+                txtConfirmPassword,
+                txtFullName,
+                txtEmail,
+                txtVerificationCode
+            };
             foreach (TextBox tb in fields)
             {
                 tb.GotFocus += (_, _) => nightPanel1.Invalidate();
@@ -45,17 +70,149 @@ namespace UI
             CanGiuaBoCuc();
         }
 
+        private static string DuongDanAvatarLocal(string username) => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DanToPhong",
+            "Avatars",
+            $"{username}.png");
+
+        private void LuuAvatarLocal(string username)
+        {
+            if (picAvatar.Image == null) return;
+            try
+            {
+                string path = DuongDanAvatarLocal(username);
+                string? dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+                using Bitmap cloned = new Bitmap(picAvatar.Image);
+                cloned.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            catch
+            {
+            }
+        }
+
+        private async Task DayAvatarLenServerSauDangKyAsync(string username, string password)
+        {
+            if (string.IsNullOrEmpty(selectedAvatarPath)) return;
+            try
+            {
+                byte[]? data = AvatarHelper.ToJpeg128(selectedAvatarPath);
+                if (data == null) return;
+
+                ResponsePacket login = await _netClient.LoginAsync(username, password);
+                if (!login.Success) return;
+
+                await _netClient.UploadAvatarAsync(data);
+                await _netClient.LogoutAsync();
+            }
+            catch
+            {
+            }
+        }
+
+        private void picAvatar_Paint(object? sender, PaintEventArgs e)
+        {
+            if (picAvatar.Width <= 0 || picAvatar.Height <= 0) return;
+
+            using GraphicsPath path = new GraphicsPath();
+            path.AddEllipse(0, 0, picAvatar.Width - 1, picAvatar.Height - 1);
+
+            Region? oldRegion = picAvatar.Region;
+            picAvatar.Region = new Region(path);
+            oldRegion?.Dispose();
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            if (picAvatar.Image == null)
+            {
+                using SolidBrush fillBrush = new SolidBrush(Color.FromArgb(240, 236, 246));
+                e.Graphics.FillEllipse(fillBrush, 0, 0, picAvatar.Width - 1, picAvatar.Height - 1);
+
+                using Font initialFont = new Font("Segoe UI", 15F, FontStyle.Bold);
+                using SolidBrush textBrush = new SolidBrush(Color.FromArgb(43, 27, 61));
+                string text = string.IsNullOrWhiteSpace(txtUsername.Text)
+                    ? "SR"
+                    : txtUsername.Text.Trim()[0].ToString().ToUpperInvariant();
+
+                SizeF size = e.Graphics.MeasureString(text, initialFont);
+                e.Graphics.DrawString(
+                    text,
+                    initialFont,
+                    textBrush,
+                    (picAvatar.Width - size.Width) / 2f,
+                    (picAvatar.Height - size.Height) / 2f);
+            }
+
+            using Pen borderPen = new Pen(Color.FromArgb(43, 27, 61), 2f);
+            e.Graphics.DrawEllipse(borderPen, 1, 1, picAvatar.Width - 3, picAvatar.Height - 3);
+        }
+
+        private void CauHinhNutDoExit()
+        {
+            if (btnExit == null) return;
+
+            btnExit.FlatStyle = FlatStyle.Flat;
+            btnExit.FlatAppearance.BorderSize = 0;
+            btnExit.UseVisualStyleBackColor = false;
+            btnExit.BackColor = Color.FromArgb(155, 17, 24);
+            btnExit.ForeColor = Color.White;
+            btnExit.FlatAppearance.MouseOverBackColor = Color.FromArgb(185, 24, 32);
+            btnExit.FlatAppearance.MouseDownBackColor = Color.FromArgb(120, 12, 18);
+            btnExit.BringToFront();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            CauHinhNutDoExit();
+        }
+
+        private void btnChooseAvatar_Click(object? sender, EventArgs e)
+        {
+            using OpenFileDialog ofd = new OpenFileDialog
+            {
+                Title = "Select Avatar Image",
+                Filter = "Image Files (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp"
+            };
+
+            if (ofd.ShowDialog(this) != DialogResult.OK) return;
+
+            try
+            {
+                using FileStream fs = new FileStream(ofd.FileName, FileMode.Open, FileAccess.Read);
+                using Image temp = Image.FromStream(fs);
+                Image? oldImg = picAvatar.Image;
+                picAvatar.Image = new Bitmap(temp);
+                oldImg?.Dispose();
+
+                selectedAvatarPath = ofd.FileName;
+                picAvatar.Invalidate();
+            }
+            catch
+            {
+                PopupNoticeForm.ShowNotice(
+                    this,
+                    "Avatar",
+                    "Cannot load this image file.",
+                    PopupNoticeForm.NoticeKind.Warning);
+            }
+        }
+
         private void VeVienDuoiCacO(object? sender, PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            VeDuongVien(e.Graphics, txtRacerId, null, false);
             VeDuongVien(e.Graphics, txtUsername, null, lblErrUsername.Text.Length > 0);
             VeDuongVien(e.Graphics, txtPassword, btnTogglePassword, lblErrPassword.Text.Length > 0);
             VeDuongVien(e.Graphics, txtConfirmPassword, btnToggleConfirmPassword, lblErrConfirmPassword.Text.Length > 0);
             VeDuongVien(e.Graphics, txtFullName, null, lblErrFullName.Text.Length > 0);
             VeDuongVien(e.Graphics, txtEmail, null, lblErrEmail.Text.Length > 0);
+            VeDuongVien(e.Graphics, txtVerificationCode, null, lblCodeStatus.ForeColor == Color.Crimson && lblCodeStatus.Text.Length > 0);
         }
 
-        private void VeDuongVien(Graphics g, TextBox txt, Control? rightControl, bool hasError)
+        private static void VeDuongVien(Graphics g, TextBox txt, Control? rightControl, bool hasError)
         {
             Color borderColor = hasError
                 ? Color.Crimson
@@ -103,7 +260,7 @@ namespace UI
             int usableHeight = Math.Max(0, ClientSize.Height - topOffset);
 
             int x = Math.Max(16, (ClientSize.Width - nightPanel1.Width) / 2);
-            int y = topOffset + Math.Max(10, (usableHeight - nightPanel1.Height) / 2);
+            int y = topOffset + Math.Max(6, (usableHeight - nightPanel1.Height) / 2);
 
             nightPanel1.Location = new Point(x, y);
             panelShadow.Size = nightPanel1.Size;
@@ -112,9 +269,82 @@ namespace UI
             panelShadow.SendToBack();
             nightPanel1.BringToFront();
 
+            int left = 48;
+            int colGap = 44;
+            int colWidth = (nightPanel1.Width - left * 2 - colGap) / 2;
+            int rightColLeft = left + colWidth + colGap;
+
             lblTitle.Location = new Point((nightPanel1.Width - lblTitle.Width) / 2, 10);
-            lblSubtitle.Location = new Point((nightPanel1.Width - lblSubtitle.Width) / 2, lblTitle.Bottom + 2);
-            btnHelp.Location = new Point(nightPanel1.Width - btnHelp.Width - 14, 12);
+            lblSubtitle.Location = new Point((nightPanel1.Width - lblSubtitle.Width) / 2, lblTitle.Bottom + 1);
+            btnHelp.Location = new Point(nightPanel1.Width - btnHelp.Width - 16, 12);
+
+            picAvatar.Location = new Point((nightPanel1.Width - picAvatar.Width) / 2, lblSubtitle.Bottom + 8);
+            btnChooseAvatar.Location = new Point((nightPanel1.Width - btnChooseAvatar.Width) / 2, picAvatar.Bottom + 6);
+
+            int row1Y = btnChooseAvatar.Bottom + 14;
+            lblRacerId.Location = new Point(left, row1Y);
+            txtRacerId.Location = new Point(left, lblRacerId.Bottom + 3);
+            txtRacerId.Width = colWidth;
+
+            lblUsername.Location = new Point(rightColLeft, row1Y);
+            txtUsername.Location = new Point(rightColLeft, lblUsername.Bottom + 3);
+            txtUsername.Width = colWidth;
+            lblErrUsername.Location = new Point(rightColLeft, txtUsername.Bottom + 5);
+
+            int row2Y = txtRacerId.Bottom + 24;
+            lblPassword.Location = new Point(left, row2Y);
+            txtPassword.Location = new Point(left, lblPassword.Bottom + 3);
+            txtPassword.Width = colWidth - btnTogglePassword.Width - 4;
+            btnTogglePassword.Location = new Point(left + colWidth - btnTogglePassword.Width, txtPassword.Top - 1);
+            lblErrPassword.Location = new Point(left, txtPassword.Bottom + 5);
+
+            lblFullName.Location = new Point(rightColLeft, row2Y);
+            txtFullName.Location = new Point(rightColLeft, lblFullName.Bottom + 3);
+            txtFullName.Width = colWidth;
+            lblErrFullName.Location = new Point(rightColLeft, txtFullName.Bottom + 5);
+
+            int row3Y = txtPassword.Bottom + 24;
+            lblConfirmPassword.Location = new Point(left, row3Y);
+            txtConfirmPassword.Location = new Point(left, lblConfirmPassword.Bottom + 3);
+            txtConfirmPassword.Width = colWidth - btnToggleConfirmPassword.Width - 4;
+            btnToggleConfirmPassword.Location = new Point(left + colWidth - btnToggleConfirmPassword.Width, txtConfirmPassword.Top - 1);
+            lblErrConfirmPassword.Location = new Point(left, txtConfirmPassword.Bottom + 5);
+
+            lblEmail.Location = new Point(rightColLeft, row3Y);
+            txtEmail.Location = new Point(rightColLeft, lblEmail.Bottom + 3);
+            txtEmail.Width = colWidth;
+            lblErrEmail.Location = new Point(rightColLeft, txtEmail.Bottom + 5);
+
+            int row4Y = txtConfirmPassword.Bottom + 24;
+            int genderWidth = 132;
+            int bdayGap = 12;
+            int bdayWidth = colWidth - genderWidth - bdayGap;
+
+            lblBirthday.Location = new Point(left, row4Y);
+            dtpBirthday.Location = new Point(left, lblBirthday.Bottom + 3);
+            dtpBirthday.Width = bdayWidth;
+
+            lblGender.Location = new Point(left + bdayWidth + bdayGap, row4Y);
+            cmbGender.Location = new Point(left + bdayWidth + bdayGap, lblGender.Bottom + 3);
+            cmbGender.Width = genderWidth;
+
+            int codeBtnWidth = 106;
+            int codeGap = 10;
+            lblVerificationCode.Location = new Point(rightColLeft, row4Y);
+            txtVerificationCode.Location = new Point(rightColLeft, lblVerificationCode.Bottom + 5);
+            txtVerificationCode.Width = colWidth - codeBtnWidth - codeGap;
+            btnSendCode.Location = new Point(rightColLeft + colWidth - codeBtnWidth, lblVerificationCode.Bottom + 1);
+            btnSendCode.Width = codeBtnWidth;
+            lblCodeStatus.Location = new Point(rightColLeft, txtVerificationCode.Bottom + 5);
+
+            int fullWidth = nightPanel1.Width - left * 2;
+            int btnY = nightPanel1.Height - btnRegister.Height - 24;
+            int cancelWidth = 132;
+            int btnGap = 12;
+            btnRegister.Location = new Point(left, btnY);
+            btnRegister.Width = fullWidth - cancelWidth - btnGap;
+            btnCancel.Location = new Point(btnRegister.Right + btnGap, btnY);
+            btnCancel.Width = cancelWidth;
 
             BoGocControl(nightPanel1, 16);
             BoGocControl(panelShadow, 16);
@@ -135,8 +365,9 @@ namespace UI
             path.AddArc(0, ctrl.Height - d, d, d, 90, 90);
             path.CloseFigure();
 
-            ctrl.Region?.Dispose();
+            Region? oldRegion = ctrl.Region;
             ctrl.Region = new Region(path);
+            oldRegion?.Dispose();
         }
 
         private static string? ValidateUsername(string u)
@@ -169,9 +400,9 @@ namespace UI
             return null;
         }
 
-        private static string? ValidateEmailOptional(string email)
+        private static string? ValidateEmailRequired(string email)
         {
-            if (string.IsNullOrEmpty(email)) return null;
+            if (string.IsNullOrWhiteSpace(email)) return "Please enter your email address.";
             if (!EmailRegex.IsMatch(email)) return "Invalid email address.";
             return null;
         }
@@ -180,6 +411,7 @@ namespace UI
         {
             string u = txtUsername.Text.Trim();
             lblErrUsername.Text = string.IsNullOrEmpty(u) ? "" : (ValidateUsername(u) ?? "");
+            picAvatar.Invalidate();
             nightPanel1.Invalidate();
         }
 
@@ -211,8 +443,92 @@ namespace UI
         private void txtEmail_TextChanged(object? sender, EventArgs e)
         {
             string em = txtEmail.Text.Trim();
-            lblErrEmail.Text = ValidateEmailOptional(em) ?? "";
+            lblErrEmail.Text = string.IsNullOrEmpty(em) ? "" : (ValidateEmailRequired(em) ?? "");
+            if (!string.Equals(em, otpTargetEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                hasSentCode = false;
+                _currentOtpCode = null;
+                lblCodeStatus.Text = "";
+            }
             nightPanel1.Invalidate();
+        }
+
+        private void txtVerificationCode_TextChanged(object? sender, EventArgs e)
+        {
+            if (lblCodeStatus.ForeColor == Color.Crimson)
+            {
+                lblCodeStatus.Text = "";
+                nightPanel1.Invalidate();
+            }
+        }
+
+        private async void btnSendCode_Click(object? sender, EventArgs e)
+        {
+            string email = txtEmail.Text.Trim();
+            string? emailErr = ValidateEmailRequired(email);
+            if (emailErr != null)
+            {
+                lblErrEmail.ForeColor = Color.FromArgb(170, 25, 25);
+                lblErrEmail.Text = emailErr;
+                nightPanel1.Invalidate();
+                txtEmail.Focus();
+                return;
+            }
+
+            lblErrEmail.Text = "";
+            btnSendCode.Enabled = false;
+            btnSendCode.ForeColor = Color.White;
+
+            try
+            {
+                _currentOtpCode = EmailVerificationService.GenerateCode6Digits();
+                await EmailVerificationService.SendVerificationCodeAsync(email, _currentOtpCode);
+
+                hasSentCode = true;
+                otpTargetEmail = email;
+
+                lblCodeStatus.ForeColor = Color.FromArgb(15, 115, 50);
+                lblCodeStatus.Text = "Verification code has been sent.";
+
+                otpCountdownSeconds = 60;
+                btnSendCode.Text = $"{otpCountdownSeconds}s";
+                _otpTimer.Start();
+            }
+            catch (Exception ex)
+            {
+                hasSentCode = false;
+                _currentOtpCode = null;
+                lblCodeStatus.ForeColor = Color.FromArgb(170, 25, 25);
+                lblCodeStatus.Text = "Send failed. Check SMTP/App Password.";
+                btnSendCode.Enabled = true;
+                btnSendCode.ForeColor = Color.White;
+                btnSendCode.Text = "Get Code";
+
+                PopupNoticeForm.ShowNotice(
+                    this,
+                    "Mail Error",
+                    $"Không gửi được email xác nhận:\n{ex.Message}",
+                    PopupNoticeForm.NoticeKind.Error);
+            }
+
+            nightPanel1.Invalidate();
+        }
+
+        private void OtpTimer_Tick(object? sender, EventArgs e)
+        {
+            otpCountdownSeconds--;
+            if (otpCountdownSeconds <= 0)
+            {
+                _otpTimer.Stop();
+                btnSendCode.Enabled = true;
+                btnSendCode.ForeColor = Color.White;
+                btnSendCode.Text = "Get Code";
+            }
+            else
+            {
+                btnSendCode.ForeColor = Color.White;
+                btnSendCode.Text = $"{otpCountdownSeconds}s";
+            }
         }
 
         private void btnTogglePassword_Click(object? sender, EventArgs e)
@@ -232,20 +548,25 @@ namespace UI
         private void btnHelp_Click(object? sender, EventArgs e)
         {
             string rules =
-                "• Username: 3-20 characters, letters, numbers, or underscore (_) only.\n" +
-                "• Password: At least 8 characters, including both letters and numbers.\n" +
-                "• Confirm Password: Must match Password exactly.\n" +
-                "• Full Name: Required, 2-100 characters.\n" +
-                "• Email (optional): Leave blank or use a valid format (name@domain.com).\n" +
-                "• Birthday: Format dd/MM/yyyy, between 01/01/1920 and today.\n" +
-                "• Shortcuts: Tab moves between fields, Enter submits Register.";
+                "• Avatar (Optional): Click the avatar circle or 'Choose Avatar' to upload a PNG, JPG, JPEG, or BMP image. If skipped, your username initial is shown.\n" +
+                "• Racer ID: Auto-generated 6-digit racer identifier (read-only).\n" +
+                "• Username (Required): 3–20 characters using letters (a–z, A–Z), numbers (0–9), or underscore (_) only.\n" +
+                "• Password (Required): Minimum 8 characters and must include at least 1 letter and 1 number.\n" +
+                "• Confirm Password (Required): Must match the Password field exactly.\n" +
+                "• Full Name (Required): 2–100 characters.\n" +
+                "• Email (Required): Must be a valid email format (e.g., name@domain.com).\n" +
+                "• Verification Code (Required): Click 'Get Code' to send a 6-digit code to your email (60s cooldown). If you edit the email afterward, you must request a new code.\n" +
+                "• Birthday & Gender (Required): Select a valid birth date (01/01/1920 – today, dd/MM/yyyy) and choose Male, Female, or Other.\n" +
+                "• New Account Bonus: Every new account starts with 100 coins.\n" +
+                "• Submit: Click 'Register' (or press Enter) once all fields are valid to create your account and return to Login.";
 
             using GuidelinesDialog dlg = new GuidelinesDialog(
                 "REGISTER REQUIREMENTS",
-                "Create a new racer account",
+                "Rules & instructions for creating a new racer account",
                 rules);
             dlg.ShowDialog(this);
         }
+
         private async void btnRegister_Click(object? sender, EventArgs e)
         {
             string username = txtUsername.Text.Trim();
@@ -253,6 +574,7 @@ namespace UI
             string confirmPassword = txtConfirmPassword.Text;
             string fullName = txtFullName.Text.Trim();
             string email = txtEmail.Text.Trim();
+            string code = txtVerificationCode.Text.Trim();
             DateTime birthday = dtpBirthday.Value.Date;
 
             bool hasError = false;
@@ -273,13 +595,37 @@ namespace UI
             lblErrFullName.Text = e4 ?? "";
             if (e4 != null) hasError = true;
 
-            string? e5 = ValidateEmailOptional(email);
+            string? e5 = ValidateEmailRequired(email);
             lblErrEmail.Text = e5 ?? "";
             if (e5 != null) hasError = true;
 
+            if (!hasSentCode || !string.Equals(email, otpTargetEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                lblCodeStatus.ForeColor = Color.Crimson;
+                lblCodeStatus.Text = "Please click 'Get Code' to verify your email.";
+                hasError = true;
+            }
+            else if (code.Length != 6 || !code.All(char.IsDigit))
+            {
+                lblCodeStatus.ForeColor = Color.Crimson;
+                lblCodeStatus.Text = "Please enter the 6-digit verification code.";
+                hasError = true;
+            }
+            else if (!string.IsNullOrEmpty(_currentOtpCode) &&
+                     !string.Equals(code, _currentOtpCode, StringComparison.Ordinal))
+            {
+                lblCodeStatus.ForeColor = Color.Crimson;
+                lblCodeStatus.Text = "Verification code does not match.";
+                hasError = true;
+            }
+
             if (birthday > DateTime.Today || birthday < dtpBirthday.MinDate)
             {
-                MessageBox.Show("Invalid birthday.", "Registration", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                PopupNoticeForm.ShowNotice(
+                    this,
+                    "Registration",
+                    "Invalid birthday.",
+                    PopupNoticeForm.NoticeKind.Warning);
                 hasError = true;
             }
 
@@ -290,22 +636,36 @@ namespace UI
             btnCancel.Enabled = false;
             try
             {
-                ResponsePacket resp = await _netClient.RegisterAsync(username, password, fullName, email, birthday);
+                ResponsePacket resp = await _netClient.RegisterAsync(
+                    username, password, fullName, email, birthday,
+                    cmbGender.SelectedItem?.ToString(),
+                    txtRacerId.Text.Trim());
+
                 if (!resp.Success)
                 {
-                    MessageBox.Show(
-                        string.IsNullOrWhiteSpace(resp.Message) ? "Registration failed." : resp.Message,
+                    PopupNoticeForm.ShowNotice(
+                        this,
                         "Registration",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+                        string.IsNullOrWhiteSpace(resp.Message) ? "Registration failed." : resp.Message,
+                        PopupNoticeForm.NoticeKind.Warning);
                     return;
                 }
 
-                MessageBox.Show(
-                    "Registration successful! You can now log in.",
+                // ID thật do server cấp (có thể khác số gợi ý nếu số đó đã có người dùng)
+                string finalId = string.IsNullOrWhiteSpace(resp.User?.RacerId)
+                    ? txtRacerId.Text.Trim()
+                    : resp.User!.RacerId!;
+                if (finalId != txtRacerId.Text.Trim()) txtRacerId.Text = finalId;
+                int startCoins = resp.User?.Coins > 0 ? resp.User.Coins : 100;
+
+                LuuAvatarLocal(username);
+                await DayAvatarLenServerSauDangKyAsync(username, password);
+
+                PopupNoticeForm.ShowNotice(
+                    this,
                     "Registration",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                    $"Registration successful!\nYour Racer ID: {finalId}\nYou received {startCoins} coins. You can now log in.",
+                    PopupNoticeForm.NoticeKind.Info);
 
                 QuayVeLoginForm();
             }
@@ -328,6 +688,7 @@ namespace UI
         {
             if (isReturningToLogin) return;
             isReturningToLogin = true;
+            _otpTimer.Stop();
             Close();
         }
 

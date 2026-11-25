@@ -53,6 +53,9 @@ public static class VehicleCatalog
 
     private const string KEY_EQUIPPED_BACKUP = "VC_Equipped_Scooter";
 
+    // Gắn theo tài khoản để 2 tài khoản trên cùng 1 máy không dùng chung xe "đang chọn"
+    private static string KeyBackup => $"{LauncherArgs.User}_{KEY_EQUIPPED_BACKUP}";
+
     // Lưu riêng trong RAM của từng cửa sổ game đang chạy, tránh 2 cửa sổ trên 1 PC ghi đè PlayerPrefs của nhau
     private static int selectedIndexTrongPhien = -1;
 
@@ -105,7 +108,7 @@ public static class VehicleCatalog
         selectedIndexTrongPhien = index;
 
         PlayerInventory.SetEquippedIndex("Scooter", index);
-        PlayerPrefs.SetInt(KEY_EQUIPPED_BACKUP, index);
+        PlayerPrefs.SetInt(KeyBackup, index);
         PlayerPrefs.Save();
 
         if (PhotonNetwork.LocalPlayer != null)
@@ -123,11 +126,13 @@ public static class VehicleCatalog
             return selectedIndexTrongPhien;
 
         int invIndex = Mathf.Clamp(PlayerInventory.GetEquippedIndex("Scooter"), 0, Count - 1);
-        int backupIndex = PlayerPrefs.HasKey(KEY_EQUIPPED_BACKUP)
-            ? Mathf.Clamp(PlayerPrefs.GetInt(KEY_EQUIPPED_BACKUP, 0), 0, Count - 1)
+        int backupIndex = PlayerPrefs.HasKey(KeyBackup)
+            ? Mathf.Clamp(PlayerPrefs.GetInt(KeyBackup, 0), 0, Count - 1)
             : 0;
 
         int ketQua = (invIndex > 0) ? invIndex : backupIndex;
+        if (!IsOwned(ketQua)) ketQua = 0;
+
         selectedIndexTrongPhien = ketQua;
         return ketQua;
     }
@@ -172,6 +177,8 @@ public static class VehicleCatalog
         return null;
     }
 
+    // Tô màu thân xe, bỏ qua bánh/lốp. Mỗi renderer chỉ tạo bản sao Material 1 lần
+    // (renderer.materials trả lại đúng bản sao đó ở các lần sau), gọi lại nhiều lần không rò bộ nhớ.
     public static void ApplyPaint(GameObject model, Color color)
     {
         if (model == null) return;
@@ -187,31 +194,37 @@ public static class VehicleCatalog
             if (renderer == null) continue;
 
             string tenObj = renderer.gameObject.name.ToLower();
-            if (tenObj.Contains("minimap") || tenObj.Contains("vetphanh"))
-                continue;
+            if (tenObj.Contains("minimap") || tenObj.Contains("vetphanh")) continue;
+            if (tenObj.Contains("wheel") || tenObj.Contains("tire")) continue;
 
-            bool laBanhXe = tenObj.Contains("wheel") || tenObj.Contains("tire");
+            // Xác định material nào cần tô bằng sharedMaterials (đọc không tạo bản sao)
+            Material[] shared = renderer.sharedMaterials;
+            bool[] canTo = new bool[shared.Length];
+            bool coMatCanTo = false;
 
-            Material[] sharedMats = renderer.sharedMaterials;
-            Material[] newMats = new Material[sharedMats.Length];
-
-            for (int i = 0; i < sharedMats.Length; i++)
+            for (int i = 0; i < shared.Length; i++)
             {
-                Material srcMat = sharedMats[i];
-                if (srcMat == null) continue;
+                if (shared[i] == null) continue;
 
-                string tenMat = srcMat.name.ToLower();
-                if (laBanhXe || tenMat.Contains("tire") || tenMat.Contains("wheel") || tenMat.Contains("rubber"))
-                {
-                    newMats[i] = srcMat;
-                    continue;
-                }
+                string tenMat = shared[i].name.ToLower();
+                if (tenMat.Contains("tire") || tenMat.Contains("wheel") || tenMat.Contains("rubber")) continue;
 
-                Material mat = new Material(srcMat);
+                canTo[i] = true;
+                coMatCanTo = true;
+            }
+            if (!coMatCanTo) continue;
+
+            Material[] mats = renderer.materials;   // bản sao riêng của renderer này
+            int n = Mathf.Min(mats.Length, canTo.Length);
+
+            for (int i = 0; i < n; i++)
+            {
+                if (!canTo[i] || mats[i] == null) continue;
+
+                Material mat = mats[i];
                 if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", mauApDung);
                 if (mat.HasProperty("_Color")) mat.SetColor("_Color", mauApDung);
                 mat.color = mauApDung;
-                newMats[i] = mat;
 
                 renderer.GetPropertyBlock(propBlock, i);
                 propBlock.SetColor("_BaseColor", mauApDung);
@@ -220,8 +233,6 @@ public static class VehicleCatalog
 
                 soDaTo++;
             }
-
-            renderer.materials = newMats;
         }
 
         thongTinToCuoi = $"ApplyPaint '{model.name}' màu={color} -> đã tô {soDaTo} material";

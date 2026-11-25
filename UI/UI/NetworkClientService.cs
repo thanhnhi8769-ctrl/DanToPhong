@@ -16,6 +16,11 @@ namespace UI.Services
         private NetworkStream? _stream;
         private bool _disposed;
 
+        // MỚI: launcher truyền cho game Unity
+        public string Host => _host;
+        public int Port => _port;
+        public string Token { get; private set; } = string.Empty;
+
         public event Action<bool, string>? ConnectionStatusChanged;
 
         public bool IsConnected => _client?.Connected == true && _stream != null;
@@ -102,14 +107,19 @@ namespace UI.Services
             }
         }
 
-        public Task<ResponsePacket> LoginAsync(string username, string password, CancellationToken token = default)
+        public async Task<ResponsePacket> LoginAsync(string username, string password, CancellationToken token = default)
         {
-            return SendAndReceiveAsync(new RequestPacket
+            ResponsePacket resp = await SendAndReceiveAsync(new RequestPacket
             {
                 Command = Commands.Login,
                 Username = username,
                 Password = password
             }, token);
+
+            if (resp.Success && !string.IsNullOrEmpty(resp.Token))
+                Token = resp.Token;
+
+            return resp;
         }
 
         public Task<ResponsePacket> RegisterAsync(
@@ -118,6 +128,8 @@ namespace UI.Services
             string fullName,
             string? email,
             DateTime? birthday,
+            string? gender = null,
+            string? racerId = null,
             CancellationToken token = default)
         {
             return SendAndReceiveAsync(new RequestPacket
@@ -127,7 +139,9 @@ namespace UI.Services
                 Password = password,
                 FullName = fullName,
                 Email = string.IsNullOrWhiteSpace(email) ? null : email,
-                Birthday = birthday
+                Birthday = birthday,
+                Gender = string.IsNullOrWhiteSpace(gender) ? null : gender,
+                RacerId = string.IsNullOrWhiteSpace(racerId) ? null : racerId
             }, token);
         }
 
@@ -139,6 +153,62 @@ namespace UI.Services
             }, token);
         }
 
+        public Task<ResponsePacket> UpdateCoinsAsync(int delta, CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.UpdateCoins,
+                CoinsDelta = delta
+            }, token);
+        }
+
+        public Task<ResponsePacket> UploadAvatarAsync(byte[] data, CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.UploadAvatar,
+                AvatarBase64 = Convert.ToBase64String(data)
+            }, token);
+        }
+
+        public Task<ResponsePacket> GetAvatarAsync(CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.GetAvatar
+            }, token);
+        }
+
+        public Task<ResponsePacket> SubmitReviewAsync(int stars, string? comment, CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.SubmitReview,
+                Stars = stars,
+                Comment = comment
+            }, token);
+        }
+
+        public Task<ResponsePacket> GetReviewsAsync(CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket { Command = Commands.GetReviews }, token);
+        }
+
+        public Task<ResponsePacket> GetLeaderboardAsync(CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket { Command = Commands.Leaderboard }, token);
+        }
+
+        public Task<ResponsePacket> GetRoomsAsync(CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket { Command = Commands.ListRooms }, token);
+        }
+
+        public Task<ResponsePacket> GetInvitesAsync(CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket { Command = Commands.GetInvites }, token);
+        }
+
         public async Task<ResponsePacket> LogoutAsync(CancellationToken token = default)
         {
             ResponsePacket resp = await SendAndReceiveAsync(new RequestPacket
@@ -146,6 +216,7 @@ namespace UI.Services
                 Command = Commands.Logout
             }, token);
 
+            Token = string.Empty;
             DisconnectInternal(raiseEvent: true);
             return resp;
         }

@@ -6,29 +6,29 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/scene/boot.unity
+    guid: 99da7aa3c0c1542429cf207387a419e6
+  - enabled: 1
     path: Assets/scene/menu.unity
     guid: 8895c5696fed74343857edad46583ba4
-  - enabled: 1
-    path: Assets/scene/ShopScene.unity
-    guid: 2b11698fcc20a2c4485028dff20d1dc6
-  - enabled: 1
-    path: Assets/scene/SelectScene.unity
-    guid: 678dcfae816a2634f841b60b38d0537f
   - enabled: 1
     path: Assets/scene/LobbyScene.unity
     guid: a85f90fd5fdff6b4082c06404666af3a
   - enabled: 1
-    path: Assets/scene/game.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/scene/SelectScene.unity
+    guid: 678dcfae816a2634f841b60b38d0537f
+  - enabled: 1
+    path: Assets/scene/ShopScene.unity
+    guid: 2b11698fcc20a2c4485028dff20d1dc6
   - enabled: 1
     path: Assets/scene/game 1.unity
     guid: 7c1c6ec83c599a046b746c316100e8a9
   - enabled: 1
     path: Assets/scene/game 2.unity
-    guid: 9bff9f9bb00f6c14e8c25af041cc85d2
+    guid: af8c5660569dda149acbe07e6f06ecff
   - enabled: 1
     path: Assets/scene/game 3.unity
-    guid: 28016e7acca3c8a428a8cc968085c733
+    guid: c94c365f572ef684783fe861b6c81ac9
   m_configObjects:
     com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

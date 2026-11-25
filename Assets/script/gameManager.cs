@@ -9,6 +9,8 @@ using Photon.Pun;
 using Photon.Realtime;
 using ExitGames.Client.Photon;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
+
+
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem.UI;
 #endif
@@ -91,6 +93,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     public bool taoNutNhacTuDong = true;
     public Vector2 viTriNutNhac = new Vector2(-360f, -20f);
     public float kichThuocNutNhac = 48f;
+    
 
     [Header("Bắt đầu trận bằng phím (Enter dùng cho chat nên đổi sang phím khác)")]
     public KeyCode phimBatDauTran = KeyCode.F2;
@@ -303,7 +306,9 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         hieuUngSource = gameObject.AddComponent<AudioSource>();
         hieuUngSource.playOnAwake = false;
     }
-
+    // Thu nhỏ bằng localScale nên không bị LayoutGroup ghi đè. Phải chạy TRƯỚC khi ButtonFx gắn vào
+    // (ButtonFx lấy scale lúc khởi tạo làm gốc cho hiệu ứng hover) - KetNoiNutPausePanel chạy trong Start trước GanHieuUngChoMoiNut nên đúng thứ tự.
+    
     public override void OnEnable()
     {
         base.OnEnable();
@@ -543,6 +548,9 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     {
         if (g != null && g.color != c) g.color = c;
     }
+    
+
+    
 
     private void KetNoiNutPausePanel()
     {
@@ -2537,6 +2545,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         {
             resultPanelObject.SetActive(true);
             CapNhatNoiDungResultPanel();
+            TaoThemNutVePhongCho();
         }
         else
         {
@@ -2930,6 +2939,177 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
         // Solo không đụng Photon
         if (cheDoNhieuNguoi && PhotonNetwork.InRoom)
+            PhotonNetwork.LeaveRoom();
+
+        SceneManager.LoadScene("menu");
+    }
+    [Header("Về phòng chờ (Solo & Nhiều người)")]
+    [Tooltip("Tên scene phòng chờ / sảnh chọn xe & map")]
+    public string tenScenePhongCho = "SelectScene";
+
+    private bool dangVePhongChung = false;
+
+    /// <summary>
+    /// Hàm chung: chạy được cả khi chơi 1 mình lẫn khi chơi nhiều người cùng phòng.
+    /// Giữ nguyên Room nếu đang ở trong phòng để nhóm chơi tiếp, không cần nhập lại mã.
+    /// </summary>
+    public void VePhongChung()
+    {
+        if (dangVePhongChung) return;
+        dangVePhongChung = true;
+        LobbyManager.DanhDauCoSanPhongTuVanTruoc();
+
+        Time.timeScale = 1f;
+        isPaused = false;
+        daBatDauDua = false;
+        dangDemBatDau = false;
+        ketThucGame = false;
+        winGame = false;
+        coKetQua = false;
+        daCoNguoiThang = false;
+        daCongBoThang = false;
+        daDuyetThang = false;
+        daNhanThuongTranNay = false;
+        banThanDaBam = false;
+        daGuiLenhBatDau = false;
+        dangXemTran = false;
+        dangQuanhXe = false;
+        coViTriLucThua = false;
+        dangChoKetQua = false;
+        ssCuoi = tongCuoi = -1;
+        dsActorDaSanSang.Clear();
+
+        bool dangTrongPhongMang = PhotonNetwork.IsConnected && PhotonNetwork.InRoom;
+
+        if (dangTrongPhongMang)
+        {
+            // Mỗi người tự về, không kéo ai theo
+            PhotonNetwork.AutomaticallySyncScene = false;
+
+            PhotonNetwork.LocalPlayer.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
+            {
+                { KEY_READY, false },
+                { KEY_ELIMINATED, false },
+                { KEY_ELIM_AT, null }
+            });
+
+            if (PhotonNetwork.IsMasterClient)
+            {
+                PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
+                {
+                    { KEY_WINNER, null },
+                    { KEY_WIN_LAST, null },
+                    { "curScn", null }   // tránh Lobby/Select bị kéo ngược về map cũ
+                });
+            }
+
+            if (!string.IsNullOrEmpty(tenScenePhongCho))
+            {
+                SceneManager.LoadScene(tenScenePhongCho);
+                return;
+            }
+        }
+        else if (!string.IsNullOrEmpty(tenScenePhongCho))
+        {
+            // Chế độ 1 mình (solo) hoặc chưa vào Room: chuyển thẳng về scene phòng chờ
+            SceneManager.LoadScene(tenScenePhongCho);
+            return;
+        }
+
+        // Dự phòng nếu để trống tenScenePhongCho: mở lại panel chờ ngay trong scene hiện tại
+        if (resultPanelObject != null) resultPanelObject.SetActive(false);
+        if (winGameObject != null) winGameObject.SetActive(false);
+        if (gameOverObject != null) gameOverObject.SetActive(false);
+        if (eliminatePanelObject != null) eliminatePanelObject.SetActive(false);
+        if (pausePanelObject != null) pausePanelObject.SetActive(false);
+        if (thanhXem != null) thanhXem.SetActive(false);
+
+        if (tutorialPanelObject != null)
+        {
+            tutorialPanelObject.SetActive(true);
+            tutorialPanelObject.transform.SetAsLastSibling();
+            MoKhoaChuot();
+            XacDinhCheDo();
+            KiemTraSanSang();
+        }
+
+        dangVePhongChung = false;
+    }
+    [Header("Tự thêm nút về phòng chờ (SelectScene)")]
+    [Tooltip("Bật để tự tạo thêm 1 nút chuyển về phòng chờ trên bảng kết quả")]
+    public bool tuThemNutVePhongCho = true;
+
+    [Tooltip("Chữ hiển thị trên nút mới tạo")]
+    public string chuNutVePhongCho = "LOBBY / PLAY AGAIN";
+
+    [Tooltip("Độ lệch (X, Y) so với nút hiện có trên bảng kết quả")]
+    public Vector2 doLechNutMoi = new Vector2(0f, -70f);
+
+    private bool daTaoNutVePhongCho = false;
+
+    /// <summary>
+    /// Gọi hàm này ngay khi mở bảng kết quả (GAME OVER / Result) để tự sinh thêm 1 nút về phòng chờ.
+    /// </summary>
+    public void TaoThemNutVePhongCho()
+    {
+        if (!tuThemNutVePhongCho || daTaoNutVePhongCho) return;
+
+        GameObject panel = resultPanelObject != null ? resultPanelObject :
+            (gameOverObject != null ? gameOverObject : winGameObject);
+        if (panel == null) return;
+
+        Button nutMau = panel.GetComponentInChildren<Button>(true);
+        if (nutMau == null) return;
+
+        GameObject nutMoiObj = Instantiate(nutMau.gameObject, nutMau.transform.parent);
+        nutMoiObj.name = "Btn_VePhongCho_SelectScene";
+        nutMoiObj.SetActive(true);
+
+        RectTransform rtMau = nutMau.GetComponent<RectTransform>();
+        RectTransform rtMoi = nutMoiObj.GetComponent<RectTransform>();
+        if (rtMau != null && rtMoi != null)
+        {
+            rtMoi.anchorMin = rtMau.anchorMin;
+            rtMoi.anchorMax = rtMau.anchorMax;
+            rtMoi.pivot = rtMau.pivot;
+            rtMoi.localScale = rtMau.localScale;
+
+            Canvas.ForceUpdateCanvases();
+            float wGoc = rtMau.rect.width > 0f ? rtMau.rect.width * rtMau.localScale.x : rtMau.sizeDelta.x;
+            float gap = 16f;
+            float halfStep = (wGoc + gap) * 0.5f;
+
+            // Dịch nút gốc sang trái nửa bước, nút mới đặt ngay bên phải cùng hàng ngang
+            rtMau.anchoredPosition = new Vector2(rtMau.anchoredPosition.x - halfStep, rtMau.anchoredPosition.y);
+            rtMoi.sizeDelta = rtMau.sizeDelta;
+            rtMoi.anchoredPosition = new Vector2(rtMau.anchoredPosition.x + wGoc + gap, rtMau.anchoredPosition.y) + doLechNutMoi;
+        }
+
+        var tmp = nutMoiObj.GetComponentInChildren<TMPro.TMP_Text>(true);
+        if (tmp != null) tmp.text = chuNutVePhongCho;
+
+        var uiText = nutMoiObj.GetComponentInChildren<UnityEngine.UI.Text>(true);
+        if (uiText != null) uiText.text = chuNutVePhongCho;
+
+        Button btnMoi = nutMoiObj.GetComponent<Button>();
+        if (btnMoi != null)
+        {
+            btnMoi.onClick.RemoveAllListeners();
+            btnMoi.onClick.AddListener(VePhongChung);
+            daTaoNutVePhongCho = true;
+        }
+    }
+
+    /// <summary>
+    /// Nút thoát hẳn ra menu (ai không muốn chơi tiếp thì bấm nút này).
+    /// </summary>
+    public void RoiPhongVaVeMenu()
+    {
+        Time.timeScale = 1f;
+        isPaused = false;
+        VaoGameCooldown.BatDau();
+
+        if (PhotonNetwork.IsConnected && PhotonNetwork.InRoom)
             PhotonNetwork.LeaveRoom();
 
         SceneManager.LoadScene("menu");

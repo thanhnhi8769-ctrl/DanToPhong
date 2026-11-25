@@ -1,4 +1,7 @@
-﻿namespace UI
+﻿using System.Xml.Linq;
+using static ReaLTaiizor.Drawing.Poison.PoisonPaint;
+
+namespace UI
 {
     partial class LoginForm
     {
@@ -40,10 +43,12 @@
             btnHelp = new Button();
             lblSubtitle = new Label();
             lblTitle = new Label();
+            picAvatar = new PictureBox();
             panelShadow = new Panel();
             pnlTitleBar.SuspendLayout();
             pnlHeaderBar.SuspendLayout();
             nightPanel1.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)picAvatar).BeginInit();
             SuspendLayout();
             // 
             // pnlTitleBar
@@ -56,7 +61,7 @@
             pnlTitleBar.Dock = DockStyle.Top;
             pnlTitleBar.Location = new Point(0, 0);
             pnlTitleBar.Name = "pnlTitleBar";
-            pnlTitleBar.Size = new Size(1220, 44);
+            pnlTitleBar.Size = new Size(1220, 40);
             pnlTitleBar.TabIndex = 0;
             pnlTitleBar.MouseDown += pnlTitleBar_MouseDown;
             // 
@@ -65,7 +70,7 @@
             titellbl.AutoSize = true;
             titellbl.Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point, 0);
             titellbl.ForeColor = Color.Indigo;
-            titellbl.Location = new Point(24, 11);
+            titellbl.Location = new Point(22, 9);
             titellbl.Name = "titellbl";
             titellbl.Size = new Size(154, 28);
             titellbl.TabIndex = 0;
@@ -76,7 +81,7 @@
             btnMinimize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnMinimize.Font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point, 0);
             btnMinimize.ForeColor = Color.Black;
-            btnMinimize.Location = new Point(1056, 7);
+            btnMinimize.Location = new Point(1056, 5);
             btnMinimize.Name = "btnMinimize";
             btnMinimize.Size = new Size(47, 30);
             btnMinimize.TabIndex = 10;
@@ -89,7 +94,7 @@
             btnMaximize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnMaximize.Font = new Font("Segoe UI Black", 9F, FontStyle.Bold, GraphicsUnit.Point, 0);
             btnMaximize.ForeColor = Color.Black;
-            btnMaximize.Location = new Point(1109, 7);
+            btnMaximize.Location = new Point(1109, 5);
             btnMaximize.Name = "btnMaximize";
             btnMaximize.Size = new Size(47, 30);
             btnMaximize.TabIndex = 11;
@@ -102,7 +107,7 @@
             btnExit.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnExit.Font = new Font("Segoe UI Black", 9F, FontStyle.Bold, GraphicsUnit.Point, 0);
             btnExit.ForeColor = Color.Black;
-            btnExit.Location = new Point(1162, 7);
+            btnExit.Location = new Point(1162, 5);
             btnExit.Name = "btnExit";
             btnExit.Size = new Size(47, 30);
             btnExit.TabIndex = 12;
@@ -116,28 +121,28 @@
             pnlHeaderBar.Controls.Add(lblHeaderTitle);
             pnlHeaderBar.Controls.Add(lblHeaderBadge);
             pnlHeaderBar.Dock = DockStyle.Top;
-            pnlHeaderBar.Location = new Point(0, 44);
+            pnlHeaderBar.Location = new Point(0, 40);
             pnlHeaderBar.Name = "pnlHeaderBar";
-            pnlHeaderBar.Size = new Size(1220, 52);
+            pnlHeaderBar.Size = new Size(1220, 48);
             pnlHeaderBar.TabIndex = 1;
             // 
             // lblHeaderTitle
             // 
             lblHeaderTitle.AutoSize = true;
-            lblHeaderTitle.Font = new Font("Segoe UI", 13F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            lblHeaderTitle.Font = new Font("Segoe UI", 12.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             lblHeaderTitle.ForeColor = Color.White;
-            lblHeaderTitle.Location = new Point(24, 12);
+            lblHeaderTitle.Location = new Point(22, 10);
             lblHeaderTitle.Name = "lblHeaderTitle";
-            lblHeaderTitle.Size = new Size(236, 36);
+            lblHeaderTitle.Size = new Size(229, 35);
             lblHeaderTitle.TabIndex = 0;
             lblHeaderTitle.Text = "SCOOTER RACING";
             // 
             // lblHeaderBadge
             // 
             lblHeaderBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            lblHeaderBadge.Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            lblHeaderBadge.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             lblHeaderBadge.ForeColor = Color.FromArgb(245, 208, 120);
-            lblHeaderBadge.Location = new Point(942, 15);
+            lblHeaderBadge.Location = new Point(942, 12);
             lblHeaderBadge.Name = "lblHeaderBadge";
             lblHeaderBadge.Size = new Size(254, 24);
             lblHeaderBadge.TabIndex = 1;
@@ -161,26 +166,28 @@
             nightPanel1.Controls.Add(btnHelp);
             nightPanel1.Controls.Add(lblSubtitle);
             nightPanel1.Controls.Add(lblTitle);
+            nightPanel1.Controls.Add(picAvatar);
             nightPanel1.ForeColor = Color.FromArgb(250, 250, 250);
             nightPanel1.LeftSideColor = Color.FromArgb(253, 251, 247);
-            nightPanel1.Location = new Point(365, 130);
+            nightPanel1.Location = new Point(375, 114);
             nightPanel1.Name = "nightPanel1";
             nightPanel1.RightSideColor = Color.FromArgb(253, 251, 247);
             nightPanel1.Side = ReaLTaiizor.Controls.NightPanel.PanelSide.Left;
-            nightPanel1.Size = new Size(490, 480);
+            nightPanel1.Size = new Size(470, 583);
             nightPanel1.TabIndex = 2;
             // 
             // btnRegister
             // 
             btnRegister.BackColor = Color.White;
+            btnRegister.Cursor = Cursors.Hand;
             btnRegister.FlatAppearance.BorderColor = Color.FromArgb(43, 27, 61);
             btnRegister.FlatAppearance.BorderSize = 2;
             btnRegister.FlatStyle = FlatStyle.Flat;
-            btnRegister.Font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            btnRegister.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             btnRegister.ForeColor = Color.Black;
-            btnRegister.Location = new Point(37, 366);
+            btnRegister.Location = new Point(38, 444);
             btnRegister.Name = "btnRegister";
-            btnRegister.Size = new Size(416, 48);
+            btnRegister.Size = new Size(394, 46);
             btnRegister.TabIndex = 7;
             btnRegister.Text = "Create New Account";
             btnRegister.UseVisualStyleBackColor = false;
@@ -189,14 +196,15 @@
             // btnLogin
             // 
             btnLogin.BackColor = Color.FromArgb(155, 17, 24);
+            btnLogin.Cursor = Cursors.Hand;
             btnLogin.FlatAppearance.BorderColor = Color.FromArgb(43, 27, 61);
             btnLogin.FlatAppearance.BorderSize = 2;
             btnLogin.FlatStyle = FlatStyle.Flat;
-            btnLogin.Font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            btnLogin.Font = new Font("Segoe UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             btnLogin.ForeColor = Color.White;
-            btnLogin.Location = new Point(37, 304);
+            btnLogin.Location = new Point(38, 384);
             btnLogin.Name = "btnLogin";
-            btnLogin.Size = new Size(416, 48);
+            btnLogin.Size = new Size(394, 46);
             btnLogin.TabIndex = 6;
             btnLogin.Text = "Login";
             btnLogin.UseVisualStyleBackColor = false;
@@ -209,9 +217,9 @@
             btnForgotPassword.FlatStyle = FlatStyle.Flat;
             btnForgotPassword.Font = new Font("Segoe UI", 9F, FontStyle.Underline, GraphicsUnit.Point, 0);
             btnForgotPassword.ForeColor = Color.FromArgb(43, 27, 61);
-            btnForgotPassword.Location = new Point(277, 253);
+            btnForgotPassword.Location = new Point(266, 335);
             btnForgotPassword.Name = "btnForgotPassword";
-            btnForgotPassword.Size = new Size(176, 40);
+            btnForgotPassword.Size = new Size(166, 37);
             btnForgotPassword.TabIndex = 5;
             btnForgotPassword.Text = "Forgot password?";
             btnForgotPassword.TextAlign = ContentAlignment.MiddleRight;
@@ -221,9 +229,10 @@
             // chkRememberMe
             // 
             chkRememberMe.AutoSize = true;
+            chkRememberMe.Cursor = Cursors.Hand;
             chkRememberMe.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point, 0);
             chkRememberMe.ForeColor = Color.Black;
-            chkRememberMe.Location = new Point(37, 260);
+            chkRememberMe.Location = new Point(38, 340);
             chkRememberMe.Name = "chkRememberMe";
             chkRememberMe.Size = new Size(154, 29);
             chkRememberMe.TabIndex = 4;
@@ -236,7 +245,7 @@
             lblErrPassword.AutoSize = true;
             lblErrPassword.Font = new Font("Segoe UI", 8F, FontStyle.Regular, GraphicsUnit.Point, 0);
             lblErrPassword.ForeColor = Color.Crimson;
-            lblErrPassword.Location = new Point(34, 233);
+            lblErrPassword.Location = new Point(38, 314);
             lblErrPassword.Name = "lblErrPassword";
             lblErrPassword.Size = new Size(0, 21);
             lblErrPassword.TabIndex = 21;
@@ -246,11 +255,11 @@
             btnTogglePassword.Cursor = Cursors.Hand;
             btnTogglePassword.FlatAppearance.BorderSize = 0;
             btnTogglePassword.FlatStyle = FlatStyle.Flat;
-            btnTogglePassword.Font = new Font("Segoe UI", 6.5F, FontStyle.Regular, GraphicsUnit.Point, 0);
-            btnTogglePassword.ForeColor = Color.Black;
-            btnTogglePassword.Location = new Point(423, 205);
+            btnTogglePassword.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            btnTogglePassword.ForeColor = Color.FromArgb(43, 27, 61);
+            btnTogglePassword.Location = new Point(400, 282);
             btnTogglePassword.Name = "btnTogglePassword";
-            btnTogglePassword.Size = new Size(30, 24);
+            btnTogglePassword.Size = new Size(32, 29);
             btnTogglePassword.TabIndex = 3;
             btnTogglePassword.TabStop = false;
             btnTogglePassword.Text = "👁";
@@ -259,11 +268,14 @@
             // 
             // txtPassword
             // 
+            txtPassword.BackColor = Color.FromArgb(253, 251, 247);
             txtPassword.BorderStyle = BorderStyle.None;
-            txtPassword.Location = new Point(37, 206);
+            txtPassword.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtPassword.ForeColor = Color.Black;
+            txtPassword.Location = new Point(38, 284);
             txtPassword.Name = "txtPassword";
-            txtPassword.PlaceholderText = "  Enter your password";
-            txtPassword.Size = new Size(382, 24);
+            txtPassword.PlaceholderText = "Enter your password";
+            txtPassword.Size = new Size(358, 27);
             txtPassword.TabIndex = 2;
             txtPassword.UseSystemPasswordChar = true;
             txtPassword.TextChanged += txtPassword_TextChanged;
@@ -273,7 +285,7 @@
             lblPassword.AutoSize = true;
             lblPassword.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             lblPassword.ForeColor = Color.Black;
-            lblPassword.Location = new Point(34, 178);
+            lblPassword.Location = new Point(38, 256);
             lblPassword.Name = "lblPassword";
             lblPassword.Size = new Size(97, 25);
             lblPassword.TabIndex = 4;
@@ -284,19 +296,22 @@
             lblErrUsername.AutoSize = true;
             lblErrUsername.Font = new Font("Segoe UI", 8F, FontStyle.Regular, GraphicsUnit.Point, 0);
             lblErrUsername.ForeColor = Color.Crimson;
-            lblErrUsername.Location = new Point(34, 151);
+            lblErrUsername.Location = new Point(38, 232);
             lblErrUsername.Name = "lblErrUsername";
             lblErrUsername.Size = new Size(0, 21);
             lblErrUsername.TabIndex = 20;
             // 
             // txtUsername
             // 
+            txtUsername.BackColor = Color.FromArgb(253, 251, 247);
             txtUsername.BorderStyle = BorderStyle.None;
-            txtUsername.Location = new Point(37, 124);
+            txtUsername.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtUsername.ForeColor = Color.Black;
+            txtUsername.Location = new Point(38, 202);
             txtUsername.MaxLength = 20;
             txtUsername.Name = "txtUsername";
-            txtUsername.PlaceholderText = "  3-20 characters (a-z, 0-9, _)";
-            txtUsername.Size = new Size(416, 24);
+            txtUsername.PlaceholderText = "3-20 characters (a-z, 0-9, _)";
+            txtUsername.Size = new Size(394, 27);
             txtUsername.TabIndex = 1;
             txtUsername.TextChanged += txtUsername_TextChanged;
             // 
@@ -305,7 +320,7 @@
             lblUsername.AutoSize = true;
             lblUsername.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             lblUsername.ForeColor = Color.Black;
-            lblUsername.Location = new Point(34, 96);
+            lblUsername.Location = new Point(38, 174);
             lblUsername.Name = "lblUsername";
             lblUsername.Size = new Size(101, 25);
             lblUsername.TabIndex = 2;
@@ -318,9 +333,9 @@
             btnHelp.FlatStyle = FlatStyle.Flat;
             btnHelp.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point, 0);
             btnHelp.ForeColor = Color.FromArgb(43, 27, 61);
-            btnHelp.Location = new Point(438, 14);
+            btnHelp.Location = new Point(422, 18);
             btnHelp.Name = "btnHelp";
-            btnHelp.Size = new Size(38, 35);
+            btnHelp.Size = new Size(32, 32);
             btnHelp.TabIndex = 30;
             btnHelp.TabStop = false;
             btnHelp.Text = "?";
@@ -332,7 +347,7 @@
             lblSubtitle.AutoSize = true;
             lblSubtitle.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point, 0);
             lblSubtitle.ForeColor = Color.DimGray;
-            lblSubtitle.Location = new Point(150, 58);
+            lblSubtitle.Location = new Point(145, 58);
             lblSubtitle.Name = "lblSubtitle";
             lblSubtitle.Size = new Size(197, 25);
             lblSubtitle.TabIndex = 1;
@@ -343,18 +358,29 @@
             lblTitle.AutoSize = true;
             lblTitle.Font = new Font("Segoe UI", 17F, FontStyle.Bold, GraphicsUnit.Point, 0);
             lblTitle.ForeColor = Color.Black;
-            lblTitle.Location = new Point(195, 16);
+            lblTitle.Location = new Point(180, 18);
             lblTitle.Name = "lblTitle";
             lblTitle.Size = new Size(124, 46);
             lblTitle.TabIndex = 0;
             lblTitle.Text = "LOGIN";
             // 
+            // picAvatar
+            // 
+            picAvatar.BackColor = Color.FromArgb(240, 236, 246);
+            picAvatar.Location = new Point(201, 90);
+            picAvatar.Name = "picAvatar";
+            picAvatar.Size = new Size(68, 68);
+            picAvatar.SizeMode = PictureBoxSizeMode.Zoom;
+            picAvatar.TabIndex = 22;
+            picAvatar.TabStop = false;
+            picAvatar.Paint += picAvatar_Paint;
+            // 
             // panelShadow
             // 
             panelShadow.BackColor = Color.FromArgb(43, 27, 61);
-            panelShadow.Location = new Point(371, 136);
+            panelShadow.Location = new Point(381, 120);
             panelShadow.Name = "panelShadow";
-            panelShadow.Size = new Size(490, 480);
+            panelShadow.Size = new Size(470, 560);
             panelShadow.TabIndex = 3;
             // 
             // LoginForm
@@ -378,6 +404,7 @@
             pnlHeaderBar.PerformLayout();
             nightPanel1.ResumeLayout(false);
             nightPanel1.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)picAvatar).EndInit();
             ResumeLayout(false);
         }
 
@@ -395,6 +422,7 @@
         private Label lblTitle;
         private Label lblSubtitle;
         private Button btnHelp;
+        private PictureBox picAvatar;
         private Label lblUsername;
         private TextBox txtUsername;
         private Label lblErrUsername;

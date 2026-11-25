@@ -115,14 +115,19 @@ public class GameNetworkManager : MonoBehaviour
         PhotonNetwork.SendRate = Mathf.Clamp(tanSoGui, 10, 60);
         PhotonNetwork.SerializationRate = Mathf.Clamp(tanSoDongBo, 10, 60);
         TuDongTimSpawnPointsNeuThieu();
+        xeDaApSkin.Clear();
+        daTaoXe = false;
         StartCoroutine(ChoVaoPhongVaSinhXe());
     }
 
     // Rời game (thoát / về menu / đổi map): bật bộ đếm chờ ở lobby để game kịp dọn và tải lại
-    private void OnDestroy()
+    
+        private void OnDestroy()
     {
-        if (daTaoXe) VaoGameCooldown.BatDau();
+        if (daTaoXe && (!PhotonNetwork.IsConnected || !PhotonNetwork.InRoom))
+            VaoGameCooldown.BatDau();
     }
+
 
     // OnGUI chạy 2 lần mỗi frame và sinh rác ngay cả khi không vẽ gì: chỉ biên dịch khi cần debug
     // (thêm XE_DEBUG vào Project Settings > Player > Scripting Define Symbols để bật lại)

@@ -82,11 +82,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\DanToPhong\\DanToPhong\\UI\\RegisterForm\\UI.csproj",
+      "projectUniqueName": "D:\\DanToPhong\\DanToPhong\\UI\\UI\\UI.csproj",
       "projectName": "UI",
-      "projectPath": "D:\\DanToPhong\\DanToPhong\\UI\\RegisterForm\\UI.csproj",
+      "projectPath": "D:\\DanToPhong\\DanToPhong\\UI\\UI\\UI.csproj",
       "packagesPath": "C:\\Users\\Dell\\.nuget\\packages\\",
-      "outputPath": "D:\\DanToPhong\\DanToPhong\\UI\\RegisterForm\\obj\\",
+      "outputPath": "D:\\DanToPhong\\DanToPhong\\UI\\UI\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

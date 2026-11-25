@@ -2,7 +2,6 @@
 using System.Buffers.Binary;
 using System.IO;
 using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,11 +10,12 @@ namespace DanToPhong.Protocol
 {
     public static class MessageFramer
     {
-        private const int MaxPacketBytes = 64 * 1024; // Giới hạn 64 KB mỗi gói để tránh cấp phát quá lớn
+        private const int MaxPacketBytes = 64 * 1024;
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true
         };
 
         public static async Task SendAsync<T>(NetworkStream stream, T payload, CancellationToken token = default)
@@ -36,7 +36,7 @@ namespace DanToPhong.Protocol
         {
             byte[] lenBuf = new byte[4];
             if (!await ReadExactAsync(stream, lenBuf, token).ConfigureAwait(false))
-                return default; // Peer đóng kết nối sạch (EOF)
+                return default;
 
             int length = BinaryPrimitives.ReadInt32BigEndian(lenBuf);
             if (length <= 0 || length > MaxPacketBytes)

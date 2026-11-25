@@ -10,3 +10,4 @@ D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Debug\net10.0\DanToPhong.Pro
 D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Debug\net10.0\refint\DanToPhong.Protocol.dll
 D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Debug\net10.0\DanToPhong.Protocol.pdb
 D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Debug\net10.0\ref\DanToPhong.Protocol.dll
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Debug\net10.0\DanToPho.C5B8C6A2.Up2Date
