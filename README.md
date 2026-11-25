@@ -1,212 +1,219 @@
 <h1 align="center">🛵 DÂN TỔ PHÓNG - MULTIPLAYER RACING GAME</h1>
 
-**Dân Tổ Phóng** là tựa game đua xe scooter 3D tốc độ cao hỗ trợ cả hai chế độ **Chơi đơn (Solo)** và **Chơi mạng nhiều người (Multiplayer)** thời gian thực thông qua **Photon PUN 2**! Nhiệm vụ của bạn là làm chủ tay lái, thu thập các đồng xu checkpoint để duy trì quỹ thời gian, giữ vững tay lái không để rơi khỏi đường đua, giao tiếp cùng bạn bè qua **Voice Chat (Mic) & Text Chat**, vượt qua cổng chiến thắng để tích lũy Xu và mở khóa các vật phẩm độc đáo trong **Cửa hàng 3D**.
+**Dân Tổ Phóng** là game đua xe scooter 3D hỗ trợ **chơi đơn** và **chơi mạng tối đa 4 người** (Photon PUN 2 + Voice chat). Người chơi đăng nhập bằng **Launcher (WinForms)**, dữ liệu tài khoản / xu / xe / avatar lưu trên **SQL Server** qua **Server TCP** của nhóm, nên đăng nhập máy nào cũng thấy đúng dữ liệu của mình.
 
 ---
 
-## 🧭 1. Luồng Màn Hình (Game Flow)
+## 🧩 1. Kiến trúc hệ thống
 
 ```
-Menu ──Play──► Lobby ──Tạo / Vào phòng──► SELECT VEHICLE ──► Select ──Xác nhận──► Lobby ──START GAME──► Đường đua
-│
-
-└──► Shop (mua & trang bị 25 mẫu xe Scooter)
+┌────────────────────┐   TCP :9000    ┌──────────────────────┐   SQL    ┌──────────────┐
+│ Launcher (WinForms)│ ─────────────► │  DanToPhong.Server   │ ───────► │ SQL Server   │
+│  đăng nhập, hồ sơ, │                │  (C#, console)       │          │ DanToPhongDB │
+│  phòng, xếp hạng   │                └──────────▲───────────┘          └──────────────┘
+└─────────┬──────────┘                           │ TCP :9000 (cùng giao thức, xác thực bằng token)
+          │ mở game kèm --token                  │
+          ▼                                      │
+┌────────────────────┐   Photon cloud (internet) │
+│ Game Unity (.exe)  │ ──────────────────────────┘
+│  xe, shop, đua mạng│ ◄───────────► người chơi khác
+└────────────────────┘
 ```
-1. **Menu:** Bấm **Play** để vào **Sảnh chờ (Lobby)**, hoặc vào **Shop** để mua và trang bị xe.
-2. **Lobby:** Tạo phòng mới hoặc nhập mã 5 ký tự để tham gia phòng bạn bè.
-3. **Select Vehicle:** Khi đã ở trong phòng, bấm **SELECT VEHICLE** để sang màn hình chọn xe (và chọn bản đồ nếu bạn là Chủ phòng).
-4. **Xác nhận (Confirm):** Lưu lựa chọn và quay lại **Lobby** mà **vẫn giữ nguyên phòng** cùng danh sách thành viên.
-5. **START GAME:** Chủ phòng bấm để khóa phòng và đồng bộ đưa cả phòng vào đường đua.
 
-> 💡 Mỗi người chơi **chọn xe cho riêng mình**, hệ thống đồng bộ qua mạng để **đúng mẫu xe và màu sơn** đó xuất hiện trên đường đua trong mắt tất cả người chơi.
+- **Launcher** đăng nhập → nhận `token` → mở game bằng dòng lệnh `--user --token --host --port --mode`.
+- **Game** dùng token để kết nối lại với Server (không cần nhập mật khẩu lần nữa) và đọc/ghi **xu, xe, map, avatar, danh sách phòng, lời mời** trên Server.
+- **Photon** chỉ lo phần đua mạng (phòng, vị trí xe, chat, voice), cần có internet.
 
 ---
 
-## 🌐 2. Chế Độ Chơi, Chọn Xe & Phòng Chờ (Lobby & Room Code)
+## ✅ 2. Yêu cầu cài đặt
 
-Game hỗ trợ linh hoạt **Chơi đơn (1 người)** và **Chơi mạng tối đa 4 người** kết nối trực tiếp qua Server khu vực **Asia** bằng **Mã phòng 5 ký tự**:
-
-- **Tạo phòng & Cấp mã tự động (Create Room):**
-  - Bấm **Create** để hệ thống tự sinh ngẫu nhiên **Mã phòng gồm 5 ký tự** viết hoa (loại bỏ các ký tự dễ nhìn nhầm như `O, 0, I, 1`).
-  - Mã phòng được **tự động sao chép sẵn vào Clipboard** ngay khi tạo phòng, kèm nút **SAO CHÉP MÃ** ở góc dưới bên phải để gửi nhanh cho bạn bè.
-- **Tham gia phòng bằng mã (Join Room):**
-  - Nhập **Mã phòng 5 ký tự** (tự động chuyển thành chữ in hoa) hoặc **nhấp chuột phải trực tiếp vào ô nhập mã** để dán nhanh từ Clipboard, sau đó nhấn `Enter` hoặc bấm **Join**.
-  - Hệ thống thông báo chi tiết nếu sai mã phòng, phòng đã đầy (`4/4`) hoặc trận đấu đã bắt đầu.
-- **Chọn xe & bản đồ theo vai trò (`SELECT VEHICLE`):**
-
-  | Vai trò | Được chọn | Giao diện |
-  | :--- | :--- | :--- |
-  | 👑 **Chủ phòng** | **Mẫu xe Scooter** + **Bản đồ (Map)** | Hộp kính 3D xoay 360° kèm khung xem trước ảnh Map |
-  | 🙋 **Người chơi thường** | **Mẫu xe Scooter** | Hộp kính 3D được **phóng to** và đặt giữa màn hình |
-
-- Giao diện tự **điều chỉnh kích thước** tùy theo số vật được hiển thị: 2 vật (xe + map) thì hộp xe nhỏ gọn, 1 vật (chỉ xe) thì hộp xe lớn hơn; kèm bảng hướng dẫn (`?`) trực quan ngay trên màn hình.
-- Map do Chủ phòng chọn được lưu vào **Room Properties**, còn xe của từng người được lưu vào **Player Properties**, đồng bộ tự động cho toàn bộ phòng.
-- **Sảnh chờ trực tuyến thông minh:**
-  - Hiển thị thời gian thực **Mã phòng**, sĩ số (`x/4`), danh sách tên người chơi kèm nhãn `(Chủ phòng)` / `(Bạn)` và thông báo nổi bật mỗi khi có người **vào phòng** hoặc **rời phòng**.
-  - **Chuyển quyền Chủ phòng tự động (Host Migration):** Nếu Chủ phòng thoát, hệ thống tự động chuyển quyền Chủ phòng và nút **START GAME** cho người chơi kế tiếp.
-  - **Xử lý khi đối thủ rớt mạng giữa trận:** Nếu chỉ còn một người trong phòng, game vẫn cho người chơi còn lại **tiếp tục đua một mình** đến khi về đích; người rớt mạng sẽ tự động bị loại khỏi danh sách phòng/bảng xếp hạng.
-- **Đồng bộ xuất phát:** Khi vào đường đua, xe của mọi người chơi được giữ cố định tại vạch xuất phát cho đến khi **tất cả thành viên trong phòng** cùng bấm **Bắt Đầu Đua** trên bảng hướng dẫn (ở chế độ Solo, game bắt đầu ngay sau khi bấm).
-- **Chế độ Khán giả (Spectator Mode) khi bị loại:**
-  - Trong chế độ nhiều người chơi, nếu hết giờ giữa chừng, xe của bạn sẽ biến mất khỏi đường đua và bảng **Eliminate** hiện lên cho phép bạn chọn **Ở lại xem** hoặc **Thoát**.
-  - Khi ở lại xem, camera tự động đồng bộ góc nhìn **Third-Person** của người chơi đang thi đấu và hỗ trợ chuyển đổi qua lại giữa các tay đua còn sống.
-- **Phân định Thắng / Thua & Phần thưởng Xu:**
-  - **Multiplayer:** Mỗi máy tự tính thời gian cán đích cục bộ và đồng bộ kết quả qua Photon PUN 2. Người đầu tiên chạm cổng **Checkwin**, hoặc **người chơi cuối cùng còn sống sót** khi tất cả đối thủ đã bị loại, sẽ thắng và nhận **+50 Xu**. Người thua nhận **0 Xu** và hiển thị trên bảng **Result**.
-  - **Solo:** Vượt qua cổng **Checkwin** trước khi hết giờ để nhận **+10 Xu** và mở bảng chiến thắng tiếp tục chơi.
-
----
-
-## 🎙️ 3. Giao Tiếp Thời Gian Thực: Voice Chat (Mic) & Text Chat
-
-Ngay trên đường đua (góc dưới bên trái màn hình), người chơi có thể tương tác trực tiếp với nhau thông qua bộ đôi **Mic & Chat**:
-
-- **Voice Chat (Photon Voice):**
-  - Nút bật/tắt micro nhanh (**`MIC ON` / `MIC OFF`**) ngay trên giao diện thi đấu, hỗ trợ trò chuyện thoại độ trễ thấp với các tay đua khác trong cùng phòng.
-- **Text Chat trong trận (`CHAT`):**
-  - Bấm nút **`CHAT`** để nhập tin nhắn văn bản và nhấn `Enter` để gửi tới toàn bộ người chơi trong phòng.
-  - Tin nhắn hiển thị tức thời theo phiên đấu (không lưu lịch sử sau khi rời phòng) và hệ thống tự động khóa điều khiển lái xe khi bạn đang gõ chữ để tránh xe chạy lệch đường.
-
----
-
-## 🛒 4. Hệ Thống Cửa Hàng 3D & Bộ Sưu Tập 25 Xe Scooter (`3D Shop`)
-
-Từ màn hình Menu chính, người chơi truy cập **Cửa hàng (Shop)** để dùng số Xu tích lũy được mở khóa và trang bị xe:
-
-- **25 Mẫu Xe Scooter Đa Sắc Màu (`VehicleCatalog`):**
-  - Đầy đủ 25 phiên bản từ **Default**, **Classic Black** đến các phối màu nổi bật (*Ocean Blue, Racing Red, Neon Green, Solar Yellow, Royal Purple, Rose Gold, Emerald...*), phủ màu trực tiếp trên GPU cho độ sắc nét cao và chuyển xe mượt mà.
-- **Sân khấu trưng bày 3D xoay 360° (3D Showcase Stage):**
-  - Tự động chuẩn hóa kích thước, căn giữa tâm hình học (*Bounds*) và vô hiệu hóa vật lý thừa để trưng bày mô hình 3D xoay mượt mà trên vòng sáng trắng giữa màn hình.
-  - Chuyển qua lại giữa các mẫu xe (`<` / `>` hoặc phím mũi tên), xem tên, giá bán và thao tác trực tiếp qua nút trạng thái: **`BUY`** (mua bằng Xu) $\rightarrow$ **`EQUIP`** (trang bị xe đã sở hữu) $\rightarrow$ **`EQUIPPED`** (đang sử dụng).
-- **Kệ trưng bày xe đã sở hữu (`OWNED SCOOTERS`):**
-  - Ở góc trên bên trái màn hình Shop hiển thị **Kệ xe 3D thu nhỏ (`OWNED SCOOTERS`)** sắp xếp theo lưới 5 cột.
-  - Toàn bộ các mẫu xe đã mở khóa được nhân bản với vật liệu độc lập và xoay 3D trực quan để bạn theo dõi bộ sưu tập của mình.
-
----
-
-## 🎮 5. Nút Điều Khiển (Controls)
-
-### Khi ở Sảnh chờ (Lobby):
-
-| Thao tác / Phím bấm | Chức năng |
+| Thành phần | Phiên bản |
 | :--- | :--- |
-| Nút `SELECT VEHICLE` | Sang màn hình chọn xe (và map nếu là Chủ phòng). Chỉ hiện khi đã ở trong phòng |
-| `Chuột phải` vào ô nhập mã | Dán nhanh mã phòng 5 ký tự từ Clipboard |
-| `Enter` (trong ô nhập mã) | Tham gia phòng ngay lập tức (`Join Room`) |
-| `ESC` | Rời phòng hiện tại hoặc quay về màn hình Menu chính |
+| Windows | 10 / 11 |
+| Visual Studio | 2022 (workload **.NET desktop development**) |
+| .NET SDK | bản ghi trong file `.csproj` (từ .NET 6 trở lên, khuyến nghị .NET 8) |
+| SQL Server + SSMS | 2019 / 2022 (Express cũng được), bật **TCP/IP** cổng `1433` |
+| Unity (nếu muốn mở / build game) | **Unity 6.3 LTS (6000.3.28f1)** |
+| Photon | tài khoản miễn phí tại [dashboard.photonengine.com](https://dashboard.photonengine.com) |
 
-### Khi ở màn hình Chọn xe (Select):
+> Chỉ muốn **chơi thử** (không sửa code)? Chỉ cần SQL Server + .NET SDK + **BuildGame.zip** (mục 8), không cần cài Unity.
 
-| Thao tác / Phím bấm | Chức năng |
+---
+
+## 🚀 3. Chạy nhanh (4 bước)
+
+### Bước 1 - Cài SQL Server (bỏ qua nếu máy đã có)
+
+Chọn **một** trong hai cách:
+
+**Cách A: SQL Server 2022 Developer (miễn phí, khuyên dùng)**
+
+1. Tải **SQL Server 2022 Developer** tại <https://www.microsoft.com/sql-server/sql-server-downloads>, cài kiểu **Basic**.
+2. (Tùy chọn) Cài **SSMS** để xem dữ liệu: <https://aka.ms/ssmsfullsetup>.
+3. Bật đăng nhập `sa`: mở SSMS, kết nối `localhost` bằng *Windows Authentication* → chuột phải server → *Properties* → *Security* → chọn **SQL Server and Windows Authentication mode**. Rồi vào *Security → Logins → `sa` → Properties*: đặt **Password** (tối thiểu 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt) và ở tab *Status* chọn **Login: Enabled**.
+4. Bật TCP cổng 1433: mở **SQL Server Configuration Manager** → *SQL Server Network Configuration* → *Protocols for MSSQLSERVER* → **TCP/IP = Enabled** → *Properties* → tab *IP Addresses* → kéo xuống mục **IPAll**: để trống *TCP Dynamic Ports*, đặt **TCP Port = 1433**.
+5. **Restart** dịch vụ SQL Server (chuột phải server trong SSMS → *Restart*, hoặc trong Configuration Manager → *SQL Server Services*).
+
+**Cách B: Docker (nếu đã cài Docker Desktop, nhanh nhất)**
+
+```bash
+docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=DanToPhong@123" -p 1433:1433 --name sql-dtp -d mcr.microsoft.com/mssql/server:2022-latest
+```
+
+Mật khẩu `sa` ở lệnh trên là `DanToPhong@123`. Dùng đúng mật khẩu này (hoặc mật khẩu bạn tự đặt) ở Bước 2.
+
+> ✅ **Không cần tạo database hay bảng thủ công.** Khi chạy lần đầu, `DanToPhong.Server` tự tạo database `DanToPhongDB` cùng các bảng `NguoiDung`, `VatPham`, `DanhGia`. Muốn tạo tay thì chạy file `SQL/00_setup_full.sql` trong SSMS. Tài khoản mới luôn bắt đầu với **100 xu**.
+
+### Bước 2 - Chạy Server
+
+1. Mở `Program.cs` của project **`DanToPhong.Server`**, sửa mật khẩu `sa` ở `ConnectionString`:
+   ```csharp
+   "Server=localhost,1433;Database=DanToPhongDB;User Id=sa;Password=<MẬT_KHẨU_SA_CỦA_BẠN>;TrustServerCertificate=True;"
+   ```
+2. Mở terminal tại thư mục `DanToPhong.Server` và chạy:
+   ```bash
+   dotnet run
+   ```
+3. Đợi đủ các dòng sau rồi **để cửa sổ đó mở suốt**:
+   ```
+   [DB] Database setup OK.
+   [DB] Connected to DanToPhongDB successfully.
+   [TCP] Server listening on port 9000...
+   ```
+
+### Bước 3 - Đặt bản build game vào đúng chỗ
+
+Launcher tìm file game theo thứ tự sau (lấy chỗ đầu tiên có file):
+
+1. `D:\DanToPhong\BuildGame36\DanToPhong.exe` (hoặc `ScooterRacing.exe`)
+2. `<thư mục chạy Launcher>\Game\DanToPhong.exe` (hoặc `ScooterRacing.exe`)
+
+Tải **BuildGame.zip** (mục 8), giải nén **toàn bộ** vào một trong hai chỗ trên (giữ nguyên cả thư mục `*_Data`, `UnityPlayer.dll`...).
+
+> Muốn đổi đường dẫn mặc định: sửa hằng `Build36Folder` trong `UI/Services/GameLauncherService.cs`.
+
+### Bước 4 - Mở Launcher
+
+1. Mở solution trong thư mục `UI` bằng Visual Studio, đặt **UI** làm Startup Project, bấm **F5**.
+2. **Register** để tạo tài khoản, rồi **Login**.
+3. Trong Launcher: **Single Player** (chơi đơn), **Multiplayer** (vào sảnh), tab **Open Rooms** (xem và vào phòng đang mở), **Create Room** (tự tạo phòng).
+
+> ⚠️ Luôn bật **Server trước** rồi mới mở Launcher. Nếu tắt Server giữa chừng, đăng nhập lại.
+
+---
+
+## 🌍 4. Chơi nhiều máy (LAN / Internet)
+
+Chỉ **một máy** chạy SQL Server + `DanToPhong.Server` (gọi là *máy chủ*). Các máy còn lại chỉ chạy Launcher + game.
+
+1. **Máy chủ:** mở firewall cho cổng `9000` (PowerShell quyền Admin):
+   ```powershell
+   New-NetFirewallRule -DisplayName "DanToPhong Server" -Direction Inbound -Protocol TCP -LocalPort 9000 -Action Allow
+   ```
+2. Lấy IP máy chủ (`ipconfig` → IPv4, ví dụ `192.168.1.20`). Khác mạng LAN thì dùng VPN (Radmin / ZeroTier / Tailscale) hoặc mở port.
+3. **Máy khách:** trong project `UI`, tìm chỗ tạo `new NetworkClientService()` (thường ở `Program.cs`) và đổi thành:
+   ```csharp
+   new NetworkClientService("192.168.1.20", 9000)
+   ```
+   Launcher sẽ tự truyền `--host`/`--port` này cho game.
+4. Tất cả máy cần **internet** để dùng Photon.
+
+**Test hai tài khoản trên cùng một máy:** mở 2 cửa sổ Launcher, đăng nhập 2 tài khoản khác nhau.
+
+---
+
+## 🛠️ 5. Dành cho dev: mở / build game Unity
+
+1. Mở thư mục project Unity bằng **Unity Hub** (đúng phiên bản `6000.3.28f1`).
+2. **Photon:** nếu repo không kèm `PhotonServerSettings`, vào *Window → Photon Unity Networking → Highlight Server Settings* và dán **App Id PUN** và **App Id Voice** (tạo trên dashboard Photon). Game cố định vùng **Asia**.
+3. **Build Settings** (*File → Build Profiles → Scene List*): scene **`Boot` phải ở index 0**, sau đó `menu`, `LobbyScene`, `SelectScene`, `ShopScene`, `game`, `game 1`, `game 2`, `game 3`, `ResultP...`. Mọi scene đua phải được **tích chọn**, vì thiếu scene sẽ kẹt ở "Loading track...".
+4. **Build** ra thư mục `D:\DanToPhong\BuildGame36` (hoặc `Game\` cạnh Launcher), file `.exe` tên `DanToPhong.exe`.
+5. Bấm Play trong Editor **không qua Launcher** thì game chạy chế độ **offline** (dữ liệu lưu `PlayerPrefs`), không nối Server. Muốn thử đầy đủ hãy **build rồi mở bằng Launcher**.
+
+Tham số dòng lệnh game nhận từ Launcher:
+
+| Tham số | Ý nghĩa |
 | :--- | :--- |
-| `←` / `A` hoặc nút `<` | Xe trước đó |
-| `→` / `D` hoặc nút `>` | Xe kế tiếp |
-| Nút `<` `>` dưới khung ảnh | Đổi map *(chỉ Chủ phòng)* |
-| Nút `CONFIRM` hoặc `Enter` | Lưu lựa chọn và **quay lại Lobby (giữ nguyên phòng)** |
-| Nút `?` | Mở / đóng bảng hướng dẫn thao tác |
-| `ESC` | Đang trong phòng: quay lại Lobby. Ngoài phòng: về Menu |
+| `--user` | tên đăng nhập |
+| `--token` | token xác thực do Server cấp (hiệu lực 6 giờ) |
+| `--host` / `--port` | địa chỉ Server (mặc định `127.0.0.1:9000`) |
+| `--mode` | `single`, `multiplayer`, `create`, `room`, `shop`, `menu` |
+| `--room` | mã phòng 5 ký tự (khi `--mode room`) |
 
-### Khi đang đua:
-Sau khi cuộc đua bắt đầu, chỉ cần nhấn phím tăng tốc lần đầu, xe sẽ **duy trì ga chạy về phía trước**. Bạn có thể dùng **`WASD`** hoặc các phím **`Mũi tên`**:
+---
 
-| Phím bấm / Nút UI | Chức năng |
+## 🧭 6. Luồng màn hình & tính năng
+
+```
+Launcher ─► Game
+              │
+              ├─ single ──► Chọn xe ──► Đường đua
+              ├─ multiplayer / create / room ──► Lobby ──► Chọn xe ──► Lobby ──START──► Đường đua
+              └─ menu ──► Play / Shop / Leaderboard / Quit
+```
+
+- **Menu** là trung tâm: Shop, Select, Lobby thoát (`ESC` / Back) đều quay về Menu hoặc Lobby; chỉ nút **QUIT** ở Menu mới thoát game về Launcher.
+- **Thẻ người chơi** ở Menu: avatar, tên, `@username • ID`, xu, xe đang dùng.
+- **Avatar** lưu trong database, đổi ở tab **Settings** của Launcher (ảnh tự cắt vuông thu nhỏ 128x128).
+- **Racer ID** là mã 6 số **duy nhất** (xem ở tab Racer, bấm để copy) dùng để **mời bạn bè** vào phòng.
+- **Mời bạn:** trong phòng chờ, nhập **ID hoặc username** của bạn → **INVITE**. Người kia nhận lời mời trong vài giây (ở Launcher hoặc trong game).
+- **Phòng:** chủ phòng báo trạng thái lên Server, tab **Open Rooms** của Launcher hiện **mọi** phòng đang mở (có thanh cuộn). Bấm **Join** là game tự vào đúng phòng.
+- **Leaderboard** (top 20 theo xu): hạng, ID, tên người chơi. Mở từ Launcher hoặc Menu game.
+- **Đánh giá game:** mỗi tài khoản 1 lượt, lưu trong database.
+- **Xu:** thắng multiplayer **+50**, solo về đích **+10**; mua xe trong Shop (25 mẫu). Mọi thay đổi đồng bộ lên Server.
+
+### Điều khiển khi đua
+
+| Phím | Chức năng |
 | :--- | :--- |
-| `W` hoặc `↑` | **Khởi động & Tăng tốc (Boost):** Nhấn giữ để xe bứt tốc chạy nhanh hơn |
-| `S` hoặc `↓` | **Phanh / Lùi xe:** Hãm tốc độ khi vào cua gắt hoặc lùi xe khi bị vướng chướng ngại vật |
-| `A` hoặc `←` | **Rẽ trái** |
-| `D` hoặc `→` | **Rẽ phải** |
-| `Space` (Dấu cách) | **Nhảy:** Vượt chướng ngại vật hoặc căn góc nhảy qua đoạn cua |
-| Nút `MIC OFF / ON` | Bật hoặc tắt micro (**Voice Chat**) |
-| Nút `CHAT` + `Enter` | Mở khung trò chuyện văn bản (**Text Chat**) và gửi tin nhắn |
-| `ESC` | **Tạm dừng / Thoát trận:** Mở bảng tùy chọn (`Resume` để tiếp tục hoặc `Quit` để rời phòng về Menu) |
+| `W` / `↑` | Tăng tốc / Boost |
+| `S` / `↓` | Phanh / lùi |
+| `A` `D` / `←` `→` | Rẽ trái / phải |
+| `Space` | Nhảy |
+| `MIC`, `CHAT` + `Enter` | Voice chat, text chat |
+| `ESC` | Tạm dừng / thoát trận |
 
-### Khi ở chế độ Khán giả (Spectator Mode):
+Khán giả (sau khi bị loại): `E`/`→`/`Tab` xem tay đua kế, `Q`/`←` xem tay đua trước.
 
-| Phím bấm / Nút | Chức năng |
+### Luật chơi
+
+- Bắt đầu với **30 giây**, mỗi đồng xu checkpoint **+5 giây**.
+- Rơi khỏi đường (xuống nước) → hồi sinh về vạch xuất phát, đồng hồ vẫn chạy.
+- Hết giờ hoặc có người về đích trước → bị loại (vào chế độ khán giả nếu chơi mạng).
+- Về đích ở cổng **Checkwin** để thắng.
+
+---
+
+## 🧯 7. Xử lý lỗi thường gặp
+
+| Triệu chứng | Cách xử lý |
 | :--- | :--- |
-| `E`, `→`, `Tab` hoặc nút `>` | Chuyển sang xem camera của tay đua tiếp theo |
-| `Q`, `←` hoặc nút `<` | Quay lại xem camera của tay đua trước đó |
-| `ESC` | Mở / đóng bảng tùy chọn **Ở lại xem** hoặc **Thoát trận** |
+| `Cannot connect to server` / không đăng nhập được | Chưa bật Server, sai `host`, hoặc firewall chặn cổng `9000` |
+| Server: `Cannot connect to DanToPhongDB` / `Login failed for user 'sa'` | Sai mật khẩu `sa` trong `ConnectionString`, chưa bật SQL Authentication, hoặc chưa Restart SQL Server |
+| `Invalid object name 'dbo.NguoiDung'` trong SSMS | Đang chọn nhầm database (`master`). Chọn `DanToPhongDB`, hoặc chạy Server một lần để nó tự tạo bảng |
+| Server: `A network-related or instance-specific error` / `error: 40` / `error: 26` | SQL Server chưa chạy, chưa bật **TCP/IP** hoặc chưa đặt cổng **1433** (Bước 1, Cách A, mục 4). Cài **Express** mặc định là instance `SQLEXPRESS` không nghe cổng 1433: hãy làm mục 4 hoặc dùng Cách B (Docker) |
+| `Không tìm thấy file game` khi bấm Play | Chưa đặt build game đúng chỗ (mục 3, bước 3) |
+| Game mở rồi tự đóng | Không kết nối / xác thực được Server (xem Console của Server, token hết hạn thì đăng nhập lại Launcher) |
+| Kẹt ở "Loading track..." khi chơi mạng | Scene đua chưa có trong Build Settings, hoặc 2 máy dùng 2 bản build khác nhau. Build lại và đưa **cùng một bản** cho mọi người |
+| Không tạo / vào được phòng | Máy không có internet hoặc Photon chưa có App Id |
+| `Send failed. Check SMTP/App Password` khi lấy mã xác nhận | Gửi email xác nhận cần cấu hình SMTP (ví dụ Gmail **App Password**) trong `EmailVerificationService` của project `UI` |
+| Xu / xe trong game lệch so với Launcher | Đang chạy game ngoài Launcher (offline) hoặc dùng bản build cũ. Build lại và mở bằng Launcher |
 
 ---
 
-## 🗺️ 6. Hệ Thống Bản Đồ Thu Nhỏ (Minimap GPS)
-
-- **Góc nhìn trực diện từ trên xuống:** Camera Minimap (Orthographic) bám sát xe của người chơi, giúp quan sát rõ toàn cảnh cung đường và các khúc cua phía trước.
-- **Mũi tên định hướng GPS phân biệt người chơi:**
-  - **Mũi tên Xanh lá (`Green`):** Vị trí và hướng di chuyển của **xe bạn**.
-  - **Mũi tên Đỏ (`Red`):** Vị trí và hướng di chuyển của **xe đối thủ**.
-
----
-
-## ⏱️ 7. Luật Chơi, Checkpoint & Hồi Sinh Khi Rơi Đường (Rules)
-
-- **Thời gian ban đầu:** Mỗi tay đua có sẵn **30 giây** đếm ngược khi bắt đầu lượt chạy.
-- **Đồng xu Checkpoint xoay tròn:** Mỗi khi ăn được 1 đồng xu checkpoint, bạn được **cộng thêm +5 giây** vào quỹ thời gian kèm thông báo và âm thanh.
-- **Rơi khỏi đường đua — Quay về vạch xuất phát:** Nếu xe trượt khỏi đường đua và rơi xuống vùng nước biển bao quanh (`Sea_Plane` hoặc thấp hơn mực nước `Y <= -0.3`), xe sẽ **hồi sinh về vạch xuất phát** với vận tốc đặt lại về `0` (đồng hồ đếm ngược vẫn tiếp tục chạy).
-- **Cổng Checkwin:** Giữ vững tay lái, thu thập checkpoint và cán đích tại **Cổng Checkwin** (biển hiệu **Billboard Finish**) sớm nhất để giành chiến thắng.
-- **Điều kiện bị loại / thua cuộc:** Thời gian đếm ngược về `0` trước khi chạm đích, hoặc có đối thủ khác về đích trước bạn.
-
----
-
-## 🔊 8. Hệ Thống Âm Thanh, Dữ Liệu & Giao Diện (Audio, Data & UI)
-
-- **Lưu trữ tiến trình cục bộ (`PlayerPrefs`):** Dữ liệu người chơi (Nickname, số Xu, danh sách xe đã mở khóa, xe đang trang bị và bản đồ đã chọn) được lưu bền vững trên máy qua `PlayerInventory` và `VehicleCatalog`.
-- **Nhạc nền & Hiệu ứng âm thanh:** Nhạc nền phát xuyên suốt từ **Menu** sang **Lobby** và chuyển sang nhạc đường đua sôi động khi vào trận, kèm SFX riêng cho Checkpoint, Chiến thắng và Bị loại.
-- **Giao diện tối giản hiện đại:** Hiệu ứng nút bấm phản hồi mượt mà với viền sáng trắng tinh gọn, đồng bộ số Xu và bảng tin thông báo thời gian thực trên đường đua.
-
----
-
-## 💡 9. Mẹo Đua Xe (Pro Tips)
-
-- **Vào phòng cực nhanh:** Chủ phòng bấm **Create** là mã 5 ký tự đã nằm sẵn trong Clipboard để `Ctrl + V` gửi bạn bè; người vào phòng chỉ cần **chuột phải** vào ô nhập mã là dán ngay.
-- **Đổi xe linh hoạt trong phòng:** Bạn có thể bấm `SELECT VEHICLE` để đổi sang bất kỳ chiếc xe nào đã mua trước khi Chủ phòng bấm `START GAME` mà không bị mất phòng.
-- **Bật Mic phối hợp hoặc tương tác cùng bạn bè:** Bấm `MIC` ở góc dưới bên trái để trò chuyện trực tiếp khi đang bứt tốc.
-- **Theo dõi mũi tên Đỏ trên Minimap:** Quan sát khoảng cách và hướng rẽ của đối thủ để chủ động bứt tốc ở các đoạn đường thẳng.
-- **Giảm ga & phanh đúng lúc khi vào cua (`S` / `↓`):** Rơi khỏi đường đua sẽ bị đưa về vạch xuất phát và mất rất nhiều thời gian, hãy nhả ga hoặc rà phanh nhẹ trước các khúc cua gắt.
-- **Cày Xu mở khóa 25 mẫu xe:** Chơi Multiplayer để nhận **+50 Xu/trận thắng**, mở khóa nhanh toàn bộ bộ sưu tập Scooter trong Shop.
-
----
-
-## 🛠️ 10. Công Nghệ Sử Dụng
-
-- **Game Engine:** Unity 6 (Universal Render Pipeline - URP)
-- **Networking & Voice:** Photon PUN 2 & Photon Voice 2 (Asia Region, Room Code, Map/Vehicle Custom Properties Sync & Host Migration)
-- **Launcher & Auth Server:** C# Windows Forms (.NET), TCP Socket Custom Protocol (`MessageFramer` Port `9000`) & Microsoft SQL Server (`DanToPhongDB`)
-- **Camera System:** Unity Cinemachine, Networked Third-Person Spectator Camera & Orthographic Minimap Camera
-- **UI, 3D Showcase & Audio:** TextMeshPro (TMP), GPU Material Tinting (`VehicleCatalog`), Dynamic 3D Bounds Normalization & Multi-channel AudioSource
-
----
-
-## 🖥️ 11. Hướng Dẫn Chạy Giao Diện Launcher & Đăng Nhập (`UI` & `DanToPhong.Server`)
-
-Hệ thống giao diện đăng nhập/quản lý tài khoản (`UI`) giao tiếp trực tiếp với `DanToPhong.Server` qua **TCP Socket (Port `9000`)** và lưu trữ dữ liệu người dùng trên **SQL Server (`DanToPhongDB`)**. Sau khi clone repo về máy, bạn thực hiện theo 3 bước sau để chạy phần UI:
-
-### Bước 1: Chuẩn Bị Cơ Sở Dữ Liệu (`DanToPhongDB`)
-1. Mở **SQL Server Management Studio (SSMS)**, đăng nhập vào instance SQL Server trên máy (`localhost,1433`).
-2. Tạo database tên **`DanToPhongDB`** và chạy script SQL tạo bảng người dùng (`dbo.NguoiDung`) của nhóm.
-3. Bật tài khoản SQL Authentication **`sa`** (chuột phải `sa` $\rightarrow$ *Properties* $\rightarrow$ *Status* $\rightarrow$ chọn **Enabled**) và đặt mật khẩu đạt chuẩn độ phức tạp của SQL Server (tối thiểu 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt).
-
-### Bước 2: Cấu Hình & Khởi Chạy `DanToPhong.Server`
-1. Mở file `UI/DanToPhong.Server/Program.cs`, cập nhật đúng mật khẩu `sa` của máy bạn ở dòng `ConnectionString`:
-   `Server=localhost,1433;Database=DanToPhongDB;User Id=sa;Password=<MẬT_KHẨU_SA_CỦA_BẠN>;TrustServerCertificate=True;`
-2. Mở terminal tại thư mục `UI/DanToPhong.Server` và chạy lệnh `dotnet run`.
-3. Đợi console hiển thị đủ 2 dòng `[DB] Connected to DanToPhongDB successfully.` và `[TCP] Server listening on port 9000...` là Server đã sẵn sàng nhận kết nối từ UI.
-
-### Bước 3: Mở & Sử Dụng Giao Diện `UI` (WinForms)
-1. Giữ nguyên cửa sổ terminal đang chạy `DanToPhong.Server`.
-2. Mở solution trong thư mục `UI` bằng **Visual Studio** (hoặc chạy project WinForms `UI`), bấm **Start (`F5`)**.
-3. Trên giao diện Launcher, bạn có thể thao tác đầy đủ các tính năng:
-   - **Đăng ký (`Register`):** Tạo tài khoản mới (*Username từ 3–20 ký tự chữ/số/gạch dưới; mật khẩu tối thiểu 8 ký tự gồm cả chữ và số*).
-   - **Đăng nhập (`Login`):** Xác thực tài khoản qua server TCP và tải thông tin hồ sơ người chơi (`GetInfo`).
-   - **Quên mật khẩu (`Reset Password`):** Khôi phục mật khẩu mới bằng cách xác nhận đúng cặp `Username` + `Email` đã đăng ký.
-   - **Vào Game (`Play` / `Launch`):** Mở trực tiếp bản build game **Dân Tổ Phóng** sau khi đăng nhập thành công.
-
-> ⚠️ **Lưu ý:** Luôn bật `DanToPhong.Server` **trước** khi bấm đăng ký/đăng nhập trên `UI` để tránh lỗi mất kết nối tới cổng `9000`.
-
----
-
-## 📦 12. Tải Bản Build Game (BuildGame.zip)
+## 📦 8. Tải bản build game
 
 👉 [Tải xuống BuildGame.zip tại đây](https://drive.google.com/drive/folders/19mJVw_RUIEru4CHCZbzZtJtPiwsEHSFR?usp=sharing)
+
+---
+
+## 🧰 9. Công nghệ sử dụng
+
+- **Game:** Unity 6 (URP), Cinemachine, TextMeshPro, Photon PUN 2 + Photon Voice 2 (vùng Asia)
+- **Launcher:** C# Windows Forms (.NET)
+- **Server:** C# console, TCP socket với giao thức riêng (`MessageFramer`: 4 byte độ dài + JSON, cổng `9000`), xác thực bằng token
+- **Cơ sở dữ liệu:** Microsoft SQL Server (`DanToPhongDB`): mật khẩu băm PBKDF2-SHA256 + salt
 
 ---
 
