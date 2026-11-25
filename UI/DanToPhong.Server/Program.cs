@@ -56,6 +56,7 @@ namespace DanToPhong.Server
 
             try
             {
+                await DatabaseInitializer.EnsureAsync(ConnectionString, cts.Token);   // tự tạo DB + bảng nếu chưa có
                 await repo.KiemTraKetNoiAsync(cts.Token);
                 Console.WriteLine("[DB] Connected to DanToPhongDB successfully.");
             }
@@ -63,6 +64,7 @@ namespace DanToPhong.Server
             {
                 Console.WriteLine($"[DB] Warning: Cannot connect to DanToPhongDB at startup. ({ex.Message})");
             }
+           
 
             var listener = new TcpListener(IPAddress.Any, Port);
             listener.Start();
