@@ -112,7 +112,11 @@ namespace UI.Services
                     process.Exited += (_, _) => process.Dispose();
                 }
 
-                process.Start();
+                if (!process.Start())
+                {
+                    process.Dispose();
+                    throw new InvalidOperationException("Windows không xác nhận game đã khởi chạy.");
+                }
                 return true;
             }
             catch (Exception ex)
