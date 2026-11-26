@@ -4,7 +4,6 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using Photon.Pun;
 
 public class MatchHistorySystem : MonoBehaviour
 {
@@ -72,7 +71,7 @@ public class MatchHistorySystem : MonoBehaviour
         data.tongTran++;
         if (thang) data.soTranThang++;
 
-        bool laMulti = PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom != null && PhotonNetwork.CurrentRoom.PlayerCount > 1;
+        bool laMulti = !string.IsNullOrWhiteSpace(LauncherArgs.Room);
         int xeIdx = VehicleCatalog.GetSelectedIndex();
 
         MatchRecord rec = new MatchRecord

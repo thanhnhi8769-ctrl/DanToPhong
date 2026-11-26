@@ -50,7 +50,8 @@ namespace DanToPhong.Server
             await using (var verify = new SqlCommand(@"
                 IF OBJECT_ID('dbo.AuthTokens') IS NULL OR
                    OBJECT_ID('dbo.VerificationCodes') IS NULL OR
-                   OBJECT_ID('dbo.RequestIdempotency') IS NULL
+                      OBJECT_ID('dbo.RequestIdempotency') IS NULL OR
+                      OBJECT_ID('dbo.LoginRateLimits') IS NULL
                 BEGIN
                     THROW 51000, 'Required security-state tables are missing.', 1;
                 END;", db))
@@ -151,7 +152,17 @@ namespace DanToPhong.Server
                   CONSTRAINT FK_RequestIdempotency_NguoiDung FOREIGN KEY(UserId) REFERENCES dbo.NguoiDung(UserId)
               );
               IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_RequestIdempotency_CreatedAt')
-                  CREATE INDEX IX_RequestIdempotency_CreatedAt ON dbo.RequestIdempotency(CreatedAt);"
+                  CREATE INDEX IX_RequestIdempotency_CreatedAt ON dbo.RequestIdempotency(CreatedAt);",
+            @"IF OBJECT_ID('dbo.LoginRateLimits') IS NULL
+              CREATE TABLE dbo.LoginRateLimits (
+                  KeyHash CHAR(64) NOT NULL CONSTRAINT PK_LoginRateLimits PRIMARY KEY,
+                  WindowStartedAt DATETIME2 NOT NULL,
+                  Attempts INT NOT NULL,
+                  LockedUntil DATETIME2 NULL,
+                  UpdatedAt DATETIME2 NOT NULL
+              );
+              IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_LoginRateLimits_UpdatedAt')
+                  CREATE INDEX IX_LoginRateLimits_UpdatedAt ON dbo.LoginRateLimits(UpdatedAt);"
         };
     }
 }

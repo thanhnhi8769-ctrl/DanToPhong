@@ -1,211 +1,224 @@
-# Đặc tả giao thức DanToPhong
+# DanToPhong TCP protocol
 
-Tài liệu này được đối chiếu với `UI/DanToPhong.Protocol/MessageFramer.cs`,
-`Packets.cs`, `Commands.cs`, `UI/DanToPhong.Server/Program.cs`,
-`UI/UI/NetworkClientService.cs` và `Assets/script/ServerClient.cs`.
+This specification describes the implemented TCP request/response protocol in
+`UI/DanToPhong.Protocol/MessageFramer.cs`, `Packets.cs`, `Commands.cs`,
+`UI/DanToPhong.Server/Program.cs`, `UI/DanToPhong.Server/TcpGameRoomRegistry.cs`,
+`UI/UI/NetworkClientService.cs`, and `Assets/script/ServerClient.cs`.
+Runtime/load-test claims are only made when backed by evidence in
+`docs/evidence/`.
 
-## 1. Transport và phiên kết nối
+## 1. Transport and session
 
-- Transport là TCP; cổng mặc định `9000`, có thể đổi bằng `DANTOPHONG_PORT`.
-- Server bind `IPAddress.Any`; client kết nối tới host/port trong `server.json`
-  hoặc biến môi trường.
-- TLS là tùy chọn cấu hình, không được thương lượng tự động. Server và client
-  phải cùng bật/tắt `DANTOPHONG_USE_TLS`. Server dùng TLS 1.2/1.3 và certificate
-  PKCS#12 khi bật; TLS mặc định **tắt**.
-- Client WinForms dùng timeout thao tác 12 giây; Unity dùng 8 giây. Server giới
-  hạn TLS handshake 10 giây và chờ tối đa 2 phút cho một request tiếp theo trên
-  mỗi kết nối.
-- Mỗi kết nối xử lý lần lượt một request rồi một response. Client Unity khóa
-  exchange bằng semaphore; server có một vòng đọc/dispatch/ghi tuần tự cho mỗi
-  session. Không có heartbeat ứng dụng hoặc TCP keep-alive được cấu hình.
-- Server dùng async I/O và giới hạn tối đa 128 session đồng thời; kết nối vượt
-  giới hạn bị đóng. Khi Ctrl+C, listener dừng, socket phiên đang hoạt động bị
-  đóng và server chờ session dọn dẹp xong.
+- Transport: TCP stream, default server port `9000`; clients can override the
+  host and port through runtime configuration.
+- TLS wraps the TCP stream before application framing. Runtime configuration
+  must enable TLS on both ends and use a certificate trusted for the server
+  hostname. The plaintext setting is an explicit isolated-test option only.
+- Requests are processed sequentially per connection. Each request receives
+  one response; the current gameplay path does not use a server-push channel.
+- Server sessions use asynchronous I/O, a configured concurrent-session limit,
+  per-session idle/read timeouts, and socket cleanup on EOF or error. Client
+  timeout/heartbeat behavior is described in the deployment configuration and
+  must be verified against the running build.
+- The client sends game input at a target rate of 15–20 requests per second.
+  Since each request waits for its response before the next request, actual
+  update rate can fall below that target when latency is high.
 
-## 2. Framing và biểu diễn bản tin
+## 2. Frame format
 
-Mỗi frame có cấu trúc:
-
-| Offset | Độ dài | Ý nghĩa |
+| Offset | Size | Description |
 |---|---:|---|
-| 0 | 4 byte | Độ dài body, số nguyên signed 32-bit big-endian |
-| 4 | N byte | JSON UTF-8, không có delimiter hoặc byte kết thúc |
+| 0 | 4 bytes | Signed 32-bit body length, big-endian |
+| 4 | N bytes | UTF-8 JSON object; no delimiter |
 
-- `1 <= N <= 65,536` byte. Giới hạn được áp dụng cho request và response ở
-  `MessageFramer`; Unity client cũng áp dụng cùng giới hạn ở hai chiều.
-- TCP là byte stream: một lần `Read`/`Write` không tương ứng một frame. Receiver
-  đọc đủ 4 byte header rồi đọc đủ N byte body; nhiều frame có thể liền nhau.
-- JSON dùng tên property camelCase. Server đọc JSON không phân biệt hoa/thường.
-- Header bằng 0, âm hoặc vượt giới hạn bị từ chối. EOF trước header hoàn chỉnh
-  được xem là đóng kết nối; EOF giữa body là frame lỗi. JSON sai/packet sai làm
-  session đóng, không gửi response thành công giả.
-- Lỗi framing không có frame lỗi riêng: server ghi log ngắn và đóng kết nối.
-  Với request hợp lệ nhưng không hỗ trợ/không hợp lệ, server trả `ResponsePacket`.
+`1 <= N <= 65,536` bytes. TCP reads may split or combine frames, so receivers
+read the full header and then the full body. Empty, negative, oversized,
+truncated, or invalid JSON frames are rejected; malformed input closes the
+session rather than returning a success-shaped response.
 
-## 3. Cấu trúc request/response
+## 3. Packet envelope and limits
 
-Request là object `RequestPacket`. Các field đều optional trừ `command`:
+The request envelope is `RequestPacket`; `command` selects the operation and
+the other fields are optional and command-specific. The response envelope is
+`ResponsePacket`, including `success`, `code`, `command`, and `message`, with
+optional DTOs and game-state fields. The authoritative field definitions are
+the C# DTOs in `Packets.cs`.
 
-`command`, `userId`, `racerId`, `username`, `password`, `verificationCode`,
-`requestId`, `fullName`, `email`, `birthday`, `gender`, `avatarPath`,
-`coinsDelta`, `mode`, `roomId`, `token`, `category`, `itemIndex`, `price`,
-`mapName`, `avatarBase64`, `stars`, `comment`, `playerCount`, `maxPlayers`,
-`isRacing`, `targetId`.
+Important fields include:
 
-Response là object `ResponsePacket`: `success`, `code`, `message`, `mode`,
-`roomId`, `user`, `token`, `inventory`, `avatarBase64`, `reviewSummary`,
-`leaderboard`, `rooms`, `invites`. Các DTO lồng nhau được định nghĩa trong
-`Packets.cs`.
+- Account/session: `username`, `password`, `verificationCode`, `token`,
+  `requestId`.
+- Room: `roomId`, `mapName`, `maxPlayers`, `playerCount`, `isRacing`.
+- Input: `vehicleIndex`, `positionX/Y/Z`, `rotationY`, `throttle`, `steer`,
+  `brake`, `clientTick`, `clientTimestampMs`.
+- Snapshot: `gamePlayers[]`; each player has `userId`, `username`,
+  `vehicleIndex`, `sequence`, position/rotation/velocity, and
+  `serverTimestampMs`.
+- Events/chat: `gameEventType`, checkpoint fields, `chatMessage`,
+  `afterMessageId`; response DTOs include ordered chat IDs and timestamps.
 
-`requestId` được dùng để khử trùng lặp giao dịch `CAPNHATXU` và `MUAHANG`;
-các lệnh khác không có correlation ID riêng. Trên một stream, thứ tự request và
-response được giữ nguyên.
+Per-field validation is command-specific. The generic frame limit does not
+replace input validation. Game input rejects non-finite/out-of-range initial
+coordinates and non-increasing client ticks; throttle and steering are clamped
+to `[-1, 1]`. Checkpoint sequence and chat length/control characters are
+validated server-side.
 
-## 4. Command và mã kết quả
+## 4. Commands
 
-| Command | Chức năng |
-|---|---|
-| `DANGKY` | Tạo tài khoản, yêu cầu mã xác nhận hợp lệ |
-| `DANGNHAP` | Đăng nhập, trả token phiên |
-| `YEUCAUMADANGKY`, `YEUCAUMADATLAI` | Gửi OTP đăng ký/đặt lại mật khẩu |
-| `DOIMATKHAU` | Đặt lại mật khẩu bằng OTP |
-| `XACTHUCTOKEN`, `DANGXUAT` | Xác thực/thu hồi token |
-| `LAYTHONGTIN`, `LAYKHO`, `LAYTRANGTHAI` | Đọc hồ sơ, kho và lời mời |
-| `CAPNHATXU`, `MUAHANG`, `TRANGBI`, `CHONMAP` | Thao tác kho/tài sản |
-| `TAIAVATAR`, `LAYAVATAR`, `DOIAVATAR` | Avatar |
-| `GUIDANHGIA`, `LAYDANHGIA`, `BANGXEPHANG` | Đánh giá và bảng xếp hạng |
-| `VAOPHONG` | Trả thông tin người chơi/phòng cho luồng launcher |
-| `CAPNHATPHONG`, `XOAPHONG`, `DSPHONG` | Cập nhật, xóa, liệt kê metadata phòng |
-| `MOIBAN`, `LAYLOIMOI` | Gửi/lấy lời mời |
+### Account and application data
 
-Các mã chuẩn trong `ErrorCodes`: `OK`, `ERR_INVALID_INPUT`,
+`DANGKY`, `DANGNHAP`, `YEUCAUMADANGKY`, `YEUCAUMADATLAI`, `DOIMATKHAU`,
+`XACTHUCTOKEN`, `DANGXUAT`, `LAYTHONGTIN`, `LAYKHO`, `CAPNHATXU`,
+`MUAHANG`, `TRANGBI`, `CHONMAP`, avatar/review/leaderboard commands,
+`VAOPHONG`, room metadata/invite commands, and `PING` are defined in
+`Commands.cs`.
+
+### TCP room and game prototype
+
+| Command | Direction | Implemented behavior |
+|---|---|---|
+| `ROOM_CREATE` | Client → server | Creates an in-memory room; response includes code and membership summary. |
+| `ROOM_JOIN` | Client → server | Joins a waiting room if it exists and has capacity. |
+| `ROOM_LEAVE` | Client → server | Removes the user's in-memory membership. |
+| `ROOM_STATE` | Client → server | Returns current room summary and player state. |
+| `ROOM_START` | Host → server | Starts a room when the host has at least one other player. |
+| `GAME_INPUT` | Client → server | Sends input, sequence/tick, timestamp and initial spawn position. |
+| `GAME_SNAPSHOT` | Server → requesting client | Returned as the response to a room-state/input request; includes initialized players. It is not pushed/broadcast asynchronously. |
+| `GAME_EVENT` | Client → server | Accepts sequential checkpoint and finish event requests; spatial validation is not implemented. |
+| `CHAT_SEND`, `CHAT_POLL` | Client ↔ server | Stores bounded in-memory room chat and returns messages after an ID; delivery is polling, not push. |
+
+Server state is serialized under an in-process lock and room membership is
+in-memory. There is no cross-process persistence or resume token for a match.
+Disconnect cleanup removes a player from the room.
+
+## 5. Gameplay synchronization currently implemented
+
+The Unity client samples controls and sends `GAME_INPUT` at a target 15–20 Hz.
+The server advances a simplified kinematic model on a nominal 20 Hz step, clamps
+input, and returns a snapshot in that same request/response exchange. Snapshot
+sequence and server timestamp are included. Unity buffers up to eight samples
+and renders remote players approximately 100 ms behind server time.
+
+Important limits:
+
+- This is request/response polling, not a server broadcast. Each client sees
+  the room snapshot only when it receives its own response.
+- There is no per-client outbound snapshot queue, so stale-snapshot coalescing
+  has not been implemented. The client sends no next request until the prior
+  response completes, which bounds its own outstanding requests but reduces
+  update rate under latency.
+- The server simulation is simplified kinematics, not the Unity track
+  collision/vehicle physics. It does not validate client spawn against track
+  geometry, and it does not authoritatively verify that a checkpoint was
+  physically crossed.
+- Finish/checkpoint state is held in memory; winner state is not pushed to
+  every room member. Reconnect does not restore prior membership.
+- Spectating, authoritative rewards/coins/scoreboard, and full match lifecycle
+  are incomplete. Solo remains local Unity gameplay.
+- Unity holds the last sample when it has no later sample; bounded
+  extrapolation is not implemented.
+
+These are known development gaps. A successful build or a protocol smoke test
+does not establish that multiplayer gameplay is complete or stable.
+
+## 6. Error codes and connection closure
+
+Application responses use codes such as `OK`, `ERR_INVALID_INPUT`,
 `ERR_USER_EXISTS`, `ERR_AUTH_FAILED`, `ERR_UNAUTHORIZED`,
-`ERR_INSUFFICIENT_COINS`, `ERR_SERVER_ERROR`, `ERR_ALREADY_REVIEWED`.
-Một số thao tác dùng `ERR_INVALID_INPUT` cho trạng thái từ chối nghiệp vụ.
-Chi tiết command và validate nằm trong `Program.cs`; không phải mọi command đều
-được Unity gọi trực tiếp.
+`ERR_INSUFFICIENT_COINS`, `ERR_SERVER_ERROR`, and
+`ERR_ALREADY_REVIEWED`. Framing/JSON errors close the connection without a
+normal application response. EOF/FIN and socket errors leave the session loop,
+which disposes the stream/socket and removes session-owned room membership.
 
-## 5. Trình tự message
+## 7. Sequence diagrams
 
-### Đăng nhập và xác thực game
+### Login and token handoff
 
 ```mermaid
 sequenceDiagram
     participant L as WinForms Launcher
     participant S as TCP Server :9000
     participant D as SQL Server
-    participant G as Unity Game
-    L->>S: DANGNHAP(username,password)
-    S->>D: Kiểm tra password hash
-    D-->>S: Hồ sơ hoặc không khớp
-    S->>D: Lưu SHA-256(token), hết hạn 6 giờ
-    S-->>L: ResponsePacket(success, user, token)
-    L->>G: Khởi chạy game, truyền token và endpoint
-    G->>S: XACTHUCTOKEN(token)
-    S->>D: Tra token hash còn hiệu lực
-    S-->>G: OK / ERR_UNAUTHORIZED
-    G->>S: LAYKHO, LAYTHONGTIN
-    S-->>G: Inventory/UserInfo
+    participant G as Unity client
+    L->>S: DANGNHAP over TCP/TLS
+    S->>D: Verify credentials and store token hash
+    S-->>L: ResponsePacket + short-lived session token
+    L->>G: Start child process; pass token in child environment
+    G->>S: XACTHUCTOKEN
+    S->>D: Validate token hash and expiry
+    S-->>G: Authenticated response
 ```
 
-### OTP đăng ký
+### Create/join, start and exchange gameplay state
 
 ```mermaid
 sequenceDiagram
-    participant C as Launcher
-    participant S as TCP Server :9000
-    participant M as SMTP
-    participant D as SQL Server
-    C->>S: YEUCAUMADANGKY(username,email)
-    S->>D: Reserve cooldown key (60s)
-    S->>M: Gửi mã 6 chữ số
-    S->>D: Lưu hash/salt, expiry 10 phút
-    S-->>C: Kết quả tổng quát
-    C->>S: DANGKY(...,verificationCode)
-    S->>D: Verify tối đa 5 lần, consume một lần
-    S-->>C: OK / ERR_AUTH_FAILED
+    participant A as Unity client A
+    participant S as DanToPhong TCP server
+    participant B as Unity client B
+    A->>S: ROOM_CREATE
+    S-->>A: Room code / room summary
+    B->>S: ROOM_JOIN(room code)
+    S-->>B: Room summary
+    A->>S: ROOM_START
+    S-->>A: Started response
+    loop Target 15–20 requests/s per client
+        A->>S: GAME_INPUT(sequence, timestamp, controls)
+        S->>S: Simulate room and build snapshot
+        S-->>A: GAME_SNAPSHOT
+        B->>S: GAME_INPUT(sequence, timestamp, controls)
+        S->>S: Simulate room and build snapshot
+        S-->>B: GAME_SNAPSHOT
+        A->>A: Buffer/interpolate received player samples
+        B->>B: Buffer/interpolate received player samples
+    end
 ```
 
-### Vào phòng và đồng bộ gameplay
+This diagram shows the implemented request/response path. It does not imply
+server-pushed broadcast or authoritative Unity physics.
 
-```mermaid
-sequenceDiagram
-    participant G1 as Unity Client 1
-    participant S as TCP Server :9000
-    participant P as Photon Cloud
-    participant G2 as Unity Client 2
-    G1->>P: ConnectUsingSettings / CreateRoom
-    G2->>P: ConnectUsingSettings / JoinRoom
-    G1->>S: CAPNHATPHONG (master client báo metadata)
-    S-->>G1: OK
-    G1->>P: PhotonView Instantiate + state serialization
-    P-->>G2: Transform/velocity snapshots
-    G2->>G2: Nội suy và dự đoán ngắn hạn
-```
-
-`VAOPHONG`, room list và invite qua TCP không phải kênh đồng bộ vị trí xe.
-Thực tế join room/gameplay được điều phối bởi Photon PUN.
-
-### Đóng kết nối
+### Disconnect and cleanup
 
 ```mermaid
 sequenceDiagram
     participant C as Client
     participant S as TCP Server
-    C->>S: FIN / EOF
-    S->>S: Kết thúc vòng ReceiveAsync
-    S->>S: Xóa ClientSession, đóng stream/socket
-    S->>S: Xóa phòng do user sở hữu nếu không còn session khác
-    S-->>C: FIN khi stream/socket được đóng
+    C->>S: FIN / EOF or socket failure
+    S->>S: Exit session receive loop
+    S->>S: Dispose stream/socket and remove session
+    S->>S: Remove user from in-memory room membership
 ```
 
-Đây là mô tả luồng đóng socket thông thường; reset/mất mạng đột ngột được xử lý
-qua exception/EOF ở session và cần kiểm thử runtime riêng.
+## 8. Future transport direction (not implemented)
 
-## 6. Kiểm chứng trong repo và lệnh test
+The current transport remains TCP for all implemented network features. A
+future state channel could negotiate a separate datagram transport over the
+authenticated TCP session, with monotonic sequence numbers, timestamps,
+message authentication, replay protection, and fallback to TCP. No datagram
+transport, HMAC state channel, or fallback implementation exists in this
+project now.
 
-`MessageFramer.ReceiveAsync` dùng vòng lặp đọc đủ byte; giới hạn packet được
-kiểm tra trước khi cấp phát body. Smoke test không cần DB/SMTP:
+## 9. Verification and capture guidance
+
+The protocol smoke test can be run locally:
 
 ```powershell
 dotnet run --project UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release
 ```
 
-Test này kiểm tra đọc một byte/lần, hai frame nối liên tiếp, EOF sạch, frame
-truncated, length quá lớn và payload gửi vượt giới hạn. Nó **không** mô phỏng
-server thực, TLS, DB, 10–50 client hoặc tải mạng.
+It exercises framing in memory only; it is not a live-server, TLS, DB, SMTP,
+load, or gameplay test. Record 10–50 client tests, slow/malformed clients,
+two-client gameplay, TLS behavior and packet captures only after observing
+them. Keep credentials and personal endpoints out of captures.
 
-Server đọc mỗi request với idle timeout 2 phút; cấu hình mới giới hạn session
-đồng thời 128. Cần chạy stress test trên môi trường có DB/runtime config thật,
-ít nhất 10–50 client, slow sender, malformed header/body, abort và server restart
-trước khi xác nhận ổn định.
+The optional scripts in `tools/` are restricted to loopback and use dummy/local
+test configuration only. They are not remote load tools. For an owner-approved
+Internet test, use separate GUI clients and a basic TCP reachability check;
+do not direct malformed/slow-client traffic at a public endpoint.
 
-## 7. Checklist capture Wireshark (chưa có capture trong repo)
-
-Chỉ capture với server do nhóm quản lý và dữ liệu thử giả. Không dùng password,
-OTP, token hoặc tài khoản thật trong ca plaintext.
-
-| Ca | Display filter/gợi ý | File cần lưu |
-|---|---|---|
-| TCP handshake/close | `tcp.port == 9000`; SYN đầu: `tcp.flags.syn == 1 && tcp.flags.ack == 0`; FIN: `tcp.flags.fin == 1` | `TC11-tcp-9000.pcapng`, `TC11-tcp-9000.png` |
-| TLS handshake | `tcp.port == 9000 && tls`; xem ClientHello, ServerHello, negotiated version/cipher | `TC12-tls-handshake.pcapng`, `TC12-tls-handshake.png` |
-| Plaintext so sánh | Chỉ khi TLS tắt và dùng payload test vô hại; Follow TCP Stream để chỉ ra JSON đọc được | `TC12-plaintext-demo.pcapng`, `TC12-plaintext-demo.png` |
-| TLS payload | Dùng cùng payload thử khi TLS bật; handshake hợp lệ và Application Data không đọc thành JSON | `TC12-tls-payload.pcapng`, `TC12-tls-payload.png` |
-
-Mỗi ảnh cần caption ghi rõ handshake/đóng kết nối hay mã hóa payload đang được
-chứng minh. Xóa/ẩn IP nguồn/đích và các metadata riêng trước khi commit; không
-coi `.pcapng` có payload plaintext là đã redact chỉ vì ảnh đã che.
-
-## 8. Hạn chế giao thức đã biết
-
-- TLS mặc định tắt và hai đầu phải cấu hình đồng nhất; không có TLS negotiation
-  hay downgrade protection ở tầng ứng dụng.
-- Không có version field, heartbeat, server push hoặc request ID chung cho mọi
-  command; đa số response được ghép theo thứ tự trên stream.
-- Giới hạn 64 KiB là giới hạn frame, không thay thế giới hạn/validate nghiệp vụ
-  cho từng field.
-- Room registry và lời mời của TCP Server ở RAM; Photon Cloud mới giữ room
-  gameplay. Restart server làm mất registry/invites.
-- Chưa có capture `.pcapng` làm bằng chứng. Không tạo capture chứa tài khoản,
-  OTP, token hoặc endpoint riêng; phải dùng tài khoản thử và redact trước khi
-  commit.
+For Wireshark on a locally controlled test server, use `tcp.port == 9000`.
+Capture SYN/SYN-ACK/ACK and FIN for TCP lifecycle. With TLS enabled, record the
+handshake and negotiated protocol/cipher and confirm application data is not
+readable as JSON. Plaintext comparison is only for dummy data on an isolated
+test environment. Do not commit raw captures unless sensitive payload and
+addresses have been removed and the resulting file has been reviewed.

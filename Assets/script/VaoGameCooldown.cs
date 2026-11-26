@@ -2,8 +2,6 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using Photon.Pun;
-using Photon.Realtime;
 
 // Bộ đếm chờ giữa 2 lần vào game. Biến static nên không mất khi đổi scene.
 public static class VaoGameCooldown
@@ -35,24 +33,9 @@ public static class VaoGameCooldown
         }
     }
 
-    // Photon đang rời phòng / ngắt kết nối / nối lại: chưa được vào game
-    public static bool PhotonDangBan
-    {
-        get
-        {
-            ClientState s = PhotonNetwork.NetworkClientState;
-            return s == ClientState.Leaving
-                || s == ClientState.Disconnecting
-                || s == ClientState.DisconnectingFromGameServer
-                || s == ClientState.DisconnectingFromMasterServer
-                || s == ClientState.ConnectingToMasterServer
-                || s == ClientState.ConnectingToGameServer;
-        }
-    }
-
     public static bool DangCho
     {
-        get { return DangDemNguoc || ConLai > 0f || PhotonDangBan; }
+        get { return DangDemNguoc || ConLai > 0f; }
     }
 }
 
@@ -91,12 +74,10 @@ public class LobbyCountdownUI : MonoBehaviour
         VaoGameCooldown.DangDemNguoc = false;
     }
 
-    // Gọi từ nút vào game: lobby.DemNguocRoiVao(() => PhotonNetwork.LoadLevel(GameNetworkManager.LayTenSceneVaoGame()));
+    // Gọi từ nút vào game: countdown local trước khi tải scene đã chọn.
     public void DemNguocRoiVao(System.Action vaoGame)
     {
-        // LobbyManager owns the Photon synchronized countdown for a room.
-        // This local UI countdown must not race it or load a scene independently.
-        if (PhotonNetwork.InRoom || dangDem || VaoGameCooldown.DangCho) return;
+        if (dangDem || VaoGameCooldown.DangCho) return;
         StartCoroutine(ChayDemNguoc(vaoGame));
     }
 
@@ -118,14 +99,6 @@ public class LobbyCountdownUI : MonoBehaviour
                 chuDemNguoc.text = string.Format(mauChuVao, g);
             }
             yield return null;
-        }
-
-        if (PhotonNetwork.InRoom)
-        {
-            dangDem = false;
-            VaoGameCooldown.DangDemNguoc = false;
-            CapNhat(true);
-            yield break;
         }
 
         // Giữ nút khóa tới khi scene đổi (DangDemNguoc chỉ được reset khi lobby mở lại)

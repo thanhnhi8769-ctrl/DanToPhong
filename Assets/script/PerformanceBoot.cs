@@ -1,8 +1,7 @@
 using UnityEngine;
-using Photon.Pun;
 
 /// Tự chạy khi mở game, KHÔNG cần kéo vào scene nào.
-/// Giảm tải CPU/GPU/mạng để chơi nhiều người (kể cả mở 2 bản game trên cùng một máy) mượt hơn.
+/// Giảm tải CPU/GPU khi mở nhiều client để kiểm thử trên cùng một máy.
 public static class PerformanceBoot
 {
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -18,8 +17,5 @@ public static class PerformanceBoot
         // Bản build thường: tắt Debug.Log vì log cũng tốn CPU. Editor / Development Build vẫn giữ log để debug.
         Debug.unityLogger.logEnabled = Debug.isDebugBuild;
 
-        // Photon: giảm tần suất gửi dữ liệu (mặc định 30 / 10) cho nhẹ mạng
-        PhotonNetwork.SendRate = 20;
-        PhotonNetwork.SerializationRate = 10;
     }
 }

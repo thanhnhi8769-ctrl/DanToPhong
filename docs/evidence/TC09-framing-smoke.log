@@ -4,5 +4,5 @@ Scope: DanToPhong.Protocol.MessageFramer in an in-memory stream harness; no exte
 Result: PASS
 Checks: fragmented reads capped at one byte; two coalesced length-prefixed frames preserve order; EOF before a header returns null; zero/oversized incoming lengths rejected; malformed JSON throws JsonException; truncated body throws EndOfStreamException; oversized outgoing JSON rejected.
 Command: dotnet run --project UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release
-Limit: This does not test the live server, TLS, database, 10–50 client load, socket FIN capture, or Photon.
+Limit: This does not test the live server, TLS, database, 10–50 client load, socket FIN capture, or multiplayer gameplay.
 Redaction: No host/IP, account data, or credentials used.

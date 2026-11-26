@@ -4,11 +4,10 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
-using Photon.Pun;
 using Unity.Cinemachine;
 
 [RequireComponent(typeof(Rigidbody))]
-public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
+public class scooter : MonoBehaviour
 {
     public static readonly List<scooter> TatCaXe = new List<scooter>();
 
@@ -64,8 +63,10 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private MauXe[] cacMauXe;
     [SerializeField, Tooltip("(Cũ) Dùng khi 'Cac Mau Xe' để trống")]
     private Transform[] danhSachMauXe;
+#pragma warning disable CS0414 // Retained because existing prefabs serialize this legacy setting.
     [SerializeField, Tooltip("Bật mọi mesh thuộc mẫu đang chọn (phòng khi prefab để ẩn một số phần)")]
     private bool batMoiMeshCuaMau = true;
+#pragma warning restore CS0414
 
     [Header("Chạy mượt")]
     [SerializeField] private bool taoMaterialKhongMaSat = true;
@@ -148,6 +149,8 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private float thoiDiemLogChan = -10f;
     private float thoiDiemLogMat = -10f;
     private bool daBamDatTruoc = false;
+    private bool remoteControlled;
+    private bool networkControlled;
 
     private string[] tuKhoaVat = new string[0];
     private string[] tuKhoaCung = new string[0];
@@ -158,11 +161,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private readonly HashSet<Collider> daBoQuaCollider = new HashSet<Collider>();
 
     private List<GameObject[]> mauXeRuntime;
-    private int mauTuMang = -1;
     private int mauDangDung = -1;
 
     private Rigidbody rb;
-    private PhotonView pv;
     private Collider[] tatCaColliderXe;
     private MeshRenderer mrIcon;
     private Mesh meshMuiTen;
@@ -182,14 +183,37 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
     private bool LaXeCuaMinh
     {
-        get { return !PhotonNetwork.IsConnected || pv == null || pv.IsMine; }
+        get { return !remoteControlled; }
     }
 
     public float DoNghieng { get { return gocReHienTai; } }
     public float TocDoToiDa { get { return tocDoXe; } }
     public bool DangLui { get { return dangLui; } }
+    public bool IsRemoteControlled { get { return remoteControlled; } }
+    public float NetworkThrottle { get { return dangTangToc ? 1f : dangLui ? -1f : 0f; } }
+    public float NetworkSteer { get { return dauVaoRe; } }
     public int SoMauXe { get { return 2; } }
     public int MauDangDung { get { return mauDangDung; } }
+
+    public void SetNetworkControlled(bool value)
+    {
+        networkControlled = value;
+        if (value && rb != null)
+        {
+            rb.isKinematic = true;
+            rb.useGravity = false;
+        }
+    }
+
+    public void SetRemoteControlled(bool value)
+    {
+        remoteControlled = value;
+        if (value && rb != null)
+        {
+            rb.isKinematic = true;
+            rb.useGravity = false;
+        }
+    }
 
     private static int LayLayerMinimap()
     {
@@ -221,15 +245,6 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     // =========================================================================
     // MẪU XE
     // =========================================================================
-    public void OnPhotonInstantiate(PhotonMessageInfo info)
-    {
-        object[] data = info.photonView != null ? info.photonView.InstantiationData : null;
-        if (data == null || data.Length == 0) return;
-
-        mauTuMang = System.Convert.ToInt32(data[0]);
-        ApDungMauXe(mauTuMang);
-    }
-
     // Mặc định bỏ qua nếu xe đã đúng mẫu này (nhiều script cùng gọi, chỉ làm 1 lần).
     // ep = true để dựng lại (sau khi nâng xe lên mặt đường...).
     public void ApDungMauXe(int indexXe, bool ep = false)
@@ -264,7 +279,6 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
-        pv = GetComponent<PhotonView>();
 
         DonColliderXe();
 
@@ -289,11 +303,11 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
 
         if (LaXeCuaMinh)
         {
-            int indexTrangBi = mauTuMang >= 0 ? mauTuMang : VehicleCatalog.GetSelectedIndex();
+            int indexTrangBi = VehicleCatalog.GetSelectedIndex();
             ApDungMauXe(indexTrangBi);
             LuuDiemXuatPhat();
 
-            rb.isKinematic = false;
+            rb.isKinematic = networkControlled;
             rb.useGravity = false;
             rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
@@ -323,11 +337,6 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         else
         {
             rb.isKinematic = true;
-
-            if (mauTuMang >= 0)
-                ApDungMauXe(mauTuMang);
-            else if (pv != null && pv.Owner != null && pv.Owner.CustomProperties.TryGetValue("Scooter", out object val))
-                ApDungMauXe(System.Convert.ToInt32(val));
         }
     }
 

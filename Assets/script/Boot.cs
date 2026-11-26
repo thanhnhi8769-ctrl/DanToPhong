@@ -1,4 +1,3 @@
-using Photon.Pun;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -24,8 +23,6 @@ public class Boot : MonoBehaviour
             return;
         }
 
-        PhotonNetwork.NickName = LauncherArgs.User;
-
         bool ok = await ServerClient.ConnectAsync();
         if (!ok)
         {
@@ -40,8 +37,6 @@ public class Boot : MonoBehaviour
         {
             LauncherArgs.RacerId = info.user.racerId ?? "";
             LauncherArgs.FullName = info.user.fullName ?? "";
-            if (!string.IsNullOrEmpty(LauncherArgs.RacerId))
-                PhotonNetwork.NickName = $"{LauncherArgs.User} #{LauncherArgs.RacerId}";
         }
         Debug.Log($"[Boot] user={LauncherArgs.User} racerId={LauncherArgs.RacerId} coins={ServerClient.Cache.coins} mode={LauncherArgs.Mode}");
 
@@ -50,6 +45,7 @@ public class Boot : MonoBehaviour
         DontDestroyOnLoad(svc);
         svc.AddComponent<RoomReporter>();
         svc.AddComponent<InviteListener>();
+        svc.AddComponent<ServerHeartbeat>();
 
         string dich;
         if (vaoMenuKhiCoLauncher && LauncherArgs.Mode == "menu")

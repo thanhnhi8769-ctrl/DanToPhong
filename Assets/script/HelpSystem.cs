@@ -1,4 +1,3 @@
-using Photon.Pun;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -212,19 +211,12 @@ public class HelpSystem : MonoBehaviour
         };
     }
 
-    // Trong scene game: lấy đúng chế độ của GameManager. Scene khác: dựa vào phòng Photon hiện tại.
+    // Trong scene game: lấy chế độ của GameManager; ngoài game dùng room TCP của phiên hiện tại.
     private static bool LaNhieuNguoi()
     {
         GameManager gm = GameManager.Instance;
         if (gm != null) return gm.CheDoNhieuNguoi;
-
-        if (!PhotonNetwork.IsConnected || !PhotonNetwork.InRoom) return false;
-
-        int soNguoi = PhotonNetwork.CurrentRoom.PlayerCount;
-        if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue("SoNguoi", out object v) && v != null)
-            soNguoi = Mathf.Max(soNguoi, System.Convert.ToInt32(v));
-
-        return soNguoi > 1;
+        return !string.IsNullOrWhiteSpace(LauncherArgs.Room);
     }
 
     private static string DungChuoiNoiDung(string[] cacBuoc)
@@ -261,8 +253,6 @@ public class HelpSystem : MonoBehaviour
     private RectTransform nutHelpRect;
 
     private float thoiDiemTao;
-    private bool daTaoNutXemThem = false;
-
     private CursorLockMode lockCu;
     private bool hienCu;
     private bool daLuuChuot = false;

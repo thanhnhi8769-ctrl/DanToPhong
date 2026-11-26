@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Photon.Pun;
 
 public class GameUi : MonoBehaviour
 {
@@ -22,8 +21,8 @@ public class GameUi : MonoBehaviour
             return;
         }
 
-        if (PhotonNetwork.InRoom)
-            PhotonNetwork.LeaveRoom();
+        if (!string.IsNullOrWhiteSpace(LauncherArgs.Room) && ServerClient.Ready)
+            ServerClient.Fire(new Req { command = "ROOM_LEAVE" });
         SceneManager.LoadScene("menu");
     }
 

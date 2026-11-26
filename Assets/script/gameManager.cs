@@ -1,3 +1,4 @@
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -5,24 +6,14 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
 using UnityEngine.SceneManagement;
-using Photon.Pun;
-using Photon.Realtime;
-using ExitGames.Client.Photon;
-using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem.UI;
 #endif
 
-public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
+public class GameManager : MonoBehaviour
 {
-    // EVENT_READY không còn dùng (Ready lưu bằng Custom Properties, không cache vào Room).
-    // Giữ hằng số để không vỡ mã nếu nơi khác tham chiếu.
-    private const byte EVENT_READY = 88;
-    private const byte EVENT_START_RACE = 89;
-    private const byte EVENT_YEU_CAU_THANG = 90;
-
     [Header("Thời gian")]
     public float thoiGianChoPhepVeDich = 30f;
     public float thoiGianHoiKhiQuaCheckPoint = 5f;
@@ -103,7 +94,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     public float thoiGianOnDinhSauKhiVaoScene = 2f;
     [Tooltip("Chờ tối đa bao lâu cho XE CỦA MÌNH xuất hiện. Quá hạn vẫn cho bắt đầu (tránh kẹt nếu map không có xe)")]
     public float thoiGianToiDaChoXe = 8f;
-    [Tooltip("Nhiều người: đếm ngược 3-2-1-GO sau khi mọi người đã sẵn sàng (đồng bộ bằng giờ Photon)")]
+    [Tooltip("Thời gian đếm ngược trước khi bắt đầu ván nhiều người.")]
     public float demNguocBatDauNhieuNguoi = 3f;
     [Tooltip("Chơi 1 người: đếm ngược sau khi bấm START RACE")]
     public float demNguocBatDauSolo = 1.5f;
@@ -111,22 +102,16 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     public float thoiGianBaoVeSauKhiBatDau = 1.5f;
 
     [Header("Mạng (chỉ nhiều người) - càng cao xe người khác càng mượt, nhưng tốn băng thông hơn")]
-    [Tooltip("PhotonNetwork.SendRate: số gói gửi mỗi giây")]
+    [Tooltip("Tần suất gửi input qua kết nối TCP.")]
     public int tanSoGuiMang = 20;
-    [Tooltip("PhotonNetwork.SerializationRate: số lần đồng bộ vị trí mỗi giây (không vượt SendRate)")]
+    [Tooltip("Tần suất cập nhật trạng thái qua kết nối TCP.")]
     public int tanSoDongBo = 10;
 
     [Header("Hiệu ứng nút (Màu trắng)")]
     public bool hieuUngNut = true;
     public Color mauVienNut = Color.white;
 
-    private const string KEY_READY = "Ready";
-    private const string KEY_ELIMINATED = "Eliminated";
-    private const string KEY_ELIM_AT = "ElimAt";
-    private const string KEY_SO_NGUOI = "SoNguoi";
     private const string KEY_NHAC_TAT = "NhacBiTat";
-    private const string KEY_WINNER = "WinnerActor";     // Room property: người thắng duy nhất
-    private const string KEY_WIN_LAST = "WinByLast";     // Room property: thắng do còn lại cuối cùng
 
     private static readonly Color MauVang = new Color(1f, 0.85f, 0.15f);
     private static readonly Color MauThua = new Color(1f, 0.35f, 0.35f);
@@ -141,6 +126,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     };
 
     private bool cheDoNhieuNguoi = false;
+    private readonly HashSet<int> checkpointRequestsPending = new HashSet<int>();
 
     // Cho các script khác (HelpSystem...) biết đang chơi 1 người hay nhiều người
     public bool CheDoNhieuNguoi { get { return cheDoNhieuNguoi; } }
@@ -150,24 +136,14 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     private float thoiDiemBatDauDua = -1f;
     private bool isPaused = false;
     private bool banThanDaBam = false;
-    private bool daGuiLenhBatDau = false;
-    private readonly HashSet<int> dsActorDaSanSang = new HashSet<int>();
     private Button nutStartRaceCache;
     private TMP_Text chuNutStartRaceCache;
     private bool daTimReadyText = false;
-
-    // Cache trạng thái panel "sẵn sàng" để chỉ dựng lại chữ khi thật sự thay đổi
-    private int ssCuoi = -1;
-    private int tongCuoi = -1;
-    private bool ssBamCuoi = false;
 
     // Chế độ mà nội dung TutorialPanel đang hiển thị (-1 = chưa vẽ, 0 = solo, 1 = nhiều người)
     private int cheDoTutorialDaVe = -1;
 
     private bool daCoNguoiThang = false;
-    private bool daDuyetThang = false;          // đã gửi yêu cầu thắng lên MasterClient
-    private bool yeuCauConLai = false;
-    private bool daCongBoThang = false;         // đã công bố người thắng trên máy này
     private bool daNhanThuongTranNay = false;
     private int soXuHienThiCuoi = -1;
     private int actorNguoiThang = -1;
@@ -227,7 +203,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     private Coroutine coroutineSuKien;
 
     private bool dangXemTran = false;
-    private bool dangChoKetQua = false;
     private Camera camXem;
     private Transform mucTieuXem;
     private float thoiDiemQuetXeTiepTheo = 0f;
@@ -278,7 +253,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     {
         if (instance != null && instance != this)
         {
-            // Nạp scene bất đồng bộ (PhotonNetwork.LoadLevel): bản GameManager của scene cũ có thể chưa kịp bị huỷ.
+            // Scene cũ có thể chưa kịp bị huỷ sau khi map mới được nạp.
             // Khi đó bản MỚI phải thay thế bản cũ, không được tự xoá mình (xoá cả GameObject sẽ làm map mới
             // mất bảng hướng dẫn / HUD / kết quả). Chỉ bỏ bản thừa khi có 2 GameManager trong CÙNG 1 scene.
             if (instance.gameObject.scene == gameObject.scene)
@@ -309,17 +284,15 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     // Thu nhỏ bằng localScale nên không bị LayoutGroup ghi đè. Phải chạy TRƯỚC khi ButtonFx gắn vào
     // (ButtonFx lấy scale lúc khởi tạo làm gốc cho hiệu ứng hover) - KetNoiNutPausePanel chạy trong Start trước GanHieuUngChoMoiNut nên đúng thứ tự.
     
-    public override void OnEnable()
+    private void OnEnable()
     {
-        base.OnEnable();
         if (instance == null) instance = this;
-        PhotonNetwork.AddCallbackTarget(this);
+        TcpGameplaySync.GameFinished += OnServerGameFinished;
     }
 
-    public override void OnDisable()
+    private void OnDisable()
     {
-        base.OnDisable();
-        PhotonNetwork.RemoveCallbackTarget(this);
+        TcpGameplaySync.GameFinished -= OnServerGameFinished;
         if (instance == this) instance = null;
     }
 
@@ -868,15 +841,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     private void XacDinhCheDo()
     {
         if (daBatDauDua) return;
-
-        int soNguoi = 1;
-        if (PhotonNetwork.IsConnected && PhotonNetwork.InRoom)
-        {
-            soNguoi = PhotonNetwork.CurrentRoom.PlayerCount;
-            if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(KEY_SO_NGUOI, out object v) && v != null)
-                soNguoi = Mathf.Max(soNguoi, System.Convert.ToInt32(v));
-        }
-        cheDoNhieuNguoi = soNguoi > 1;
+        cheDoNhieuNguoi = !string.IsNullOrWhiteSpace(LauncherArgs.Room);
 
         // Có người vào/ra phòng làm đổi chế độ khi bảng hướng dẫn đang mở: vẽ lại nội dung cho đúng
         int cheDo = cheDoNhieuNguoi ? 1 : 0;
@@ -920,6 +885,14 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         KetNoiNutResultPanel();
 
         danhSachDongXu = GameObject.FindGameObjectsWithTag("CheckPoint");
+        System.Array.Sort(danhSachDongXu, (a, b) =>
+        {
+            int byName = string.CompareOrdinal(a.name, b.name);
+            if (byName != 0) return byName;
+            int byX = a.transform.position.x.CompareTo(b.transform.position.x);
+            if (byX != 0) return byX;
+            return a.transform.position.z.CompareTo(b.transform.position.z);
+        });
 
         if (eliminatePanelObject == null)
             eliminatePanelObject = TimObjectTrongCanvas("eliminate");
@@ -943,31 +916,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         if (taoNutNhacTuDong) TaoNutNhac();
         if (hieuUngNut) GanHieuUngChoMoiNut();
 
-        if (cheDoNhieuNguoi && PhotonNetwork.InRoom)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
-            {
-                { KEY_READY, false },
-                { KEY_ELIMINATED, false },
-                { KEY_ELIM_AT, null }
-            });
-
-            // Mượt hơn khi xem người khác: mặc định PUN đồng bộ vị trí rất thưa (khoảng 10 lần / giây)
-            PhotonNetwork.SendRate = Mathf.Clamp(tanSoGuiMang, 10, 60);
-            PhotonNetwork.SerializationRate = Mathf.Clamp(tanSoDongBo, 10, PhotonNetwork.SendRate);
-            Debug.Log($"[GameManager] Mạng: SendRate={PhotonNetwork.SendRate} SerializationRate={PhotonNetwork.SerializationRate}");
-
-            // Xóa kết quả thắng còn sót từ ván trước (phòng được dùng lại) để không hiện bảng kết thúc nhầm
-            if (PhotonNetwork.IsMasterClient)
-            {
-                PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
-                {
-                    { KEY_WINNER, null },
-                    { KEY_WIN_LAST, null }
-                });
-            }
-        }
-
         HienThiThoiGianGame();
 
         if (tutorialPanelObject != null)
@@ -977,9 +925,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
             MoKhoaChuot();
             BatNhacNen();
 
-            // KHÔNG đặt Time.timeScale = 0 ở đây nữa (Solo trước đây làm vậy):
-            // xe và đồng hồ vốn đã bị khóa bởi daBatDauDua, còn chat / voice / Photon / coroutine
-            // chạy theo thời gian game nên bị đóng băng khi timeScale = 0. Pause trong Solo vẫn dừng game như cũ.
+            // Xe và đồng hồ được khóa bởi trạng thái ván; giữ thời gian thực để chat và đồng bộ tiếp tục chạy.
             KiemTraSanSang();
         }
         else
@@ -990,153 +936,21 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
     // =========================================================================
     // BẮT ĐẦU ĐUA & ĐỒNG BỘ SẴN SÀNG
-    // Ready lưu bằng Custom Properties (bền, không bị nhận lại sự kiện cũ).
-    // Chỉ MasterClient được phát lệnh bắt đầu.
+    // Server kiểm tra host và trạng thái phòng trước khi bắt đầu qua TCP.
     // =========================================================================
     public void BatDauGame()
     {
-        if (daBatDauDua || dangDemBatDau) return;
-
-        // Mới vào scene: chờ xe / map / mạng ổn định rồi mới cho bấm (tránh vào quá nhanh gây lỗi)
-        if (!SanSangDeBatDau()) return;
-
+        if (daBatDauDua || dangDemBatDau || !SanSangDeBatDau()) return;
         XacDinhCheDo();
-
-        // Solo: đếm ngược ngắn rồi bắt đầu, không đụng Photon
-        if (!cheDoNhieuNguoi || !PhotonNetwork.InRoom)
-        {
-            BatDauDemNguoc(-1.0, demNguocBatDauSolo);
-            return;
-        }
-
-        if (banThanDaBam) return;
         banThanDaBam = true;
-
-        dsActorDaSanSang.Add(PhotonNetwork.LocalPlayer.ActorNumber);
-
-        // Cập nhật Custom Properties -> OnPlayerPropertiesUpdate trên mọi máy -> KiemTraSanSang
-        PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable { { KEY_READY, true } });
-
-        KiemTraSanSang();
-    }
-
-    public void OnEvent(EventData photonEvent)
-    {
-        if (photonEvent.Code == EVENT_START_RACE)
-        {
-            // Mốc giờ Photon do Chủ phòng gửi: mọi máy cùng đếm 3-2-1-GO rồi xuất phát cùng lúc
-            double mocBatDau = photonEvent.CustomData is double tg ? tg : PhotonNetwork.Time + 1.0;
-            BatDauDemNguoc(mocBatDau, 0f);
-        }
-        else if (photonEvent.Code == EVENT_YEU_CAU_THANG)
-        {
-            // Chỉ MasterClient xử lý yêu cầu thắng
-            if (!cheDoNhieuNguoi || !PhotonNetwork.IsMasterClient) return;
-
-            object[] d = photonEvent.CustomData as object[];
-            if (d == null || d.Length < 2) return;
-
-            MasterXacNhanThang(System.Convert.ToInt32(d[0]), d[1] is bool b && b);
-        }
+        BatDauDemNguoc(0, cheDoNhieuNguoi ? demNguocBatDauNhieuNguoi : demNguocBatDauSolo);
     }
 
     private void KiemTraSanSang()
     {
-        if (daBatDauDua || dangDemBatDau) return;
-
-        XacDinhCheDo();
-
-        if (!cheDoNhieuNguoi || !PhotonNetwork.InRoom)
-        {
-            if (readyStatusText != null && readyStatusText.gameObject.activeSelf)
-                readyStatusText.gameObject.SetActive(false);
-
-            // Về lại 1 người: lần sau vào chế độ nhiều người phải dựng lại chữ
-            ssCuoi = tongCuoi = -1;
-            return;
-        }
-
-        DamBaoTextTrangThaiSanSang();
-
-        int tong = PhotonNetwork.CurrentRoom.PlayerCount;
-        int sanSang = 0;
-
-        Player[] ds = PhotonNetwork.PlayerList;   // chỉ người còn trong phòng
-        for (int i = 0; i < ds.Length; i++)
-        {
-            Player p = ds[i];
-            bool pReady = (p.IsLocal && banThanDaBam) ||
-                          (p.CustomProperties.TryGetValue(KEY_READY, out object v) && v is bool b && b);
-            if (pReady)
-            {
-                dsActorDaSanSang.Add(p.ActorNumber);
-                sanSang++;
-            }
-            else
-            {
-                dsActorDaSanSang.Remove(p.ActorNumber);
-            }
-        }
-
-        // Chỉ cập nhật giao diện khi số liệu thật sự đổi
-        if (sanSang != ssCuoi || tong != tongCuoi || banThanDaBam != ssBamCuoi)
-        {
-            ssCuoi = sanSang;
-            tongCuoi = tong;
-            ssBamCuoi = banThanDaBam;
-
-            if (readyStatusText != null)
-            {
-                if (!readyStatusText.gameObject.activeSelf)
-                {
-                    readyStatusText.gameObject.SetActive(true);
-                    readyStatusText.transform.SetAsLastSibling();
-                }
-
-                readyStatusText.text = banThanDaBam
-                    ? $"WAITING FOR PLAYERS... ({sanSang}/{tong} READY)"
-                    : $"PRESS START RACE ({sanSang}/{tong} READY)";
-            }
-
-            if (chuNutStartRaceCache != null)
-            {
-                chuNutStartRaceCache.text = banThanDaBam
-                    ? $"WAITING ({sanSang}/{tong})"
-                    : (daOnDinhScene ? "START RACE" : "LOADING...");
-            }
-
-            if (nutStartRaceCache != null)
-                nutStartRaceCache.interactable = !banThanDaBam && daOnDinhScene;
-        }
-
-        // CHỈ MasterClient phát lệnh bắt đầu
-        if (sanSang >= tong && tong >= 2 && PhotonNetwork.IsMasterClient && !daGuiLenhBatDau)
-        {
-            daGuiLenhBatDau = true;
-
-            // Xóa kết quả thắng của ván trước (nếu phòng được dùng lại)
-            PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
-            {
-                { KEY_WINNER, null },
-                { KEY_WIN_LAST, null }
-            });
-
-            // Gửi MỐC GIỜ PHOTON (đồng bộ giữa các máy ~vài chục ms) thay vì "bắt đầu ngay":
-            // các máy tải map nhanh chậm khác nhau, nhưng cùng đếm tới một mốc nên xuất phát cùng lúc
-            double mocBatDau = PhotonNetwork.Time + Mathf.Max(0.5f, demNguocBatDauNhieuNguoi);
-            PhotonNetwork.RaiseEvent(
-                EVENT_START_RACE,
-                mocBatDau,
-                new RaiseEventOptions { Receivers = ReceiverGroup.All },   // không cache vào Room
-                SendOptions.SendReliable
-            );
-            BatDauDemNguoc(mocBatDau, 0f);
-        }
+        if (readyStatusText != null && readyStatusText.gameObject.activeSelf)
+            readyStatusText.gameObject.SetActive(false);
     }
-
-    // =========================================================================
-    // CHỜ ỔN ĐỊNH KHI MỚI VÀO SCENE + ĐẾM NGƯỢC 3-2-1-GO
-    // =========================================================================
     private bool SanSangDeBatDau()
     {
         float troi = Time.unscaledTime - thoiDiemVaoScene;
@@ -1164,55 +978,39 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         daOnDinhScene = true;
         if (nutStartRaceCache != null && !banThanDaBam) nutStartRaceCache.interactable = true;
         if (chuNutStartRaceCache != null && !banThanDaBam) chuNutStartRaceCache.text = "START RACE";
-        ssCuoi = tongCuoi = -1;       // buộc dựng lại chữ trạng thái sẵn sàng
     }
 
-    // mocServer > 0: đếm theo giờ Photon (nhiều người). mocServer <= 0: đếm theo giayLocal (1 người)
-    private void BatDauDemNguoc(double mocServer, float giayLocal)
+    private void BatDauDemNguoc(double ignoredServerTime, float giayLocal)
     {
         if (daBatDauDua || dangDemBatDau) return;
         dangDemBatDau = true;
-
         if (tutorialPanelObject != null) tutorialPanelObject.SetActive(false);
         if (readyStatusText != null) readyStatusText.gameObject.SetActive(false);
-
         if (coroutineDemNguoc != null) StopCoroutine(coroutineDemNguoc);
-        coroutineDemNguoc = StartCoroutine(ChayDemNguocBatDau(mocServer, giayLocal));
+        coroutineDemNguoc = StartCoroutine(ChayDemNguocBatDau(0, giayLocal));
     }
 
-    private IEnumerator ChayDemNguocBatDau(double mocServer, float giayLocal)
+    private IEnumerator ChayDemNguocBatDau(double ignoredServerTime, float giayLocal)
     {
         TaoChuDemNguoc();
-
-        float ketThucLocal = Time.unscaledTime + giayLocal;
-        // Chốt chặn an toàn: lỡ mất mạng giữa chừng thì không kẹt vĩnh viễn
-        float hanChot = Time.unscaledTime + Mathf.Max(giayLocal, demNguocBatDauNhieuNguoi) + 5f;
-        int soCuoi = -1;
-
-        while (Time.unscaledTime < hanChot)
+        float endTime = Time.unscaledTime + Mathf.Max(0f, giayLocal);
+        int lastSecond = -1;
+        while (Time.unscaledTime < endTime)
         {
-            float conLai = mocServer > 0.0
-                ? (float)(mocServer - PhotonNetwork.Time)
-                : ketThucLocal - Time.unscaledTime;
-            if (conLai <= 0f) break;
-
-            int so = Mathf.CeilToInt(conLai);
-            if (so != soCuoi)
+            int second = Mathf.CeilToInt(endTime - Time.unscaledTime);
+            if (second != lastSecond)
             {
-                soCuoi = so;
-                HienChuDemNguoc(so.ToString(), new Color(1f, 0.85f, 0.2f));
+                lastSecond = second;
+                HienChuDemNguoc(second.ToString(), new Color(1f, 0.85f, 0.2f));
             }
             yield return null;
         }
-
-        BatDauDua();                                   // mở khóa xe + đồng hồ
+        BatDauDua();
         HienChuDemNguoc("GO!", new Color(0.3f, 0.95f, 0.5f));
         yield return new WaitForSecondsRealtime(0.8f);
-
         AnChuDemNguoc();
         coroutineDemNguoc = null;
     }
-
     private void TaoChuDemNguoc()
     {
         if (chuDemNguoc != null) return;
@@ -1264,67 +1062,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
         BatNhacNen();
         HienThiThoiGianGame();
-    }
-
-    public override void OnPlayerPropertiesUpdate(Player targetPlayer, Hashtable changedProps)
-    {
-        if (!cheDoNhieuNguoi || changedProps == null) return;
-
-        if (!daBatDauDua && changedProps.ContainsKey(KEY_READY))
-            KiemTraSanSang();
-
-        if (changedProps.ContainsKey(KEY_ELIMINATED))
-            KiemTraNguoiSotLaiCuoiCung();
-    }
-
-    public override void OnPlayerEnteredRoom(Player newPlayer)
-    {
-        if (!daBatDauDua)
-        {
-            XacDinhCheDo();
-            KiemTraSanSang();
-        }
-    }
-
-    public override void OnPlayerLeftRoom(Player otherPlayer)
-    {
-        if (otherPlayer != null) dsActorDaSanSang.Remove(otherPlayer.ActorNumber);
-
-        if (!daBatDauDua)
-        {
-            XacDinhCheDo();
-            KiemTraSanSang();
-        }
-        else if (cheDoNhieuNguoi)
-        {
-            KiemTraNguoiSotLaiCuoiCung(true);
-            if (dangXemTran) LamMoiMucTieuXem();   // người đang xem rời phòng -> tự chuyển mục tiêu
-        }
-    }
-
-    // MasterClient rời phòng giữa chừng / chuyển quyền
-    public override void OnMasterClientSwitched(Player newMasterClient)
-    {
-        if (!cheDoNhieuNguoi) return;
-
-        if (!daBatDauDua)
-        {
-            KiemTraSanSang();      // master mới sẽ phát lệnh bắt đầu nếu đã đủ Ready
-            return;
-        }
-
-        // Người thắng đã được ghi trên Room property trước đó mà máy này chưa công bố
-        if (!daCongBoThang && DocNguoiThangTuPhong(out int actor, out bool conLai))
-        {
-            CongBoNguoiThang(actor, conLai);
-            return;
-        }
-
-        // Yêu cầu thắng của mình có thể đã mất cùng master cũ: gửi lại
-        if (daDuyetThang && !daCongBoThang)
-            GuiYeuCauThang(yeuCauConLai, true);
-
-        KiemTraNguoiSotLaiCuoiCung(true);
     }
 
     private void BatNhacNen()
@@ -1452,20 +1189,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
             EventSystem.current.SetSelectedGameObject(null);
     }
 
-    private static string LayTenNguoiChoi(Player p)
-    {
-        if (p == null) return "Player";
-        return string.IsNullOrEmpty(p.NickName) ? $"Player #{p.ActorNumber}" : p.NickName;
-    }
-
-    private static bool DaBiLoai(Player p)
-    {
-        return p != null && p.CustomProperties.TryGetValue(KEY_ELIMINATED, out object v) && v is bool b && b;
-    }
-
-    // =========================================================================
-    // XE CỦA MÌNH
-    // =========================================================================
     private XuLyVaChamChoXe LayXeCuaMinh()
     {
         if (xeCuaMinhCache != null) return xeCuaMinhCache;
@@ -1474,7 +1197,8 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
         foreach (var xe in FindObjectsByType<XuLyVaChamChoXe>(FindObjectsSortMode.None))
         {
-            if (!PhotonNetwork.IsConnected || xe.photonView == null || xe.photonView.IsMine)
+            scooter controller = xe.GetComponentInParent<scooter>();
+            if (controller == null || !controller.IsRemoteControlled)
             {
                 xeCuaMinhCache = xe;
                 break;
@@ -1563,7 +1287,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
     private IEnumerator XemNguoiThangRoiHienKetQua(string lyDo)
     {
-        dangChoKetQua = true;
         if (eliminatePanelObject != null) eliminatePanelObject.SetActive(false);
         HienThongBaoSuKien(lyDo, Color.yellow, Mathf.Min(3f, thoiGianXemNguoiThang));
 
@@ -1571,7 +1294,6 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
         yield return new WaitForSecondsRealtime(thoiGianXemNguoiThang);
 
-        dangChoKetQua = false;
         HienKetQuaThua(lyDo, true);
     }
 
@@ -1922,7 +1644,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
                 DamBaoEventSystemDuyNhat();
 
             if (nutNhac != null) DatCuoi(nutNhac.transform);
-            if (!daBatDauDua && cheDoNhieuNguoi) KiemTraSanSang();   // chỉ multiplayer mới đụng Photon
+            if (!daBatDauDua && cheDoNhieuNguoi) KiemTraSanSang();
 
             if (bannerRoot != null && bannerRoot.activeSelf && CoBangDangMo()) AnBanner();
         }
@@ -2222,7 +1944,54 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
     public void QuaCheckPoint(Collider other)
     {
-        QuaCheckPoint();
+        if (other == null || !other.gameObject.activeSelf || !daBatDauDua || ketThucGame || winGame || daBiLoai)
+            return;
+
+        if (!cheDoNhieuNguoi)
+        {
+            other.gameObject.SetActive(false);
+            QuaCheckPoint();
+            return;
+        }
+
+        int index = System.Array.IndexOf(danhSachDongXu, other.gameObject) + 1;
+        if (index <= 0 || !checkpointRequestsPending.Add(index))
+            return;
+        SubmitCheckpointAsync(other, index);
+    }
+
+    private async void SubmitCheckpointAsync(Collider checkpoint, int index)
+    {
+        try
+        {
+            TcpGameplaySync sync = FindFirstObjectByType<TcpGameplaySync>();
+            if (sync == null)
+                throw new InvalidOperationException("TCP gameplay synchronizer is unavailable.");
+            Resp response = await sync.SendGameEventAsync(new Req
+            {
+                command = "GAME_EVENT",
+                gameEventType = "CHECKPOINT",
+                checkpointIndex = index,
+                totalCheckpoints = danhSachDongXu != null ? danhSachDongXu.Length : 0
+            });
+            if (response != null && response.success && checkpoint != null)
+            {
+                checkpoint.gameObject.SetActive(false);
+                QuaCheckPoint();
+            }
+            else
+            {
+                Debug.LogWarning("[GameManager] Server rejected checkpoint event.");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[GameManager] Checkpoint event failed: " + ex.GetType().Name);
+        }
+        finally
+        {
+            checkpointRequestsPending.Remove(index);
+        }
     }
 
     public void ChamNuoc()
@@ -2248,133 +2017,58 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     // Giữ nguyên chữ ký cũ (script khác / SendMessage vẫn gọi được)
     public void VeDichThanhCong()
     {
-        // Chưa bắt đầu đua hoặc xe vừa xuất hiện (còn đang ổn định vật lý): bỏ qua, tránh hiện bảng thắng nhầm
         if (!daBatDauDua || DangTrongThoiGianBaoVe())
         {
-            Debug.LogWarning($"[GameManager] Bỏ qua chạm đích quá sớm (daBatDauDua={daBatDauDua}, " +
-                             $"{(daBatDauDua ? Time.time - thoiDiemBatDauDua : 0f):F2}s sau khi bắt đầu).");
+            Debug.LogWarning("[GameManager] Finish event ignored before the race is ready.");
             return;
         }
 
-        // Solo: tự xử lý thắng, không cần Photon
-        if (!cheDoNhieuNguoi || !PhotonNetwork.InRoom)
+        if (!cheDoNhieuNguoi)
+        {
+            XuLyThang(false);
+            return;
+        }
+        SubmitFinishAsync();
+    }
+
+    private async void SubmitFinishAsync()
+    {
+        try
+        {
+            TcpGameplaySync sync = FindFirstObjectByType<TcpGameplaySync>();
+            if (sync == null)
+                throw new InvalidOperationException("TCP gameplay synchronizer is unavailable.");
+            Resp response = await sync.SendGameEventAsync(new Req
+            {
+                command = "GAME_EVENT",
+                gameEventType = "FINISH"
+            });
+            if (response != null && response.success && response.gameFinished)
+                OnServerGameFinished(response.winnerUsername);
+            else
+                Debug.LogWarning("[GameManager] Server rejected finish event.");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[GameManager] Finish event failed: " + ex.GetType().Name);
+        }
+    }
+
+    private void OnServerGameFinished(string winnerUsername)
+    {
+        if (!cheDoNhieuNguoi || ketThucGame || winGame || daCoNguoiThang)
+            return;
+
+        if (string.Equals(winnerUsername, LauncherArgs.User, StringComparison.OrdinalIgnoreCase))
         {
             XuLyThang(false);
             return;
         }
 
-        // Multiplayer: xin MasterClient xác nhận để chỉ có đúng 1 người thắng
-        GuiYeuCauThang(false);
-    }
-
-    // ---------- Xác nhận người thắng duy nhất (multiplayer) ----------
-    private void GuiYeuCauThang(bool conLaiCuoiCung, bool epGui = false)
-    {
-        if (!cheDoNhieuNguoi || !PhotonNetwork.InRoom) return;
-        if (!epGui && daDuyetThang) return;
-        if (ketThucGame || winGame || daBiLoai || daCoNguoiThang || daCongBoThang) return;
-        if (!daBatDauDua) return;
-
-        daDuyetThang = true;
-        yeuCauConLai = conLaiCuoiCung;
-        int actor = PhotonNetwork.LocalPlayer.ActorNumber;
-
-        if (PhotonNetwork.IsMasterClient)
-        {
-            MasterXacNhanThang(actor, conLaiCuoiCung);
-        }
-        else
-        {
-            PhotonNetwork.RaiseEvent(
-                EVENT_YEU_CAU_THANG,
-                new object[] { actor, conLaiCuoiCung },
-                new RaiseEventOptions { Receivers = ReceiverGroup.MasterClient },
-                SendOptions.SendReliable);
-        }
-    }
-
-    private bool DocNguoiThangTuPhong(out int actor, out bool conLai)
-    {
-        actor = -1;
-        conLai = false;
-        if (!PhotonNetwork.InRoom) return false;
-
-        Hashtable props = PhotonNetwork.CurrentRoom.CustomProperties;
-        if (!props.TryGetValue(KEY_WINNER, out object w) || w == null) return false;
-
-        actor = System.Convert.ToInt32(w);
-        conLai = props.TryGetValue(KEY_WIN_LAST, out object l) && l is bool b && b;
-        return true;
-    }
-
-    // Chỉ MasterClient gọi. Người đến sau bị từ chối vì Room property đã có người thắng.
-    private void MasterXacNhanThang(int actor, bool conLai)
-    {
-        if (!PhotonNetwork.IsMasterClient || !PhotonNetwork.InRoom) return;
-
-        if (DocNguoiThangTuPhong(out int daCo, out bool daCoConLai))
-        {
-            CongBoNguoiThang(daCo, daCoConLai);   // bảo đảm master cũng đồng bộ
-            return;
-        }
-
-        Player p = PhotonNetwork.CurrentRoom.GetPlayer(actor);
-        if (p == null || DaBiLoai(p)) return;     // đã rời phòng / đã bị loại
-
-        PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
-        {
-            { KEY_WINNER, actor },
-            { KEY_WIN_LAST, conLai }
-        });
-
-        CongBoNguoiThang(actor, conLai);          // idempotent, tránh phụ thuộc thứ tự callback
-    }
-
-    public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
-    {
-        if (!cheDoNhieuNguoi || propertiesThatChanged == null) return;
-        if (!propertiesThatChanged.ContainsKey(KEY_WINNER)) return;
-
-        if (DocNguoiThangTuPhong(out int actor, out bool conLai))
-            CongBoNguoiThang(actor, conLai);
-    }
-
-    // Mọi máy nhận cùng 1 kết quả: người thắng nhận thưởng, người khác hiện kết quả thua
-    private void CongBoNguoiThang(int winnerActor, bool conLaiCuoiCung)
-    {
-        if (daCongBoThang) return;
-        if (!daBatDauDua)
-        {
-            // Thường là Room property "người thắng" còn sót từ ván trước: không được hiện bảng kết thúc
-            Debug.LogWarning("[GameManager] Bỏ qua thông báo người thắng khi đua chưa bắt đầu (actor " + winnerActor + ")");
-            return;
-        }
-        daCongBoThang = true;
-        actorNguoiThang = winnerActor;
-
-        if (PhotonNetwork.InRoom && winnerActor == PhotonNetwork.LocalPlayer.ActorNumber)
-        {
-            XuLyThang(conLaiCuoiCung);            // thưởng đúng 1 lần (daNhanThuongTranNay)
-            return;
-        }
-
         daCoNguoiThang = true;
-        if (ketThucGame || winGame) return;
-
-        string tenThang = "ANOTHER PLAYER";
-        if (PhotonNetwork.InRoom)
-        {
-            Player p = PhotonNetwork.CurrentRoom.GetPlayer(winnerActor);
-            if (p != null) tenThang = LayTenNguoiChoi(p).ToUpper();
-        }
-
-        string lyDo = $"{tenThang} WON THE RACE!";
-        if (dangXemTran && !dangChoKetQua)
-            StartCoroutine(XemNguoiThangRoiHienKetQua(lyDo));
-        else
-            HienKetQuaThua(lyDo, true);
+        string name = string.IsNullOrWhiteSpace(winnerUsername) ? "ANOTHER PLAYER" : winnerUsername.ToUpperInvariant();
+        HienKetQuaThua(name + " WON THE RACE!", true);
     }
-
     private void XuLyThang(bool thangVoiLyDoConLaiCuoiCung)
     {
         if (!daBatDauDua || ketThucGame || winGame || daBiLoai || daCoNguoiThang) return;
@@ -2421,15 +2115,8 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
         MatchHistorySystem.LuuKetQuaTran(false, 0);
 
-        if (cheDoNhieuNguoi && PhotonNetwork.InRoom)
+        if (cheDoNhieuNguoi)
         {
-            // Cập nhật trạng thái Eliminated lên Photon rồi chuyển sang Spectator
-            PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
-            {
-                { KEY_ELIMINATED, true },
-                { KEY_ELIM_AT, PhotonNetwork.Time }
-            });
-
             if (eliminatePanelObject != null)
             {
                 KetNoiNutEliminatePanel();     // chỉ thực hiện lần đầu
@@ -2438,51 +2125,11 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
             }
 
             BatDauCheDoXemTran();
-            KiemTraNguoiSotLaiCuoiCung();
             return;
         }
 
-        // Solo: không Spectator, không Photon
         HienKetQuaThua("TIME'S UP!", false);
     }
-
-    private void KiemTraNguoiSotLaiCuoiCung(bool doThoatPhong = false)
-    {
-        if (!cheDoNhieuNguoi || !daBatDauDua || ketThucGame || winGame || daCoNguoiThang || daCongBoThang)
-            return;
-        if (!PhotonNetwork.InRoom) return;
-
-        // Dùng danh sách người CÒN trong phòng, dừng sớm khi thấy >= 2 người còn sống
-        int conSong = 0;
-        Player nguoiConSong = null;
-        Player[] ds = PhotonNetwork.PlayerList;
-        for (int i = 0; i < ds.Length; i++)
-        {
-            if (DaBiLoai(ds[i])) continue;
-            conSong++;
-            nguoiConSong = ds[i];
-            if (conSong > 1) return;
-        }
-
-        // Không còn ai sống (hết giờ cùng lúc / người còn lại rời phòng): kết thúc cho người đang xem
-        if (conSong == 0)
-        {
-            if (daBiLoai && !dangChoKetQua)
-            {
-                if (eliminatePanelObject != null) eliminatePanelObject.SetActive(false);
-                HienKetQuaThua("NOBODY FINISHED IN TIME!", true);
-            }
-            return;
-        }
-
-        if (!tuDongThangKhiConMotNguoi) return;
-        if (doThoatPhong && PhotonNetwork.CurrentRoom.PlayerCount <= 1) return;
-
-        // Chỉ chính người sống sót gửi yêu cầu; MasterClient quyết định cuối cùng
-        if (nguoiConSong != null && nguoiConSong.IsLocal && !daBiLoai)
-            GuiYeuCauThang(true);
-    }
-
     private void HienKetQuaThua(string lyDo, bool tatXemTran)
     {
         if (coKetQua) return;      // chỉ hiện kết quả 1 lần
@@ -2696,12 +2343,12 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
             RectTransform r = img.rectTransform;
             r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f);
-            r.anchoredPosition = new Vector2(Random.Range(-rong * 0.45f, rong * 0.45f), Random.Range(0f, cao * 0.45f));
-            r.sizeDelta = new Vector2(Random.Range(10f, 18f), Random.Range(6f, 12f));
+            r.anchoredPosition = new Vector2(UnityEngine.Random.Range(-rong * 0.45f, rong * 0.45f), UnityEngine.Random.Range(0f, cao * 0.45f));
+            r.sizeDelta = new Vector2(UnityEngine.Random.Range(10f, 18f), UnityEngine.Random.Range(6f, 12f));
 
             manhPhao[i] = r;
-            vanToc[i] = new Vector2(Random.Range(-70f, 70f), Random.Range(-180f, -90f));
-            tocDoXoay[i] = Random.Range(-360f, 360f);
+            vanToc[i] = new Vector2(UnityEngine.Random.Range(-70f, 70f), UnityEngine.Random.Range(-180f, -90f));
+            tocDoXoay[i] = UnityEngine.Random.Range(-360f, 360f);
         }
 
         float t = 0f;
@@ -2726,7 +2373,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
                 if (pos.y < -cao * 0.5f)
                 {
                     pos.y = cao * 0.5f;
-                    pos.x = Random.Range(-rong * 0.45f, rong * 0.45f);
+                    pos.x = UnityEngine.Random.Range(-rong * 0.45f, rong * 0.45f);
                 }
 
                 r.anchoredPosition = pos;
@@ -2790,8 +2437,8 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
             XuLyVaChamChoXe xe = tatCa[i];
             if (xe == null || !xe.gameObject.activeInHierarchy || xe == xeMinh) continue;
 
-            PhotonView pv = xe.photonView;
-            if (pv != null && pv.Owner != null && DaBiLoai(pv.Owner)) continue;   // bỏ xe người đã bị loại
+            scooter controller = xe.GetComponentInParent<scooter>();
+            if (controller == null || !controller.IsRemoteControlled) continue;
 
             danhSachXeXem.Add(xe.transform);
         }
@@ -2848,8 +2495,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     private int ActorCuaXe(Transform t)
     {
         if (t == null) return -1;
-        PhotonView pv = t.GetComponentInParent<PhotonView>();
-        return pv != null ? pv.OwnerActorNr : -1;
+        return t.GetInstanceID();
     }
 
     // Chỉ dựng lại chuỗi khi mục tiêu đổi
@@ -2867,8 +2513,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         }
         else
         {
-            PhotonView pv = mucTieuXem.GetComponentInParent<PhotonView>();
-            string ten = (pv != null && pv.Owner != null) ? LayTenNguoiChoi(pv.Owner) : "RACER";
+            string ten = mucTieuXem.name.Replace("XE_REMOTE_", "RACER #");
             xemTextCache = $"SPECTATING: {ten.ToUpper()}  [Q / E]   |   [ESC] MENU";
         }
         tenXemText.text = xemTextCache;
@@ -2919,7 +2564,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     {
         isPaused = false;
 
-        // Trước khi bấm START RACE, Solo KHÔNG còn đóng băng thời gian (chat / voice / Photon chạy như Multiplayer)
+        // Do not pause world time while starting the countdown; network requests still need to run.
         Time.timeScale = 1f;
 
         if (pausePanelObject != null) pausePanelObject.SetActive(false);
@@ -2937,16 +2582,14 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         // Báo cho Lobby biết vừa thoát game: bắt người chơi chờ vài giây rồi mới được tạo / vào phòng mới
         VaoGameCooldown.BatDau();
 
-        // Solo không đụng Photon
-        if (cheDoNhieuNguoi && PhotonNetwork.InRoom)
-            PhotonNetwork.LeaveRoom();
+        LeaveTcpRoom();
 
         SceneManager.LoadScene("menu");
     }
     [Header("Về phòng chờ (Solo & Nhiều người)")]
     [Tooltip("Tên scene phòng chờ / sảnh chọn xe & map")]
     public string tenScenePhongCho = "SelectScene";
-    [Tooltip("Chơi nhiều người (đang trong phòng Photon): chơi lại thì về scene Lobby, giữ nguyên phòng")]
+    [Tooltip("Tên scene lobby cho chế độ nhiều người.")]
     public string tenSceneLobbyNhieuNguoi = "LobbyScene";
     public string chuNutVeLobbyNhieuNguoi = "BACK TO LOBBY";
 
@@ -2954,7 +2597,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
     /// <summary>
     /// Hàm chung: chạy được cả khi chơi 1 mình lẫn khi chơi nhiều người cùng phòng.
-    /// Giữ nguyên Room nếu đang ở trong phòng để nhóm chơi tiếp, không cần nhập lại mã.
+    /// Trả người chơi về lobby và rời phòng TCP hiện tại.
     /// </summary>
     public void VePhongChung()
     {
@@ -2970,41 +2613,14 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         winGame = false;
         coKetQua = false;
         daCoNguoiThang = false;
-        daCongBoThang = false;
-        daDuyetThang = false;
         daNhanThuongTranNay = false;
         banThanDaBam = false;
-        daGuiLenhBatDau = false;
         dangXemTran = false;
         dangQuanhXe = false;
         coViTriLucThua = false;
-        dangChoKetQua = false;
-        ssCuoi = tongCuoi = -1;
-        dsActorDaSanSang.Clear();
-
-        bool dangTrongPhongMang = PhotonNetwork.IsConnected && PhotonNetwork.InRoom;
-
-        if (dangTrongPhongMang)
+        if (!string.IsNullOrWhiteSpace(LauncherArgs.Room))
         {
-            // Mỗi người tự về, không kéo ai theo
-            PhotonNetwork.AutomaticallySyncScene = false;
-
-            PhotonNetwork.LocalPlayer.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
-            {
-                { KEY_READY, false },
-                { KEY_ELIMINATED, false },
-                { KEY_ELIM_AT, null }
-            });
-
-            if (PhotonNetwork.IsMasterClient)
-            {
-                PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
-                {
-                    { KEY_WINNER, null },
-                    { KEY_WIN_LAST, null },
-                    { "curScn", null }   // tránh Lobby/Select bị kéo ngược về map cũ
-                });
-            }
+            LeaveTcpRoom();
 
             string sceneLobby = tenSceneLobbyNhieuNguoi;
             if (string.IsNullOrEmpty(sceneLobby) || !Application.CanStreamedLevelBeLoaded(sceneLobby))
@@ -3115,9 +2731,18 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
         isPaused = false;
         VaoGameCooldown.BatDau();
 
-        if (PhotonNetwork.IsConnected && PhotonNetwork.InRoom)
-            PhotonNetwork.LeaveRoom();
+        LeaveTcpRoom();
 
         SceneManager.LoadScene("menu");
+    }
+
+    private static void LeaveTcpRoom()
+    {
+        if (!string.IsNullOrWhiteSpace(LauncherArgs.Room) && ServerClient.Ready)
+            ServerClient.Fire(new Req { command = "ROOM_LEAVE" });
+        LauncherArgs.Room = string.Empty;
+        LauncherArgs.RoomMap = string.Empty;
+        LauncherArgs.SpawnIndex = 0;
+        LauncherArgs.IsRoomHost = false;
     }
 }

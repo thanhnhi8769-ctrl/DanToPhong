@@ -34,12 +34,34 @@ namespace DanToPhong.Protocol
         public int? MaxPlayers { get; set; }
         public bool? IsRacing { get; set; }
         public string? TargetId { get; set; }   // RacerId hoặc username người được mời
+        public string? ChatMessage { get; set; }
+        public long? AfterMessageId { get; set; }
+        public float? PositionX { get; set; }
+        public float? PositionY { get; set; }
+        public float? PositionZ { get; set; }
+        public float? RotationX { get; set; }
+        public float? RotationY { get; set; }
+        public float? RotationZ { get; set; }
+        public float? RotationW { get; set; }
+        public float? VelocityX { get; set; }
+        public float? VelocityY { get; set; }
+        public float? VelocityZ { get; set; }
+        public float? Throttle { get; set; }
+        public float? Steer { get; set; }
+        public bool? Brake { get; set; }
+        public int? VehicleIndex { get; set; }
+        public int? ClientTick { get; set; }
+        public long? ClientTimestampMs { get; set; }
+        public string? GameEventType { get; set; }
+        public int? CheckpointIndex { get; set; }
+        public int? TotalCheckpoints { get; set; }
     }
 
     public sealed class ResponsePacket
     {
         public bool Success { get; set; }
         public string Code { get; set; } = ErrorCodes.Ok;
+        public string Command { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         public string? Mode { get; set; }
         public string? RoomId { get; set; }
@@ -53,6 +75,19 @@ namespace DanToPhong.Protocol
         public List<LeaderboardEntryDto>? Leaderboard { get; set; }
         public List<RoomDto>? Rooms { get; set; }
         public List<InviteDto>? Invites { get; set; }
+        public int PlayerCount { get; set; }
+        public int MaxPlayers { get; set; }
+        public int SpawnIndex { get; set; }
+        public bool IsHost { get; set; }
+        public bool IsRacing { get; set; }
+        public bool GameFinished { get; set; }
+        public int? WinnerUserId { get; set; }
+        public string? WinnerUsername { get; set; }
+        public string? MapName { get; set; }
+        public long ServerTick { get; set; }
+        public long ServerTimestampMs { get; set; }
+        public List<GamePlayerSnapshotDto>? GamePlayers { get; set; }
+        public List<RoomChatMessageDto>? ChatMessages { get; set; }
     }
 
     public sealed class UserInfoDto
@@ -113,5 +148,33 @@ namespace DanToPhong.Protocol
     {
         public string RoomCode { get; set; } = string.Empty;
         public string FromName { get; set; } = string.Empty;
+    }
+
+    public sealed class GamePlayerSnapshotDto
+    {
+        public int UserId { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public int SpawnIndex { get; set; }
+        public int VehicleIndex { get; set; }
+        public long Sequence { get; set; }
+        public float PositionX { get; set; }
+        public float PositionY { get; set; }
+        public float PositionZ { get; set; }
+        public float RotationX { get; set; }
+        public float RotationY { get; set; }
+        public float RotationZ { get; set; }
+        public float RotationW { get; set; }
+        public float VelocityX { get; set; }
+        public float VelocityY { get; set; }
+        public float VelocityZ { get; set; }
+        public long ServerTimestampMs { get; set; }
+    }
+
+    public sealed class RoomChatMessageDto
+    {
+        public long MessageId { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public long ServerTimestampMs { get; set; }
     }
 }

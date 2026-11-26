@@ -36,10 +36,8 @@ namespace DanToPhong.Server
         private const int MaxConcurrentClients = 128;
         private static readonly SemaphoreSlim ClientCapacity = new(MaxConcurrentClients, MaxConcurrentClients);
         private const int MaxLoginAttemptsPerWindow = 5;
-        private const int MaxLoginRateLimitEntries = 10000;
-        private static readonly long LoginAttemptWindowMilliseconds = (long)TimeSpan.FromMinutes(15).TotalMilliseconds;
-        private static readonly object LoginAttemptsGate = new();
-        private static readonly Dictionary<string, (long WindowStartedAt, int Attempts)> LoginAttempts = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
+        private static readonly TimeSpan LoginLockDuration = TimeSpan.FromMinutes(15);
 
         private static X509Certificate2 LoadServerCertificate()
         {
@@ -70,7 +68,7 @@ namespace DanToPhong.Server
         {
             string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS");
             if (string.IsNullOrWhiteSpace(raw))
-                return false;
+                return true;
             if (bool.TryParse(raw.Trim(), out bool enabled))
                 return enabled;
             throw new InvalidOperationException("DANTOPHONG_USE_TLS must be 'true' or 'false'.");
@@ -132,6 +130,7 @@ namespace DanToPhong.Server
                         client.Dispose();
                         continue;
                     }
+                    ConfigureTcpKeepAlive(client);
 
                     var session = new ClientSession
                     {
@@ -190,7 +189,7 @@ namespace DanToPhong.Server
                 while (!token.IsCancellationRequested && session.Client.Connected)
                 {
                     using var idleTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-                    idleTimeout.CancelAfter(TimeSpan.FromMinutes(2));
+                    idleTimeout.CancelAfter(TimeSpan.FromSeconds(75));
                     RequestPacket? request = await MessageFramer.ReceiveAsync<RequestPacket>(stream, idleTimeout.Token).ConfigureAwait(false);
                     if (request == null)
                         break;
@@ -225,7 +224,10 @@ namespace DanToPhong.Server
                     Console.WriteLine($"[{session.SessionId}] Disconnected ({session.AuthenticatedUsername ?? "guest"})");
                     if (session.AuthenticatedUserId.HasValue &&
                         !ActiveSessions.Values.Any(s => s != session && s.AuthenticatedUserId == session.AuthenticatedUserId))
+                    {
                         RoomRegistry.RemoveByOwner(session.AuthenticatedUserId.Value);
+                        TcpGameRoomRegistry.RemoveUser(session.AuthenticatedUserId.Value);
+                    }
                 }
                 finally
                 {
@@ -298,6 +300,9 @@ namespace DanToPhong.Server
             {
                 return cmd switch
                 {
+                    Commands.Ping => session.AuthenticatedUserId.HasValue
+                        ? new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "PONG" }
+                        : Unauth(),
                     Commands.Register => await HandleRegisterAsync(req, repo, state, token).ConfigureAwait(false),
                     Commands.Login => await HandleLoginAsync(session, req, repo, state, token).ConfigureAwait(false),
                     Commands.GetInfo => await HandleGetInfoAsync(session, repo, token).ConfigureAwait(false),
@@ -323,6 +328,15 @@ namespace DanToPhong.Server
                     Commands.Invite => await HandleInviteAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.GetInvites => HandleGetInvites(session),
                     Commands.GetState => await HandleGetStateAsync(session, req, repo, token).ConfigureAwait(false),
+                    Commands.CreateGameRoom => HandleCreateGameRoom(session, req),
+                    Commands.JoinGameRoom => HandleJoinGameRoom(session, req),
+                    Commands.LeaveGameRoom => HandleLeaveGameRoom(session),
+                    Commands.GameRoomState => HandleGameRoomState(session),
+                    Commands.StartGameRoom => HandleStartGameRoom(session, req),
+                    Commands.GameInput => HandleGameInput(session, req),
+                    Commands.ChatSend => HandleChatSend(session, req),
+                    Commands.ChatPoll => HandleChatPoll(session, req),
+                    Commands.GameEvent => HandleGameEvent(session, req),
 
                     _ => new ResponsePacket
                     {
@@ -361,6 +375,75 @@ namespace DanToPhong.Server
             Message = "Session is not authenticated."
         };
 
+        private static ResponsePacket HandleCreateGameRoom(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue || string.IsNullOrWhiteSpace(session.AuthenticatedUsername))
+                return Unauth();
+            if (!string.IsNullOrWhiteSpace(request.MapName) && !MapRegex.IsMatch(request.MapName.Trim()))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid map name." };
+            return TcpGameRoomRegistry.Create(session.AuthenticatedUserId.Value, session.AuthenticatedUsername, request);
+        }
+
+        private static ResponsePacket HandleJoinGameRoom(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue || string.IsNullOrWhiteSpace(session.AuthenticatedUsername))
+                return Unauth();
+            if (!RoomCodeRegex.IsMatch((request.RoomId ?? string.Empty).Trim()))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid room code." };
+            return TcpGameRoomRegistry.Join(session.AuthenticatedUserId.Value, session.AuthenticatedUsername, request.RoomId!);
+        }
+
+        private static ResponsePacket HandleLeaveGameRoom(ClientSession session)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.Leave(session.AuthenticatedUserId.Value);
+        }
+
+        private static ResponsePacket HandleGameRoomState(ClientSession session)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.State(session.AuthenticatedUserId.Value);
+        }
+
+        private static ResponsePacket HandleStartGameRoom(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            if (!string.IsNullOrWhiteSpace(request.MapName) && !MapRegex.IsMatch(request.MapName.Trim()))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid map name." };
+            return TcpGameRoomRegistry.Start(session.AuthenticatedUserId.Value, request);
+        }
+
+        private static ResponsePacket HandleGameInput(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.SubmitInput(session.AuthenticatedUserId.Value, request);
+        }
+
+        private static ResponsePacket HandleChatSend(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.SendChat(session.AuthenticatedUserId.Value, request.ChatMessage);
+        }
+
+        private static ResponsePacket HandleChatPoll(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.PollChat(session.AuthenticatedUserId.Value, request.AfterMessageId ?? 0);
+        }
+
+        private static ResponsePacket HandleGameEvent(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.SubmitEvent(session.AuthenticatedUserId.Value, request);
+        }
+
         private static async Task<ResponsePacket> HandleLogoutAsync(ClientSession session, ServerStateRepository state, CancellationToken token)
         {
             int? userId = session.AuthenticatedUserId;
@@ -375,6 +458,7 @@ namespace DanToPhong.Server
                     try { active.Client.Close(); } catch { }
                 }
                 RoomRegistry.RemoveByOwner(userId.Value);
+                TcpGameRoomRegistry.RemoveUser(userId.Value);
             }
             session.AuthenticatedUserId = null;
             session.AuthenticatedUsername = null;
@@ -476,7 +560,8 @@ namespace DanToPhong.Server
             string remoteAddress = session.Client.Client.RemoteEndPoint is IPEndPoint endpoint
                 ? endpoint.Address.ToString()
                 : "unknown";
-            if (!TryBeginLoginAttempt(remoteAddress))
+            string limiterKey = $"{username.ToUpperInvariant()}|{remoteAddress}";
+            if (!await state.TryBeginLoginAttemptAsync(limiterKey, MaxLoginAttemptsPerWindow, LoginAttemptWindow, LoginLockDuration, token).ConfigureAwait(false))
             {
                 return new ResponsePacket
                 {
@@ -493,11 +578,12 @@ namespace DanToPhong.Server
             }
             catch
             {
-                ReleaseLoginAttempt(remoteAddress);
+                await state.ReleaseLoginAttemptAsync(limiterKey, token).ConfigureAwait(false);
                 throw;
             }
             if (user == null)
             {
+                await state.RecordFailedLoginAsync(limiterKey, MaxLoginAttemptsPerWindow, LoginLockDuration, token).ConfigureAwait(false);
                 return new ResponsePacket
                 {
                     Success = false,
@@ -506,7 +592,7 @@ namespace DanToPhong.Server
                 };
             }
 
-            ClearLoginAttempts(remoteAddress);
+            await state.ClearLoginAttemptsAsync(limiterKey, token).ConfigureAwait(false);
 
             // Chỉ lưu hash của token; game nhận token gốc đúng một lần ở response.
             string authToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
@@ -525,61 +611,19 @@ namespace DanToPhong.Server
             };
         }
 
-        private static bool TryBeginLoginAttempt(string remoteAddress)
+        private static void ConfigureTcpKeepAlive(TcpClient client)
         {
-            long now = Environment.TickCount64;
-            lock (LoginAttemptsGate)
+            try
             {
-                if (LoginAttempts.TryGetValue(remoteAddress, out var current))
-                {
-                    if (now - current.WindowStartedAt < LoginAttemptWindowMilliseconds)
-                    {
-                        if (current.Attempts >= MaxLoginAttemptsPerWindow)
-                            return false;
-
-                        LoginAttempts[remoteAddress] = (current.WindowStartedAt, current.Attempts + 1);
-                        return true;
-                    }
-
-                    LoginAttempts.Remove(remoteAddress);
-                }
-
-                if (LoginAttempts.Count >= MaxLoginRateLimitEntries)
-                {
-                    foreach (string key in LoginAttempts
-                        .Where(entry => now - entry.Value.WindowStartedAt >= LoginAttemptWindowMilliseconds)
-                        .Select(entry => entry.Key)
-                        .ToArray())
-                    {
-                        LoginAttempts.Remove(key);
-                    }
-
-                    if (LoginAttempts.Count >= MaxLoginRateLimitEntries)
-                        return false;
-                }
-
-                LoginAttempts[remoteAddress] = (now, 1);
-                return true;
+                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
             }
-        }
-
-        private static void ClearLoginAttempts(string remoteAddress)
-        {
-            lock (LoginAttemptsGate)
-                LoginAttempts.Remove(remoteAddress);
-        }
-
-        private static void ReleaseLoginAttempt(string remoteAddress)
-        {
-            lock (LoginAttemptsGate)
+            catch (SocketException ex)
             {
-                if (!LoginAttempts.TryGetValue(remoteAddress, out var current))
-                    return;
-
-                if (current.Attempts <= 1)
-                    LoginAttempts.Remove(remoteAddress);
-                else
-                    LoginAttempts[remoteAddress] = (current.WindowStartedAt, current.Attempts - 1);
+                Console.WriteLine($"[TCP] Keep-alive unavailable: {ex.SocketErrorCode}");
+            }
+            catch (PlatformNotSupportedException)
+            {
+                Console.WriteLine("[TCP] Keep-alive is not supported on this platform.");
             }
         }
 

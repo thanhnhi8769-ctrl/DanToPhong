@@ -37,7 +37,7 @@ public class RoadPhysicsFixer : EditorWindow
 
         EditorGUILayout.Space(12);
         EditorGUILayout.LabelField("3. SỬA XE", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("Chọn PREFAB XE (trong Project, thường ở thư mục Resources, cái Photon spawn ra) rồi bấm nút. Có thể chọn nhiều prefab.", MessageType.Info);
+        EditorGUILayout.HelpBox("Chọn PREFAB XE (trong Project, thường ở thư mục Resources) rồi bấm nút. Có thể chọn nhiều prefab.", MessageType.Info);
         if (GUILayout.Button("SỬA XE ĐANG CHỌN", GUILayout.Height(34))) SuaXe();
     }
 

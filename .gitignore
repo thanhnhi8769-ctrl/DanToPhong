@@ -37,6 +37,7 @@
 .env.*
 !.env.example
 **/server.env
+**/server.json
 **/*.pem
 **/*.pfx
 **/*.p12

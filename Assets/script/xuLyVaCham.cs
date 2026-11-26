@@ -1,24 +1,21 @@
 using UnityEngine;
-using Photon.Pun;
 
-public class XuLyVaChamChoXe : MonoBehaviourPun
+public class XuLyVaChamChoXe : MonoBehaviour
 {
     private Rigidbody rb;
-    private PhotonView viewXe;
 
     private bool LaXeCuaMinh
     {
         get
         {
-            if (!PhotonNetwork.InRoom) return true;
-            return viewXe != null && viewXe.IsMine;
+            scooter controller = GetComponentInParent<scooter>();
+            return controller == null || !controller.IsRemoteControlled;
         }
     }
 
     private void Awake()
     {
         rb = GetComponentInParent<Rigidbody>();
-        viewXe = GetComponentInParent<PhotonView>();
 
         if (rb != null)
         {
@@ -36,10 +33,10 @@ public class XuLyVaChamChoXe : MonoBehaviourPun
             if (!LaXeCuaMinh) return;
             if (!other.gameObject.activeSelf) return;
 
-            other.gameObject.SetActive(false);
-
             if (GameManager.Instance != null)
-                GameManager.Instance.QuaCheckPoint();
+                GameManager.Instance.QuaCheckPoint(other);
+            else
+                other.gameObject.SetActive(false);
 
             return;
         }

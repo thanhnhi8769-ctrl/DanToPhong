@@ -30,6 +30,17 @@
         public const string Invite = "MOIBAN";
         public const string GetInvites = "LAYLOIMOI";
         public const string GetState = "LAYTRANGTHAI";   // kho + lời mời trong một response
+        public const string Ping = "PING";
+        public const string CreateGameRoom = "ROOM_CREATE";
+        public const string JoinGameRoom = "ROOM_JOIN";
+        public const string LeaveGameRoom = "ROOM_LEAVE";
+        public const string GameRoomState = "ROOM_STATE";
+        public const string StartGameRoom = "ROOM_START";
+        public const string GameInput = "GAME_INPUT";
+        public const string GameSnapshot = "GAME_SNAPSHOT";
+        public const string ChatSend = "CHAT_SEND";
+        public const string ChatPoll = "CHAT_POLL";
+        public const string GameEvent = "GAME_EVENT";
     }
 
     public static class ErrorCodes

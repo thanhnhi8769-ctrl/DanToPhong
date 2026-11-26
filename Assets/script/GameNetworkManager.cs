@@ -2,9 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Photon.Pun;
 using Unity.Cinemachine;
-using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 public class GameNetworkManager : MonoBehaviour
 {
@@ -19,21 +17,16 @@ public class GameNetworkManager : MonoBehaviour
     public float doCaoThaXe = 0.05f;
 
     [Header("Mạng (tăng để xe người khác chạy êm hơn)")]
-    [Tooltip("Số gói gửi lên server mỗi giây (mặc định Photon = 30)")]
+    [Tooltip("Tần suất gửi input đến server TCP.")]
     public int tanSoGui = 20;
-    [Tooltip("Số lần đồng bộ vị trí xe mỗi giây (mặc định Photon = 10 nên xe người khác bị giật)")]
+    [Tooltip("Tần suất hiển thị snapshot do server phát.")]
     public int tanSoDongBo = 10;
 
     [Header("Chẩn đoán")]
     public bool hienThongTinDebugXe = false;
 
-    private const float CHU_KY_QUET_SKIN = 1.5f;
-
     private bool daTaoXe = false;
     private static bool daDangKySceneLoaded = false;
-
-    private readonly Dictionary<int, int> xeDaApSkin = new Dictionary<int, int>();
-    private float thoiDiemQuetTiepTheo = 0f;
 
     // Renderer đã được tách material riêng (mỗi xe một bản, tránh dùng chung màu giữa các xe)
     private static readonly RaycastHit[] bufferRay = new RaycastHit[32];
@@ -65,9 +58,7 @@ public class GameNetworkManager : MonoBehaviour
             string m = LayMapDaChon();
             if (!string.IsNullOrEmpty(m) && m != "game" && Application.CanStreamedLevelBeLoaded(m))
             {
-                // Đang ở trong phòng Online thì dùng hàm load scene của Photon, chơi Offline thì dùng của Unity
-                if (PhotonNetwork.InRoom) PhotonNetwork.LoadLevel(m);
-                else SceneManager.LoadScene(m);
+                SceneManager.LoadScene(m);
                 return;
             }
         }
@@ -91,11 +82,8 @@ public class GameNetworkManager : MonoBehaviour
 
     private static string LayMapDaChon()
     {
-        if (PhotonNetwork.InRoom
-            && PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue("Map", out object v)
-            && v is string s && !string.IsNullOrEmpty(s))
-            return s;
-
+        if (!string.IsNullOrWhiteSpace(LauncherArgs.RoomMap))
+            return LauncherArgs.RoomMap;
         return PlayerInventory.GetSelectedMap();
     }
 
@@ -109,11 +97,7 @@ public class GameNetworkManager : MonoBehaviour
     {
         if (SceneManager.GetActiveScene().name.ToLower().Contains("select")) return;
 
-        PhotonNetwork.IsMessageQueueRunning = true;
-        PhotonNetwork.SendRate = Mathf.Clamp(tanSoGui, 10, 60);
-        PhotonNetwork.SerializationRate = Mathf.Clamp(tanSoDongBo, 10, PhotonNetwork.SendRate);
         TuDongTimSpawnPointsNeuThieu();
-        xeDaApSkin.Clear();
         daTaoXe = false;
         StartCoroutine(ChoVaoPhongVaSinhXe());
     }
@@ -122,7 +106,7 @@ public class GameNetworkManager : MonoBehaviour
     
         private void OnDestroy()
     {
-        if (daTaoXe && (!PhotonNetwork.IsConnected || !PhotonNetwork.InRoom))
+            if (daTaoXe)
             VaoGameCooldown.BatDau();
     }
 
@@ -145,9 +129,6 @@ public class GameNetworkManager : MonoBehaviour
 
     private void Update()
     {
-        if (Time.unscaledTime < thoiDiemQuetTiepTheo) return;
-        thoiDiemQuetTiepTheo = Time.unscaledTime + CHU_KY_QUET_SKIN;
-        QuetVaApSkinXeMoi();
     }
 
     private static bool ChuaChuoi(string s, string tuKhoa)
@@ -203,16 +184,6 @@ public class GameNetworkManager : MonoBehaviour
 
     private IEnumerator ChoVaoPhongVaSinhXe()
     {
-        if (PhotonNetwork.IsConnected)
-        {
-            float timeout = 10f;
-            while ((!PhotonNetwork.InRoom || !PhotonNetwork.IsConnectedAndReady) && timeout > 0f)
-            {
-                timeout -= Time.unscaledDeltaTime;
-                yield return null;
-            }
-        }
-
         yield return new WaitForSecondsRealtime(0.25f);
 
         if (daTaoXe) yield break;
@@ -225,9 +196,9 @@ public class GameNetworkManager : MonoBehaviour
 
         if (spawnPoints != null && spawnPoints.Length > 0 && spawnPoints[0] != null)
         {
-            int playerIndex = (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer.ActorNumber > 0)
-                ? (PhotonNetwork.LocalPlayer.ActorNumber - 1) % spawnPoints.Length
-                : 0;
+            int playerIndex = string.IsNullOrWhiteSpace(LauncherArgs.Room)
+                ? 0
+                : Mathf.Abs(LauncherArgs.SpawnIndex) % spawnPoints.Length;
 
             Transform chosenSpawn = spawnPoints[playerIndex];
             gocSpawn = chosenSpawn.rotation;
@@ -239,38 +210,9 @@ public class GameNetworkManager : MonoBehaviour
         int indexXe = VehicleCatalog.GetSelectedIndex();
         GameObject xe = null;
 
-        if (PhotonNetwork.IsConnected)
-        {
-            if (!PhotonNetwork.InRoom)
-            {
-                Debug.LogError("[NETWORK] Đang kết nối Photon nhưng chưa vào Room!");
-                yield break;
-            }
-
-            try
-            {
-                Hashtable trangBi = new Hashtable
-                {
-                    { "Scooter", indexXe },
-                    { "Helmet", PlayerInventory.GetEquippedIndex("Helmet") },
-                    { "Character", PlayerInventory.GetEquippedIndex("Character") }
-                };
-                PhotonNetwork.LocalPlayer.SetCustomProperties(trangBi);
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogWarning($"[NETWORK] Could not sync player equipment properties: {ex.Message}");
-            }
-
-            object[] dataKhoiTao = new object[] { indexXe };
-            xe = PhotonNetwork.Instantiate(tenPrefabXeGoc, viTriSpawn, gocSpawn, 0, dataKhoiTao);
-        }
-        else
-        {
-            GameObject prefab = Resources.Load<GameObject>(tenPrefabXeGoc);
-            if (prefab != null)
-                xe = Instantiate(prefab, viTriSpawn, gocSpawn);
-        }
+        GameObject prefab = Resources.Load<GameObject>(tenPrefabXeGoc);
+        if (prefab != null)
+            xe = Instantiate(prefab, viTriSpawn, gocSpawn);
 
         if (xe != null)
         {
@@ -279,9 +221,14 @@ public class GameNetworkManager : MonoBehaviour
 
             NangXeKhoiMatDuong(xe, viTriSpawn.y - doCaoThaXe);
             KichHoatDungMauXe(xe, indexXe, kichThuocXeChuan);
-
-            PhotonView pvXe = xe.GetComponent<PhotonView>();
-            if (pvXe != null) xeDaApSkin[pvXe.ViewID] = indexXe;
+            scooter controller = xe.GetComponent<scooter>();
+            if (!string.IsNullOrWhiteSpace(LauncherArgs.Room))
+            {
+                if (controller != null) controller.SetNetworkControlled(true);
+                TcpGameplaySync sync = GetComponent<TcpGameplaySync>();
+                if (sync == null) sync = gameObject.AddComponent<TcpGameplaySync>();
+                sync.ConfigureLocalCar(xe, indexXe, Mathf.Clamp(tanSoGui, 15, 20));
+            }
 
             xe.SendMessage("LuuDiemXuatPhat", SendMessageOptions.DontRequireReceiver);
 
@@ -349,44 +296,6 @@ public class GameNetworkManager : MonoBehaviour
         bufferCollider.Clear();
 
         return thap == float.MaxValue ? float.NaN : thap;
-    }
-
-    // Xe người khác: mỗi xe lấy màu theo InstantiationData của CHÍNH xe đó.
-    // CustomProperties của người chơi chỉ dùng khi xe không có InstantiationData.
-    private void QuetVaApSkinXeMoi()
-    {
-        if (!PhotonNetwork.IsConnectedAndReady || !PhotonNetwork.InRoom) return;
-
-        List<scooter> ds = scooter.TatCaXe;
-        if (ds.Count <= 1) return;
-
-        for (int k = 0; k < ds.Count; k++)
-        {
-            scooter sc = ds[k];
-            if (sc == null) continue;
-
-            if (!sc.TryGetComponent(out PhotonView pv) || pv.IsMine) continue;
-
-            int idx = -1;
-            object[] dt = pv.InstantiationData;
-            if (dt != null && dt.Length > 0 && dt[0] != null)
-            {
-                idx = System.Convert.ToInt32(dt[0]);
-            }
-            else if (pv.Owner != null && pv.Owner.CustomProperties != null &&
-                     pv.Owner.CustomProperties.TryGetValue("Scooter", out object propVal) && propVal != null)
-            {
-                idx = System.Convert.ToInt32(propVal);
-            }
-
-            if (idx < 0) continue;
-
-            if (xeDaApSkin.TryGetValue(pv.ViewID, out int daAp) && daAp == idx)
-                continue;
-
-            sc.ApDungMauXe(idx);
-            xeDaApSkin[pv.ViewID] = idx;
-        }
     }
 
     // Bảng tên -> node dựng 1 lần cho mỗi lần áp màu

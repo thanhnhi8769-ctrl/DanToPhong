@@ -15,15 +15,46 @@ using UnityEngine;
 public class Req
 {
     public string command, token, category, mapName, targetId, roomId, mode, requestId;
-    public int itemIndex, coinsDelta, price, playerCount, maxPlayers;
-    public bool isRacing;
+    public string chatMessage, gameEventType;
+    public int itemIndex, coinsDelta, price, playerCount, maxPlayers, vehicleIndex, clientTick, checkpointIndex, totalCheckpoints;
+    public bool isRacing, brake;
+    public float positionX, positionY, positionZ, rotationY, throttle, steer;
+    public long clientTimestampMs, afterMessageId;
 }
 [Serializable] public class ItemDto { public string category; public int itemIndex; public bool isEquipped; }
 [Serializable] public class InvDto { public int coins; public string selectedMap; public List<ItemDto> items = new List<ItemDto>(); }
 [Serializable] public class UserDto { public string username, fullName, racerId, email, avatarPath; public int coins; }
 [Serializable] public class InviteDto { public string roomCode, fromName; }
 [Serializable] public class LbEntry { public int rank, coins; public string racerId, username, fullName; }
-[Serializable] public class Resp { public bool success; public string code, message; public InvDto inventory; public UserDto user; public string avatarBase64; public List<InviteDto> invites; public List<LbEntry> leaderboard; }
+[Serializable] public class GamePlayerDto
+{
+    public int userId, spawnIndex, vehicleIndex;
+    public string username;
+    public long sequence;
+    public float positionX, positionY, positionZ, rotationX, rotationY, rotationZ, rotationW;
+    public float velocityX, velocityY, velocityZ;
+    public long serverTimestampMs;
+}
+[Serializable] public class RoomChatMessageDto
+{
+    public long messageId, serverTimestampMs;
+    public string username, message;
+}
+[Serializable] public class Resp
+{
+    public bool success, isHost, isRacing, gameFinished;
+    public string code, command, message, roomId, mapName, winnerUsername;
+    public int playerCount, maxPlayers, spawnIndex;
+    public int winnerUserId;
+    public long serverTick, serverTimestampMs;
+    public InvDto inventory;
+    public UserDto user;
+    public string avatarBase64;
+    public List<InviteDto> invites;
+    public List<LbEntry> leaderboard;
+    public List<GamePlayerDto> gamePlayers;
+    public List<RoomChatMessageDto> chatMessages;
+}
 
 public static class ServerClient
 {
@@ -43,7 +74,7 @@ public static class ServerClient
     // LAYTRANGTHAI không retry vì việc đọc có thể đồng thời lấy lời mời khỏi hàng đợi.
     private static readonly HashSet<string> Idempotent = new HashSet<string>
     {
-        "XACTHUCTOKEN", "LAYKHO", "LAYTHONGTIN", "LAYAVATAR", 
+        "XACTHUCTOKEN", "LAYKHO", "LAYTHONGTIN", "LAYAVATAR", "PING",
         "CAPNHATPHONG", "XOAPHONG", "CHONMAP", "TRANGBI", "CAPNHATXU", "MUAHANG"
     };
 
@@ -128,6 +159,7 @@ public static class ServerClient
         Stream stream = null;
         try
         {
+            ConfigureTcpKeepAlive(client);
             Task connect = client.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
             using (var timeout = new CancellationTokenSource())
             {
@@ -184,6 +216,22 @@ public static class ServerClient
             if (ReferenceEquals(ns, stream)) ns = null;
             if (ReferenceEquals(tcp, client)) tcp = null;
             throw;
+        }
+    }
+
+    private static void ConfigureTcpKeepAlive(TcpClient client)
+    {
+        try
+        {
+            client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+        }
+        catch (SocketException ex)
+        {
+            Debug.LogWarning("[ServerClient] TCP keep-alive unavailable: " + ex.SocketErrorCode);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            Debug.LogWarning("[ServerClient] TCP keep-alive is not supported on this platform.");
         }
     }
 

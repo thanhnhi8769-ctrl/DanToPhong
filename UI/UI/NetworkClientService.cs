@@ -16,6 +16,10 @@ namespace UI.Services
         private readonly int _port;
         private readonly bool _useTls;
         private readonly SemaphoreSlim _ioLock = new(1, 1);
+        private readonly CancellationTokenSource _heartbeatCts = new();
+        private readonly System.Threading.Timer _heartbeatTimer;
+        private readonly object _heartbeatGate = new();
+        private Task _heartbeatTask = Task.CompletedTask;
 
         private TcpClient? _client;
         private Stream? _stream;
@@ -76,7 +80,7 @@ namespace UI.Services
             }
             string? envTls = Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS");
             if (string.IsNullOrWhiteSpace(envTls))
-                _useTls = fileUseTls ?? false;
+                _useTls = fileUseTls ?? true;
             else if (bool.TryParse(envTls, out bool parsedTls))
                 _useTls = parsedTls;
             else
@@ -84,6 +88,8 @@ namespace UI.Services
 
             if (string.IsNullOrWhiteSpace(_host) || _port is < 1 or > 65535)
                 throw new InvalidOperationException("Thiếu cấu hình DANTOPHONG_SERVER_HOST/PORT hoặc file server.json.");
+
+            _heartbeatTimer = new System.Threading.Timer(OnHeartbeatTimer, null, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(20));
         }
 
         private sealed class ServerConfig
@@ -95,6 +101,49 @@ namespace UI.Services
 
         private static readonly TimeSpan NetworkTimeout = TimeSpan.FromSeconds(12);
 
+        private static void ConfigureTcpKeepAlive(TcpClient client)
+        {
+            try
+            {
+                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            }
+            catch (SocketException ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"TCP keep-alive unavailable: {ex.SocketErrorCode}");
+            }
+            catch (PlatformNotSupportedException)
+            {
+                System.Diagnostics.Trace.TraceWarning("TCP keep-alive is not supported on this platform.");
+            }
+        }
+
+        private void OnHeartbeatTimer(object? state)
+        {
+            if (_disposed || string.IsNullOrEmpty(Token) || !IsConnected) return;
+            lock (_heartbeatGate)
+            {
+                if (_disposed || !_heartbeatTask.IsCompleted) return;
+                _heartbeatTask = SendHeartbeatAsync(_heartbeatCts.Token);
+            }
+        }
+
+        private async Task SendHeartbeatAsync(CancellationToken token)
+        {
+            try
+            {
+                ResponsePacket response = await SendAndReceiveAsync(new RequestPacket { Command = Commands.Ping }, token);
+                if (!response.Success || response.Message != "PONG")
+                    System.Diagnostics.Trace.TraceWarning("Server heartbeat was not acknowledged.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Server heartbeat failed: {ex.GetType().Name}");
+            }
+        }
+
         public async Task<bool> ConnectAsync(CancellationToken token = default)
         {
             if (IsConnected) return true;
@@ -104,6 +153,7 @@ namespace UI.Services
                 DisconnectInternal(raiseEvent: false);
 
                 var client = new TcpClient();
+                ConfigureTcpKeepAlive(client);
                 _client = client;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(NetworkTimeout);
@@ -373,8 +423,15 @@ namespace UI.Services
         {
             if (_disposed) return;
             _disposed = true;
+            _heartbeatTimer.Dispose();
+            _heartbeatCts.Cancel();
             DisconnectInternal(raiseEvent: false);
+            Task heartbeatTask;
+            lock (_heartbeatGate) heartbeatTask = _heartbeatTask;
+            try { heartbeatTask.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { }
             _ioLock.Dispose();
+            _heartbeatCts.Dispose();
         }
     }
 }

@@ -37,10 +37,15 @@ WinForms Launcher ── TCP/9000 ── DanToPhong.Server ── SQL Server / R
         │                                   └── Gmail SMTP (OTP)
         └── mở Unity, chuyển tài khoản/token/endpoint/mode
 
-Unity game ── Photon Cloud ── Unity game của người chơi khác
+Unity Solo: vật lý local
+Unity multiplayer prototype ── TCP/9000 request/response ── Server
 ```
 
-Launcher/server dùng frame TCP 4-byte big-endian và JSON. TCP Server quản lý tài khoản, OTP, inventory và trạng thái phòng/lời mời. Photon PUN quản lý matchmaking và đồng bộ trận. Dữ liệu phòng/lời mời TCP và một số phiên hiện đặt trong RAM; triển khai phù hợp một instance, chưa phải kiến trúc scale ngang.
+Launcher/server dùng frame TCP 4-byte big-endian và JSON. TCP Server quản lý
+tài khoản, OTP, inventory và một prototype phòng/game. Prototype trả snapshot
+trong response của từng request; chưa có server push/broadcast tới cả phòng.
+Room/game state vẫn đặt trong RAM và simulation chưa thay thế physics/va chạm
+đường đua của Unity.
 
 ### 1.2. Kết quả tổng hợp
 
@@ -50,15 +55,18 @@ Launcher/server dùng frame TCP 4-byte big-endian và JSON. TCP Server quản l�
 | SMTP/OTP | **Đã sửa** | Hỗ trợ Gmail implicit TLS 465 và STARTTLS 587; lỗi gửi không còn khóa gửi lại bằng cooldown giả. Server build thành công. |
 | Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS đọc không phân biệt hoa-thường; TLS được chuyển tiếp từ Launcher sang Unity; env port sai giờ báo lỗi thay vì âm thầm fallback. |
 | Điều khiển/va chạm xe | **Đã rà soát** | Có ga, phanh/lùi, rẽ, nhảy, chống kẹt, bám đường và hồi sinh; chưa test vật lý bằng build chạy. |
-| Multiplayer transform | **Đã rà soát** | Owner gửi vị trí/hướng/vận tốc qua Photon; remote interpolate và khóa physics cục bộ. Chưa test jitter hai máy. |
+| Multiplayer state | **Một phần** | Unity gửi input qua TCP; server trả snapshot theo request và client nội suy. Không có broadcast, track-aware authoritative physics hay kiểm thử hai máy. |
 | Scene mặc định `game` | **Đã sửa** | Scene có dùng làm fallback nhưng thiếu Build Settings; đã thêm vào danh sách build. |
 | Git hygiene | **Đã sửa** | Cho phép các project .NET và scene thuộc `Assets/scene` được version; tiếp tục loại build/cache/demo scenes. |
 | AWS Internet-ready | **Chưa sẵn sàng** | Sau lần smoke test được chủ tài khoản duyệt, EC2 và RDS đã dừng lại. EIP hiện hữu vẫn gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
-| Production readiness | **Cần lưu ý** | Chưa xác minh TLS, SMTP gửi thật, RDS connectivity, Photon credentials, hoặc test hai client Internet. |
+| Production readiness | **Chưa xác nhận** | Chưa xác minh TLS/SMTP/DB runtime, hai client Internet, hoặc tải thực tế. |
 
 ## 2. Network stack tự phát triển và đặc tả giao thức
 
-Ứng dụng C# tự triển khai transport trên `TcpClient`/`TcpListener`, bộ đóng gói `MessageFramer` và packet DTO dùng chung trong `DanToPhong.Protocol`; không dùng HTTP/REST cho luồng Launcher ↔ Server. Game multiplayer thời gian thực dùng Photon riêng, không đi qua TCP service này.
+Ứng dụng C# tự triển khai transport trên `TcpClient`/`TcpListener`, bộ đóng
+gói `MessageFramer` và packet DTO dùng chung trong `DanToPhong.Protocol`;
+không dùng HTTP/REST hoặc thư viện mạng bên thứ ba cho luồng client-server.
+Multiplayer hiện dùng một prototype TCP request/response chưa hoàn chỉnh.
 
 ### 2.1. Kết nối, frame và JSON
 
@@ -108,7 +116,9 @@ Ví dụ minh họa, không chứa thông tin xác thực thật:
 
 Server accept TCP liên tục; mỗi socket tạo `ClientSession` và tác vụ xử lý độc lập. `ConcurrentDictionary` quản lý session đang hoạt động, mỗi session giữ danh tính/token của phiên, `SemaphoreSlim` bảo vệ thao tác ghi. DB SQL Server/RDS lưu tài khoản, token hash, OTP hash và idempotency; schema được khởi tạo khi Server start. Room/invite registry có phần lưu RAM và instance đơn; không tự đồng bộ giữa nhiều EC2.
 
-**Giới hạn cần ghi nhận:** hiện chưa thấy giới hạn tổng số socket/tác vụ đồng thời hoặc rate limit tổng thể tại accept layer. Không tuyên bố server chịu tải lớn/production scale trước khi có load test, quota và giám sát tài nguyên. Photon là network stack thứ hai, dùng cho room/gameplay; port/protocol Photon do Photon Cloud SDK quản lý, không phải TCP/9000 của project.
+**Giới hạn cần ghi nhận:** có giới hạn session cấu hình ở accept layer nhưng chưa có
+load test 10–50 client. Không tuyên bố chịu tải lớn/production scale trước khi có
+kiểm thử tải, quota và giám sát tài nguyên.
 
 ## 3. Kiến trúc và triển khai AWS
 
@@ -187,7 +197,13 @@ Server trước đây dùng `System.Net.Mail.SmtpClient` cố định `smtp.gmai
 
 ### Multiplayer
 
-`GameNetworkManager` spawn qua Photon trong room và dùng local spawn khi offline. `SmoothNetworkTransform` serialize position, rotation, linear/angular velocity; buffer tối đa 32 gói, nội suy có trễ và giới hạn dự đoán khi packet tới muộn. Xe remote khóa vật lý local để giảm xung đột; owner là nguồn cập nhật transform. Đây là client-authoritative transform, không phải chống gian lận hay server-authoritative physics.
+`TcpGameplaySync` gửi input qua TCP khoảng 15–20 request/giây và nhận snapshot
+trong response; server dùng kinematics đơn giản, còn client buffer tối đa 8
+sample và nội suy với độ trễ mục tiêu khoảng 100 ms. Đây chưa phải broadcast:
+mỗi client nhận snapshot riêng sau request của mình. Server chưa mô phỏng
+collision/đường đua, chưa kiểm tra checkpoint theo vị trí, không có outbound
+coalescing queue hoặc reconnect/resume. Vì vậy không xem đây là gameplay
+authoritative hoàn chỉnh.
 
 **Đánh giá:** logic có guard cho xe owner/remote, timeout room, missing scene và respawn. Không thể kết luận chống kẹt/văng/bay lạ hoặc đồng bộ Internet đạt ngưỡng chất lượng nếu chưa chạy build thật trên đường đua và hai client có latency/jitter. Cần kiểm tra phanh khi rẽ gấp, va tường, qua khe nối, rơi nước, respawn gần xe khác và rời mạng giữa trận.
 
@@ -200,14 +216,18 @@ Build Settings giữ `boot` đầu tiên. Scene được kiểm tra theo `Editor
 | `boot` | Xác thực token khi mở từ Launcher; chọn mode | Có trong build, index 0 |
 | `menu` | Màn hình trung tâm và lối quay về | Có trong build |
 | `SelectScene` | Chọn map/xe; đi vào Solo hoặc lobby | Có trong build |
-| `LobbyScene` | Tạo/tham gia Photon room; host bắt đầu trận | Có trong build |
+| `LobbyScene` | Tạo/tham gia phòng TCP prototype; bắt đầu trận | Có trong build; runtime chưa xác minh |
 | `ShopScene` | Shop | Có trong build |
 | `game` | Đường đua mặc định/fallback được `PlayerInventory` và `GameNetworkManager` tham chiếu | **Đã thêm vào Build Settings** vì trước đó thiếu |
 | `game 1`, `game 2`, `game 3` | Các đường đua chọn trong game | Có trong build |
 
-Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launcher, nó yêu cầu token hợp lệ rồi định tuyến `single` đến SelectScene và multiplayer đến LobbyScene. Photon room dùng `PhotonNetwork.LoadLevel`; Solo dùng `SceneManager`. Nút menu/quit và quay lại lobby có handler riêng.
+Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launcher,
+nó yêu cầu token hợp lệ rồi định tuyến `single` đến SelectScene và multiplayer
+đến LobbyScene. Chuyển cảnh dùng Unity `SceneManager`; Solo dùng vật lý local.
+Multiplayer room/start path đã nối TCP ở mức prototype, nhưng runtime và toàn
+bộ chuyển cảnh chưa được xác minh.
 
-**Cần kiểm tra bằng Unity:** scene asset serialize được, reference prefab/camera/input còn hợp lệ, Photon App ID/region/version khớp, `game` xuất hiện trong build mới, và chuyển scene liên tục không giữ `Time.timeScale` bằng 0. Không có Unity Editor/build game end-to-end chạy trong lượt này.
+**Cần kiểm tra bằng Unity:** scene asset serialize được, reference prefab/camera/input còn hợp lệ, `game` xuất hiện trong build mới, và chuyển scene liên tục không giữ `Time.timeScale` bằng 0. Chưa chạy Unity Editor/build end-to-end trên cây TCP hiện tại.
 
 ## 8. Bảo mật và quản lý cấu hình
 
@@ -215,14 +235,17 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 - Client server config không nên chứa credential bí mật. Host/port/TLS là cấu hình public; sau khi có EIP thật cần cập nhật config release.
 - TLS đã có tùy chọn hai đầu nhưng phải bật đồng bộ và dùng chứng chỉ hợp lệ cho host client kết nối. Không dùng TLS `false` cho tài khoản thật qua Internet: TCP plaintext có thể lộ mật khẩu/token.
 - RDS hiện `PubliclyAccessible=true` dù Security Group giới hạn inbound; ưu tiên chuyển sang private-only khi được duyệt. DB account nên có quyền tối thiểu cần thiết. SMTP sender cần App Password riêng và rotation nếu từng bị commit/ghi log.
-- Photon App ID là định danh cấu hình client; không đặt DB/SMTP secret trong Unity assets.
 - `.gitignore` trước đây bỏ qua toàn bộ `.unity` nên scene chính không xuất hiện trong clone; đồng thời bỏ qua `.csproj` Launcher/Server. Nay chỉ mở lại scene `Assets/scene/*.unity` và project `.csproj` bên `UI`, còn scene demo package/cache/build vẫn bỏ qua.
 - Cần `git status --short` trước khi push và kiểm tra history nếu secret từng commit. `.gitignore` không xóa secret đã nằm trong commit cũ.
 - Kiểm tra mới phát hiện 268 file trong `bin/obj` và hai solution Unity `.slnx` đã bị track từ trước. Đã bỏ chúng khỏi index (file local được giữ), thêm ignore `*.slnx`; trước push cần xác minh index diff chỉ là xóa artifacts và các source/tài liệu dự kiến.
 
 ## 9. Kịch bản, kết quả và ảnh minh chứng
 
-### Đã xác minh trong lượt này
+### Bằng chứng lịch sử đang có trong repo
+
+Các mục dưới đây phản ánh lần kiểm tra trước được ghi nhận trong repo, không
+phải thao tác AWS/build đã thực hiện ở lượt cập nhật tài liệu này. Lượt này
+không bật/tắt AWS, đổi EIP/Security Group, hoặc push Git.
 
 | Kiểm tra | Kết quả |
 |---|---|
@@ -233,10 +256,11 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 | Tắt AWS sau test | Đã dừng EC2 trước RDS; AWS xác nhận cuối cùng cả hai `stopped`. AWS CLI không có waiter `rds db-instance-stopped`; dùng vòng lặp truy vấn trạng thái trong Chương 13.3. |
 | Kiểm tra IP cũ trong Release config | AWS trả `InvalidAddress.NotFound`; endpoint cũ không phải EIP có thể xác nhận. |
 | Source OTP/config | Luồng 465/587 dùng chế độ TLS đúng; lỗi gửi có cleanup reservation; cooldown 60 giây tách với hạn OTP 10 phút; cấu hình port/TLS fail-fast. |
-| Build Server | Sau các sửa đổi cấu hình gần nhất, `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore`: thành công, 0 warning, 0 error. |
-| Build/Publish Launcher | `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o D:\DanToPhong\LauncherRelease`: thành công; output có `UI.exe`; 7 warning (6 nullable annotations trong Designer, 1 trường avatar chưa gán). `server.json` vẫn placeholder TLS; chưa có EIP gắn EC2. |
+| Build Server | Lượt này: `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore` thành công, 0 warning, 0 error. |
+| Build/Publish Launcher | Lượt này: `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore -o D:\DanToPhong\LauncherRelease` thành công; còn 6 cảnh báo nullable (`CS8669`) trong file Designer sinh tự động. |
+| Build Unity | Lượt này: Unity Editor 6000.3.28f1 build Windows x64 thành công sau khi gỡ plugin và dọn state chỉ ghi; không còn cảnh báo C# ở lần build cuối. Unity có log lỗi không fatal về licensing/package HTTPS. Chưa launch player hoặc test gameplay. |
 | Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp. Runbook AWS đã được thực thi một lần sau khi người dùng duyệt start; resource cuối cùng đã dừng, không đổi EIP/Security Group. |
-| Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; bổ sung `game` fallback bị thiếu. |
+| Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; `game` fallback có trong build. Windows x64 player vừa được build; scene/runtime flow chưa được chơi thử. |
 | Git hygiene | `.gitignore` bỏ qua output; 268 file `bin/obj` và hai `.slnx` đã được gỡ khỏi index. Các thay đổi đã commit cục bộ; chưa push. |
 | Secret scan | Quét signature AWS key/private key và mẫu password cụ thể trong source/config/doc không có kết quả; không thay thế quét Git history/rotation. |
 
@@ -244,18 +268,18 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 
 | ID | Thao tác và tiêu chí đạt | Trạng thái | Ảnh minh chứng (chưa chụp) |
 |---|---|---|---|
-| TC01 | Build/publish Launcher và chạy được trên Windows có .NET Desktop Runtime 10. | Chưa chạy runtime | `[Dán ảnh: docs/evidence/TC01-launcher.png]` |
-| TC02 | Đăng ký: request OTP, nhận email, nhập đúng code trong 10 phút, tạo user; code sai/hết hạn/dùng lại bị từ chối. | Chưa test E2E | `[Dán ảnh đã che email/code: docs/evidence/TC02-register-otp.png]` |
-| TC03 | Chờ cooldown 60 giây: resend; đổi username/email sau khi yêu cầu mã thì form không nhận mã cũ. | Chưa test E2E | `[Dán ảnh: docs/evidence/TC03-otp-cooldown.png]` |
-| TC04 | Login đúng/sai, logout, token hết hạn/thu hồi; token không lưu trong file ghi nhớ. | Chưa test E2E | `[Dán ảnh đã che token: docs/evidence/TC04-login-session.png]` |
-| TC05 | SMTP 465 implicit TLS và 587 STARTTLS; sai secret/timeout không đánh dấu gửi thành công, có thể thử lại sau lỗi. | Chưa test SMTP | `[Dán log đã lọc thông tin nhạy cảm: docs/evidence/TC05-smtp.png]` |
-| TC06 | Solo: `boot → SelectScene → game map → finish/reset/menu`; không kẹt scene/timeScale. | Chưa test Unity runtime | `[Dán ảnh: docs/evidence/TC06-solo.png]` |
-| TC07 | Client A tạo room, Client B (máy/mạng khác) join; cả hai thấy cùng room/player count và bắt đầu cùng scene. | Chưa test 2 máy | `[Dán ảnh hai client: docs/evidence/TC07-lobby-two-clients.png]` |
-| TC08 | Hai client chạy trận; xe/heading/vận tốc tương quan, checkpoint/finish; thử latency/jitter, rời mạng và reconnect. | Chưa test Internet | `[Dán ảnh/video: docs/evidence/TC08-multiplayer-race.png]` |
-| TC09 | Điều khiển ga/phanh/lùi/rẽ/drift, va tường, qua khe, rơi khỏi đường và reset; không bay/kẹt bất thường. | Chưa test vật lý | `[Dán ảnh: docs/evidence/TC09-vehicle-physics.png]` |
-| TC10 | TLS: hai đầu bật TLS với certificate tin cậy; client kết nối đúng host, plaintext bị từ chối. | Chưa test TLS | `[Dán ảnh/log đã lọc: docs/evidence/TC10-tls.png]` |
-| TC11 | Reboot EC2; `dantophong.service` active, DB reachable, Launcher từ Internet tiếp tục kết nối. | Chưa test AWS | `[Dán ảnh systemctl/health: docs/evidence/TC11-ec2-service.png]` |
-| TC12 | UI scale/DPI 100/125/150%, cửa sổ nhỏ và các Form chính không cắt controls/crash. | Chưa test UI | `[Dán ảnh: docs/evidence/TC12-ui-dpi.png]` |
+| TC01 | Reachability TCP/9000 từ một máy. | PASS lịch sử — chỉ xác nhận cổng, không xác nhận nghiệp vụ | [TC01-tcp-reachability.log](docs/evidence/TC01-tcp-reachability.log) |
+| TC02 | Hai máy khác mạng đăng nhập, vào phòng, đồng bộ. | BLOCKED — chưa có bằng chứng hai máy | Chưa có |
+| TC03 | Hai client dùng TCP tạo/vào phòng và nhận snapshot. | BLOCKED — chưa chạy Unity client/hai máy | Chưa có |
+| TC04 | OTP SMTP gửi/nhận, mã đúng/sai/hết hạn. | BLOCKED — runtime SMTP chưa cấu hình | Chưa có |
+| TC05 | TLS handshake và plaintext fail-closed. | BLOCKED — log deployment cũ FAIL; source hiện tại chưa retest | [TC05-tls-plaintext.log](docs/evidence/TC05-tls-plaintext.log) |
+| TC06 | DPI so sánh plaintext/TLS bằng capture. | BLOCKED — chưa capture | Chưa có |
+| TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — chưa chạy runtime | Chưa có |
+| TC08 | Unity Windows x64 build và launch. | PASS — build hiện tại; launch và gameplay chưa test | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log) |
+| TC09 | TCP framing: split/coalesced, EOF, length sai, truncated. | PASS lịch sử — smoke test in-memory | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
+| TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | BLOCKED — chưa chạy server thực | Chưa có |
+| TC11 | TCP 3-way handshake và FIN tới cổng 9000. | BLOCKED — chưa capture | Chưa có |
+| TC12 | TLS handshake/cipher và so sánh payload. | BLOCKED — chưa có TLS capture | Chưa có |
 
 Ảnh phải tránh hiển thị password, OTP, token, connection string, App Password, private key và dữ liệu cá nhân. Ghi thêm ngày/commit, Windows/Unity build, endpoint test, network condition và pass/fail; giữ log đã redact cùng ảnh. Không đánh dấu “Đạt” khi chỉ có ảnh UI tĩnh.
 
@@ -274,7 +298,7 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 5. Đưa Unity build cạnh Launcher trong `Game\` (hoặc theo đường dẫn `BuildGame36` được Launcher dò); đăng nhập rồi chọn Solo/Multiplayer.
 6. Người chơi khác tải cùng bản Launcher + Unity build, không cần sửa code; cấu hình endpoint public chỉ cần thay một lần khi EIP được provision và đóng gói cùng release.
 
-Chi tiết lệnh AWS/systemd và biến môi trường có trong [README](README.md#4-triển-khai-aws).
+Chi tiết lệnh AWS/systemd và biến môi trường có trong [README](README.md#aws-deployment-notes).
 
 ## 11. User story và sơ đồ luồng
 
@@ -283,7 +307,7 @@ Chi tiết lệnh AWS/systemd và biến môi trường có trong [README](READM
 | Người chơi mới | Là người chơi, tôi muốn đăng ký bằng email và OTP để tạo tài khoản. | OTP đúng, chưa hết hạn, dùng một lần; code sai/expired bị từ chối. |
 | Người chơi | Là người chơi, tôi muốn đăng nhập và mở game bằng phiên an toàn. | Login phát token; Unity xác thực token; logout/expiry thu hồi quyền. |
 | Người chơi | Là người chơi, tôi muốn vào Solo hoặc tạo/join phòng với bạn. | Solo chuyển đúng scene; hai client Internet cùng vào room và đồng bộ scene. |
-| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input local tác động xe mình; transform remote được nội suy qua Photon. |
+| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input được gửi qua TCP; snapshot được nội suy ở client. Việc đồng bộ hiện một phần, chưa có room-wide push hay track-authoritative physics. |
 | Quản trị viên | Là quản trị viên, tôi muốn Server tự lên sau reboot và lưu dữ liệu trong DB. | systemd active, SQL Server/RDS reachable, log không lộ secret. |
 
 ### Flow đăng ký/login và vào game
@@ -304,8 +328,8 @@ flowchart TD
     J --> K[Unity gửi XACTHUCTOKEN]
     K --> L{Mode}
     L -->|Solo| M[SelectScene -> Race -> Finish/Reset]
-    L -->|Multiplayer| N[Photon Lobby -> Join/Start]
-    N --> O[Photon đồng bộ scene và xe]
+    L -->|Multiplayer| N[TCP ROOM_CREATE / ROOM_JOIN / ROOM_START]
+    N --> O[TCP GAME_INPUT / GAME_SNAPSHOT request-response]
     M --> P[Menu/Thoát]
     O --> P
 ```
@@ -335,7 +359,7 @@ Thông tin nhóm chưa có trong repository/session; các ô sau **cố ý để
 | `[Nhóm trưởng - điền họ tên]` | `[MSSV]` | Tích hợp, kiến trúc, AWS/release, tổng hợp báo cáo (điều chỉnh theo thực tế) | `[__%]` | `[Ký/xác nhận]` |
 | `[Thành viên 2]` | `[MSSV]` | WinForms/đăng ký-đăng nhập/OTP (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
 | `[Thành viên 3]` | `[MSSV]` | Server/CSDL/network protocol (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
-| `[Thành viên 4]` | `[MSSV]` | Unity gameplay/scene/Photon (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
+| `[Thành viên 4]` | `[MSSV]` | Unity gameplay/scene/TCP game prototype (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
 
 **Liên lạc nhóm trưởng:** Họ tên `[điền]`; email `[điền email học tập]`; điện thoại `[điền nếu cần]`. Không đặt thông tin liên lạc cá nhân lên Git public nếu chưa được đồng ý; có thể điền trong bản nộp riêng.
 
@@ -513,4 +537,8 @@ git push
 
 **Chưa thể xác nhận “clone về dùng ngay”:** smoke test một máy đã xác nhận listener TCP/9000 và phản hồi giao thức; EC2/RDS sau đó đã được dừng. EIP hiện có vẫn gắn ENI `RDSNetworkInterface`, EC2 hiện không có EIP và public IP tự cấp chỉ tạm thời. Security Group TCP/9000 chỉ cho một IPv4 `/32`; RDS vẫn `PubliclyAccessible=true`; TLS chưa được xác minh/bật. Chưa test hai client, đăng nhập, OTP thật, Unity gameplay hoặc lưu ảnh minh chứng. Trước khi phát hành, cần xác nhận endpoint ổn định, giới hạn ingress phù hợp, bật TLS, kiểm thử end-to-end và chỉ ghi kết quả có bằng chứng thực tế.
 
-Ngoài ra cần chạy gameplay thật và test hai client. Photon transform là client-authoritative; phần thưởng/điểm đua phải được xác nhận phía Server trước khi dùng cho cạnh tranh hoặc tiền tệ. Hiện báo cáo chỉ đánh giá code/config tĩnh, không chứng nhận độ ổn định/khả năng chịu tải production.
+Ngoài ra cần chạy gameplay thật và test hai client. TCP game prototype còn
+request/response, mô phỏng kinematics đơn giản, không có room-wide push, track
+collision authority, verified checkpoint crossing hoặc reconnect/resume.
+Phần thưởng/điểm đua chưa được xác nhận phía Server. Báo cáo không chứng nhận
+độ ổn định hoặc khả năng chịu tải production.

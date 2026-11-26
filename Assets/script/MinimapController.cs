@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.UI;
-using Photon.Pun;
 
 [RequireComponent(typeof(Camera))]
 public class MinimapController : MonoBehaviour
@@ -227,9 +226,8 @@ public class MinimapController : MonoBehaviour
             if (xe == null)
                 continue;
 
-            PhotonView pv = xe.GetComponentInParent<PhotonView>();
-
-            if (pv == null || pv.IsMine)
+            scooter controller = xe.GetComponentInParent<scooter>();
+            if (controller != null && !controller.IsRemoteControlled)
             {
                 targetXeCuaMinh = xe.transform;
                 Debug.Log("[Minimap] Đã tìm thấy xe của người chơi.");

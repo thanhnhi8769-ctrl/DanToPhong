@@ -5,9 +5,6 @@ using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using Photon.Pun;
-using Photon.Realtime;
-using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 public class ButtonFx : MonoBehaviour,
     IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
@@ -156,15 +153,6 @@ public class SelectManager : MonoBehaviour
     private float thoiDiemKiemTraVaiTro;
     private Canvas cachedCanvas;
 
-    // FIX: xóa scene đồng bộ cũ (SelectScene) khỏi Room để Lobby không bị PUN kéo ngược về Select
-    private void XoaSceneDongBoCuTrongPhong()
-    {
-        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null)
-        {
-            PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable { { "curScn", null } });
-        }
-    }
-
     private void DamBaoEventSystemHoatDong()
     {
         EventSystem es = FindFirstObjectByType<EventSystem>();
@@ -186,14 +174,10 @@ public class SelectManager : MonoBehaviour
     private void Start()
     {
         Time.timeScale = 1f;
-        PhotonNetwork.AutomaticallySyncScene = false;
-        XoaSceneDongBoCuTrongPhong(); // FIX
         DamBaoEventSystemHoatDong();
 
         if (VehicleCatalog.Count <= 0)
         {
-            if (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer != null)
-                PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable { { "DangChonXe", false } });
             if (warningText != null)
             {
                 warningText.gameObject.SetActive(true);
@@ -206,14 +190,6 @@ public class SelectManager : MonoBehaviour
 
         cam = Camera.main;
         cachedCanvas = FindFirstObjectByType<Canvas>();
-
-        if (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer != null)
-        {
-            PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
-            {
-                { "DangChonXe", true }
-            });
-        }
 
         ButtonFx.MauChung = Color.white;
         tenCacMauXe = VehicleCatalog.GetAllNames();
@@ -233,7 +209,7 @@ public class SelectManager : MonoBehaviour
             }
         }
 
-        laChuPhong = !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
+        laChuPhong = string.IsNullOrWhiteSpace(LauncherArgs.Room) || LauncherArgs.IsRoomHost;
 
         bool coMap = laChuPhong && maps != null && maps.Length > 0;
         hopViTriHT = coMap ? hopViTri : hopViTriMotVat;
@@ -242,15 +218,6 @@ public class SelectManager : MonoBehaviour
         scooterIndex = VehicleCatalog.GetSelectedIndex();
         if (!VehicleCatalog.IsOwned(scooterIndex))
             scooterIndex = TimXeDauTienDaSoHuu();
-
-        if (PhotonNetwork.InRoom &&
-            PhotonNetwork.LocalPlayer != null &&
-            PhotonNetwork.LocalPlayer.CustomProperties.TryGetValue("Scooter", out object xeTrongPhong))
-        {
-            int indexPhoton = System.Convert.ToInt32(xeTrongPhong);
-            if (indexPhoton >= 0 && indexPhoton < VehicleCatalog.Count && VehicleCatalog.IsOwned(indexPhoton))
-                scooterIndex = indexPhoton;
-        }
 
         scooterIndex = Mathf.Clamp(scooterIndex, 0, VehicleCatalog.Count - 1);
 
@@ -429,7 +396,7 @@ public class SelectManager : MonoBehaviour
         if (Time.unscaledTime < thoiDiemKiemTraVaiTro) return;
         thoiDiemKiemTraVaiTro = Time.unscaledTime + 0.5f;
 
-        bool moi = !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
+        bool moi = string.IsNullOrWhiteSpace(LauncherArgs.Room) || LauncherArgs.IsRoomHost;
         if (moi == laChuPhong) return;
 
         laChuPhong = moi;
@@ -682,13 +649,7 @@ public class SelectManager : MonoBehaviour
         mapIndex = (mapIndex + huong + maps.Length) % maps.Length;
         CapNhatMap();
 
-        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient && PhotonNetwork.CurrentRoom != null)
-        {
-            PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
-            {
-                { "Map", maps[mapIndex].sceneName }
-            });
-        }
+        PlayerInventory.SetSelectedMap(maps[mapIndex].sceneName);
     }
 
     private Text TaoText(Transform cha, string ten, Vector2 viTri, Vector2 kichThuoc, int coChu = 20)
@@ -931,7 +892,8 @@ public class SelectManager : MonoBehaviour
             }
             return;
         }
-        Debug.Log($"[SelectManager] CLICK CONFIRM! index={scooterIndex}, owned={VehicleCatalog.IsOwned(scooterIndex)}, inRoom={PhotonNetwork.InRoom}, lobby={tenSceneLobby}");
+        bool inRoom = !string.IsNullOrWhiteSpace(LauncherArgs.Room);
+        Debug.Log($"[SelectManager] Confirm index={scooterIndex}, owned={VehicleCatalog.IsOwned(scooterIndex)}, inRoom={inRoom}, lobby={tenSceneLobby}");
         if (dangChuyenScene) return;
 
         if (!VehicleCatalog.IsOwned(scooterIndex))
@@ -964,7 +926,7 @@ public class SelectManager : MonoBehaviour
         }
         dangChuyenScene = true;
 
-        bool laChuPhongHienTai = PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient;
+        bool laChuPhongHienTai = inRoom && LauncherArgs.IsRoomHost;
 
         if (laChuPhongHienTai && maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
         {
@@ -978,27 +940,8 @@ public class SelectManager : MonoBehaviour
             }
         }
 
-        if (PhotonNetwork.InRoom)
+        if (inRoom)
         {
-            if (PhotonNetwork.LocalPlayer != null)
-            {
-                PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
-                {
-                    { "Scooter", scooterIndex },
-                    { "DangChonXe", false }
-                });
-            }
-
-            if (laChuPhongHienTai && PhotonNetwork.CurrentRoom != null &&
-                maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
-            {
-                PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
-                {
-                    { "Map", maps[mapIndex].sceneName }
-                });
-            }
-
-            XoaSceneDongBoCuTrongPhong(); // FIX
             LobbyManager.DanhDauCoSanPhongTuVanTruoc();
 
             string sceneDich = TimTenSceneLobbyHopLe();
@@ -1040,17 +983,8 @@ public class SelectManager : MonoBehaviour
         if (dangChuyenScene) return;
         dangChuyenScene = true;
 
-        if (PhotonNetwork.InRoom)
+        if (!string.IsNullOrWhiteSpace(LauncherArgs.Room))
         {
-            if (PhotonNetwork.LocalPlayer != null)
-            {
-                PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable
-                {
-                    { "DangChonXe", false }
-                });
-            }
-
-            XoaSceneDongBoCuTrongPhong();
             LobbyManager.DanhDauCoSanPhongTuVanTruoc();
 
             string sceneDich = TimTenSceneLobbyHopLe();

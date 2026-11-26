@@ -32,7 +32,147 @@ namespace DanToPhong.Server
                 WHERE CooldownUntil < DATEADD(day, -1, SYSUTCDATETIME())
                   AND (ExpiresAt IS NULL OR ExpiresAt < SYSUTCDATETIME());
                 DELETE dbo.RequestIdempotency
-                WHERE ResponseJson IS NOT NULL AND CreatedAt < DATEADD(day, -30, SYSUTCDATETIME());", conn);
+                WHERE ResponseJson IS NOT NULL AND CreatedAt < DATEADD(day, -30, SYSUTCDATETIME());
+                DELETE TOP (500) dbo.LoginRateLimits
+                WHERE UpdatedAt < DATEADD(day, -2, SYSUTCDATETIME());", conn);
+            await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }
+
+        internal async Task<bool> TryBeginLoginAttemptAsync(
+            string key,
+            int maxAttempts,
+            TimeSpan window,
+            TimeSpan lockDuration,
+            CancellationToken token)
+        {
+            string keyHash = HashKey(key);
+            DateTime now = DateTime.UtcNow;
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(IsolationLevel.Serializable, token).ConfigureAwait(false);
+            DateTime? windowStartedAt = null;
+            DateTime? lockedUntil = null;
+            int attempts = 0;
+            bool rowExists = false;
+            await using (var read = new SqlCommand(@"
+                SELECT WindowStartedAt, Attempts, LockedUntil
+                FROM dbo.LoginRateLimits WITH (UPDLOCK, HOLDLOCK)
+                WHERE KeyHash=@keyHash;", conn, tx))
+            {
+                read.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
+                await using var reader = await read.ExecuteReaderAsync(token).ConfigureAwait(false);
+                if (await reader.ReadAsync(token).ConfigureAwait(false))
+                {
+                    rowExists = true;
+                    windowStartedAt = reader.GetDateTime(0);
+                    attempts = reader.GetInt32(1);
+                    lockedUntil = reader.IsDBNull(2) ? null : reader.GetDateTime(2);
+                }
+            }
+
+            if (lockedUntil > now)
+            {
+                await tx.CommitAsync(token).ConfigureAwait(false);
+                return false;
+            }
+
+            bool reset = !windowStartedAt.HasValue ||
+                         lockedUntil.HasValue ||
+                         windowStartedAt.Value <= now - window;
+            if (reset)
+            {
+                windowStartedAt = now;
+                attempts = 0;
+                lockedUntil = null;
+            }
+
+            if (attempts >= maxAttempts)
+            {
+                DateTime lockUntil = now + lockDuration;
+                await using var lockCmd = new SqlCommand(@"
+                    UPDATE dbo.LoginRateLimits SET LockedUntil=@lockedUntil, UpdatedAt=@now
+                    WHERE KeyHash=@keyHash;", conn, tx);
+                lockCmd.Parameters.Add("@lockedUntil", SqlDbType.DateTime2).Value = lockUntil;
+                lockCmd.Parameters.Add("@now", SqlDbType.DateTime2).Value = now;
+                lockCmd.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
+                await lockCmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                await tx.CommitAsync(token).ConfigureAwait(false);
+                return false;
+            }
+
+            attempts++;
+            if (!rowExists)
+            {
+                await using var insert = new SqlCommand(@"
+                    INSERT dbo.LoginRateLimits(KeyHash, WindowStartedAt, Attempts, LockedUntil, UpdatedAt)
+                    VALUES(@keyHash, @windowStartedAt, @attempts, NULL, @now);", conn, tx);
+                insert.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
+                insert.Parameters.Add("@windowStartedAt", SqlDbType.DateTime2).Value = now;
+                insert.Parameters.Add("@attempts", SqlDbType.Int).Value = attempts;
+                insert.Parameters.Add("@now", SqlDbType.DateTime2).Value = now;
+                await insert.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+            else
+            {
+                DateTime startTime = windowStartedAt ?? now;
+                await using var update = new SqlCommand(@"
+                    UPDATE dbo.LoginRateLimits SET WindowStartedAt=@windowStartedAt, Attempts=@attempts,
+                        LockedUntil=NULL, UpdatedAt=@now
+                    WHERE KeyHash=@keyHash;", conn, tx);
+                update.Parameters.Add("@windowStartedAt", SqlDbType.DateTime2).Value = startTime;
+                update.Parameters.Add("@attempts", SqlDbType.Int).Value = attempts;
+                update.Parameters.Add("@now", SqlDbType.DateTime2).Value = now;
+                update.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
+                await update.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(token).ConfigureAwait(false);
+            return true;
+        }
+
+        internal async Task RecordFailedLoginAsync(
+            string key,
+            int maxAttempts,
+            TimeSpan lockDuration,
+            CancellationToken token)
+        {
+            string keyHash = HashKey(key);
+            DateTime now = DateTime.UtcNow;
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var cmd = new SqlCommand(@"
+                UPDATE dbo.LoginRateLimits
+                SET LockedUntil=CASE WHEN Attempts >= @maxAttempts THEN DATEADD(second, @lockSeconds, @now) ELSE LockedUntil END,
+                    UpdatedAt=@now
+                WHERE KeyHash=@keyHash;", conn);
+            cmd.Parameters.Add("@maxAttempts", SqlDbType.Int).Value = maxAttempts;
+            cmd.Parameters.Add("@lockSeconds", SqlDbType.Int).Value = checked((int)lockDuration.TotalSeconds);
+            cmd.Parameters.Add("@now", SqlDbType.DateTime2).Value = now;
+            cmd.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
+            if (await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false) != 1)
+                throw new InvalidOperationException("Login limiter state disappeared during authentication.");
+        }
+
+        internal async Task ReleaseLoginAttemptAsync(string key, CancellationToken token)
+        {
+            string keyHash = HashKey(key);
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var cmd = new SqlCommand(@"
+                UPDATE dbo.LoginRateLimits SET Attempts=CASE WHEN Attempts > 0 THEN Attempts - 1 ELSE 0 END,
+                    UpdatedAt=SYSUTCDATETIME()
+                WHERE KeyHash=@keyHash;", conn);
+            cmd.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
+            await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }
+
+        internal async Task ClearLoginAttemptsAsync(string key, CancellationToken token)
+        {
+            string keyHash = HashKey(key);
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var cmd = new SqlCommand("DELETE dbo.LoginRateLimits WHERE KeyHash=@keyHash;", conn);
+            cmd.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = keyHash;
             await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }
 

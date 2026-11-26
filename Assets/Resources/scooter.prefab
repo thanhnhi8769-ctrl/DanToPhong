@@ -135,7 +135,6 @@ GameObject:
   - component: {fileID: 43871892496580415}
   - component: {fileID: 2942607413128082378}
   - component: {fileID: 6503655027412933562}
-  - component: {fileID: 4653599809934117568}
   - component: {fileID: 3024410106219281540}
   - component: {fileID: 3268479911746001341}
   m_Layer: 3
@@ -279,29 +278,6 @@ SphereCollider:
   serializedVersion: 3
   m_Radius: 0.5
   m_Center: {x: 0, y: 0.5, z: 0}
---- !u!114 &4653599809934117568
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3386653257227138305}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: aa584fbee541324448dd18d8409c7a41, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: PhotonUnityNetworking::Photon.Pun.PhotonView
-  ObservedComponentsFoldoutOpen: 1
-  Group: 0
-  prefixField: -1
-  Synchronization: 3
-  OwnershipTransfer: 0
-  observableSearch: 2
-  ObservedComponents:
-  - {fileID: 3268479911746001341}
-  sceneViewId: 0
-  InstantiationId: 0
-  isRuntimeInstantiated: 0
 --- !u!114 &3024410106219281540
 MonoBehaviour:
   m_ObjectHideFlags: 0

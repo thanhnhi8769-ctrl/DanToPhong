@@ -1,0 +1,18 @@
+<mxfile host="app.diagrams.net" modified="2026-11-27T00:00:00.000Z" agent="DanToPhong" version="24.7.17" type="device">
+  <diagram id="stories" name="User story flows">
+    <mxGraphModel dx="1200" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/><mxCell id="1" parent="0"/>
+        <mxCell id="s1" value="STORY 1 — New player&#xa;Request OTP → Verify code&#xa;→ Create account" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="35" y="75" width="255" height="100" as="geometry"/></mxCell>
+        <mxCell id="s1end" value="Account stored in SQL&#xa;OTP single-use / 10 min" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="340" y="75" width="230" height="100" as="geometry"/></mxCell>
+        <mxCell id="s2" value="STORY 2 — Returning player&#xa;Login → Receive token&#xa;→ Launch Unity → Validate token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="35" y="255" width="255" height="105" as="geometry"/></mxCell>
+        <mxCell id="s2end" value="Solo game session&#xa;TLS TCP 9000; token not in args" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="340" y="255" width="230" height="105" as="geometry"/></mxCell>
+        <mxCell id="s3" value="STORY 3 — Play with a friend&#xa;Client A creates room; B joins&#xa;→ Multiplayer snapshots" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="35" y="445" width="255" height="110" as="geometry"/></mxCell>
+        <mxCell id="s3end" value="PARTIAL IMPLEMENTATION&#xa;TCP room/input/snapshot request-response&#xa;No broadcast or track authority yet" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="340" y="445" width="260" height="110" as="geometry"/></mxCell>
+        <mxCell id="e1" style="endArrow=block;html=1;" edge="1" parent="1" source="s1" target="s1end"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;" edge="1" parent="1" source="s2" target="s2end"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;dashed=1;" edge="1" parent="1" source="s3" target="s3end"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

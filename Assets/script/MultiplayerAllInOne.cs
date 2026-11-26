@@ -1,11 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using Photon.Pun;
-using Photon.Realtime;
-using Photon.Voice.PUN;
-using Photon.Voice.Unity;
-using ExitGames.Client.Photon;
 using System.Collections.Generic;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -13,10 +8,10 @@ using UnityEngine.InputSystem.UI;
 #endif
 
 [DisallowMultipleComponent]
-public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
+public class MultiplayerAllInOne : MonoBehaviour
 {
-    private const byte CHAT_EVENT = 77;
     private const int MAX_MESSAGES = 40;
+    private const float CHAT_POLL_INTERVAL = 1f;
 
     public static bool DangGoChat { get; private set; }
 
@@ -24,12 +19,6 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     public Font customFont;
     [Tooltip("Bật: vừa vào scene game là mở sẵn khung chat luôn.")]
     public bool moSanKhungChatKhiVaoGame = true;
-
-    [Header("Photon Voice")]
-    private PunVoiceClient voiceClient;
-    private Recorder recorder;
-    private GameObject speakerTemplate;
-    private bool voiceOn;
 
     [Header("UI - Runtime")]
     private Canvas canvas;
@@ -55,12 +44,14 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     private string trangThaiCuoi;
     private bool scrollDirty = false;
     private bool historyDirty = false;
+    private float nextChatPoll;
+    private bool pollingChat;
+    private long lastChatMessageId;
 
     private readonly Color hudGray = new Color(0.15f, 0.15f, 0.15f, 0.85f);
     private readonly Color hudPanel = new Color(0.08f, 0.08f, 0.10f, 0.94f);
     private readonly Color hudHeader = new Color(0.18f, 0.18f, 0.22f, 1f);
     private readonly Color hudInput = new Color(0.04f, 0.04f, 0.05f, 0.95f);
-    private readonly Color micActive = new Color(0.2f, 0.65f, 0.3f, 0.9f);
     private readonly Color white = new Color(0.95f, 0.95f, 0.95f, 1f);
     private readonly Color softText = new Color(0.7f, 0.75f, 0.8f, 1f);
 
@@ -110,7 +101,6 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         roundedSprite = TaoSpriteBoGoc(64, 14);
 
         TaoEventSystem();
-        TaoVoice();
         TaoCanvas();
         CapNhatTrangThaiPhong();
         CapNhatNutMic();
@@ -118,16 +108,8 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         ThemTinNhanHeThong("Hệ thống Chat đã sẵn sàng!");
     }
 
-    public override void OnEnable()
+    private void OnDisable()
     {
-        base.OnEnable();
-        PhotonNetwork.AddCallbackTarget(this);
-    }
-
-    public override void OnDisable()
-    {
-        base.OnDisable();
-        PhotonNetwork.RemoveCallbackTarget(this);
         DangGoChat = false;
     }
 
@@ -143,6 +125,9 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
     private void Update()
     {
+        if (!pollingChat && Time.unscaledTime >= nextChatPoll && !string.IsNullOrWhiteSpace(LauncherArgs.Room))
+            PollChatAsync();
+
         bool dangMo = chatPanel != null && chatPanel.activeSelf;
         bool dangGo = dangMo && inputField != null && inputField.isFocused;
         DangGoChat = dangGo;
@@ -225,94 +210,19 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 #endif
     }
 
-    private void TaoVoice()
-    {
-        voiceClient = FindFirstObjectByType<PunVoiceClient>();
-        if (voiceClient == null) voiceClient = gameObject.AddComponent<PunVoiceClient>();
-        voiceClient.UsePunAppSettings = true;
-        voiceClient.AutoConnectAndJoin = true;
-
-        recorder = FindFirstObjectByType<Recorder>();
-        if (recorder == null) recorder = gameObject.AddComponent<Recorder>();
-        recorder.SourceType = Recorder.InputSourceType.Microphone;
-        // Không thu micro liên tục khi chưa bật MIC (đỡ tốn CPU + rác bộ nhớ)
-        recorder.RecordWhenJoined = false;
-        recorder.RecordingEnabled = false;
-        recorder.TransmitEnabled = false;
-
-        recorder.SamplingRate = POpusCodec.Enums.SamplingRate.Sampling48000;
-
-        voiceClient.PrimaryRecorder = recorder;
-        voiceClient.AddRecorder(recorder);
-
-        speakerTemplate = new GameObject("RuntimeSpeakerTemplate");
-        speakerTemplate.transform.SetParent(transform, false);
-        AudioSource source = speakerTemplate.AddComponent<AudioSource>();
-        source.playOnAwake = false;
-        source.spatialBlend = 0f;
-        speakerTemplate.AddComponent<Speaker>();
-
-        voiceClient.SpeakerPrefab = speakerTemplate;
-        speakerTemplate.hideFlags = HideFlags.HideInHierarchy;
-    }
-
     private void ToggleMic()
     {
-        if (!PhotonNetwork.InRoom) { ThemTinNhanHeThong("Bạn cần vào phòng trước khi bật micro."); return; }
-        if (recorder == null) { ThemTinNhanHeThong("Không tìm thấy thiết bị ghi âm."); return; }
-
-        voiceOn = !voiceOn;
-        recorder.RecordingEnabled = voiceOn;
-        recorder.TransmitEnabled = voiceOn;
-
-        CapNhatNutMic();
-        ThemTinNhanHeThong(voiceOn ? "Bạn đã bật micro." : "Bạn đã tắt micro.");
+        ThemTinNhanHeThong("Voice chat is not available in this TCP build.");
     }
 
     private void CapNhatNutMic()
     {
-        if (micText != null) micText.text = voiceOn ? TEXT_MIC_ON : TEXT_MIC_OFF;
+        if (micText != null) micText.text = TEXT_MIC_OFF;
         if (micButton != null)
         {
             Image image = micButton.GetComponent<Image>();
-            if (image != null) image.color = voiceOn ? micActive : hudGray;
+            if (image != null) image.color = hudGray;
         }
-    }
-
-    public override void OnJoinedRoom()
-    {
-        voiceOn = false;
-        if (recorder != null) recorder.TransmitEnabled = false;
-        CapNhatNutMic();
-        CapNhatTrangThaiPhong();
-        ThemTinNhanHeThong("Đã kết nối vào phòng.");
-    }
-
-    public override void OnLeftRoom()
-    {
-        voiceOn = false;
-        if (recorder != null) recorder.TransmitEnabled = false;
-        CapNhatNutMic();
-        CapNhatTrangThaiPhong();
-        ThemTinNhanHeThong("Bạn đã rời phòng.");
-    }
-
-    public override void OnPlayerEnteredRoom(Player newPlayer)
-    {
-        if (newPlayer != null) ThemTinNhanHeThong(TenNguoiChoi(newPlayer) + " đã tham gia.");
-        CapNhatTrangThaiPhong();
-    }
-
-    public override void OnPlayerLeftRoom(Player otherPlayer)
-    {
-        if (otherPlayer != null) ThemTinNhanHeThong(TenNguoiChoi(otherPlayer) + " đã rời đi.");
-        CapNhatTrangThaiPhong();
-    }
-
-    private static string TenNguoiChoi(Player p)
-    {
-        if (p == null) return "Người chơi";
-        return string.IsNullOrEmpty(p.NickName) ? "Người chơi #" + p.ActorNumber : p.NickName;
     }
 
     // Chỉ gọi khi có sự kiện phòng (vào / ra / có người vào / ra), không gọi mỗi frame
@@ -320,9 +230,9 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     {
         if (roomStatusText == null) return;
 
-        string trangThai = PhotonNetwork.InRoom
-            ? "TRONG PHÒNG: " + PhotonNetwork.CurrentRoom.PlayerCount
-            : "CHƯA KẾT NỐI";
+        string trangThai = !string.IsNullOrWhiteSpace(LauncherArgs.Room)
+            ? "TCP ROOM: " + LauncherArgs.Room
+            : "SOLO";
 
         if (trangThai == trangThaiCuoi) return;
 
@@ -487,7 +397,7 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         sendButton.onClick.AddListener(GuiTinNhan);
 
         // Chơi 1 người thì không cần mở sẵn khung chat (đỡ che giao diện); có từ 2 người trở lên mới tự mở
-        bool coNhieuNguoi = PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.PlayerCount > 1;
+        bool coNhieuNguoi = !string.IsNullOrWhiteSpace(LauncherArgs.Room);
         chatPanel.SetActive(moSanKhungChatKhiVaoGame && coNhieuNguoi);
     }
 
@@ -495,9 +405,9 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     {
         if (inputField == null || string.IsNullOrWhiteSpace(inputField.text)) return;
 
-        if (!PhotonNetwork.InRoom)
+        if (string.IsNullOrWhiteSpace(LauncherArgs.Room))
         {
-            ThemTinNhanHeThong("Bạn chưa kết nối vào phòng nên không thể gửi tin nhắn.");
+            ThemTinNhanHeThong("Join a TCP room before sending a chat message.");
             inputField.text = "";
             FocusOChat();
             return;
@@ -505,27 +415,68 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
 
         string msg = inputField.text.Trim();
         if (msg.Length > 120) msg = msg.Substring(0, 120);
-
-        object[] data = { TenNguoiChoi(PhotonNetwork.LocalPlayer), msg };
-        PhotonNetwork.RaiseEvent(CHAT_EVENT, data, new RaiseEventOptions { Receivers = ReceiverGroup.All }, SendOptions.SendReliable);
-
         inputField.text = "";
         FocusOChat();
+        SendChatAsync(msg);
     }
 
-    public void OnEvent(EventData photonEvent)
+    private async void SendChatAsync(string message)
     {
-        if (photonEvent.Code != CHAT_EVENT) return;
-        object[] data = photonEvent.CustomData as object[];
-        if (data != null && data.Length >= 2) ThemTinNhan(data[0] as string, data[1] as string, false);
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req
+            {
+                command = "CHAT_SEND",
+                chatMessage = message
+            });
+            if (response == null || !response.success)
+                ThemTinNhanHeThong(response != null ? response.message : "Chat send failed.");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[TCP chat] " + ex.GetType().Name);
+            ThemTinNhanHeThong("Chat send failed.");
+        }
+    }
+
+    private async void PollChatAsync()
+    {
+        pollingChat = true;
+        nextChatPoll = Time.unscaledTime + CHAT_POLL_INTERVAL;
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req
+            {
+                command = "CHAT_POLL",
+                afterMessageId = lastChatMessageId
+            });
+            if (response == null || !response.success || response.chatMessages == null)
+                return;
+
+            foreach (RoomChatMessageDto message in response.chatMessages)
+            {
+                if (message == null || message.messageId <= lastChatMessageId)
+                    continue;
+                lastChatMessageId = message.messageId;
+                ThemTinNhan(message.username, message.message, false);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[TCP chat] " + ex.GetType().Name);
+        }
+        finally
+        {
+            pollingChat = false;
+        }
     }
 
     private void ThemTinNhanHeThong(string message) => ThemTinNhan("HỆ THỐNG", message, true);
 
     private void ThemTinNhan(string playerName, string message, bool systemMessage)
     {
-        playerName = (playerName ?? "Player").Replace("\n", " ");
-        message = (message ?? "").Replace("\n", " ");
+        playerName = (playerName ?? "Player").Replace("\n", " ").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        message = (message ?? "").Replace("\n", " ").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
         string line = systemMessage
             ? $"<color=#AAAAAA><i>● {playerName}: {message}</i></color>"
@@ -659,8 +610,6 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
     private void OnDestroy()
     {
         DangGoChat = false;
-        if (recorder != null) { recorder.TransmitEnabled = false; recorder.RecordingEnabled = false; }
-        if (speakerTemplate != null) Destroy(speakerTemplate);
         if (roundedSprite != null) Destroy(roundedSprite);
         if (roundedTexture != null) Destroy(roundedTexture);
     }

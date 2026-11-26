@@ -1,6 +1,4 @@
 using System.Collections.Generic;
-using Photon.Pun;
-using Photon.Realtime;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -9,48 +7,37 @@ using UnityEngine.UI;
 
 // Boot tạo 1 object chứa 2 component này (DontDestroyOnLoad), chỉ khi chạy từ launcher.
 
+public class ServerHeartbeat : MonoBehaviour
+{
+    private const float IntervalSeconds = 20f;
+    private float nextPing;
+    private bool pending;
+
+    private async void Update()
+    {
+        if (pending || Time.unscaledTime < nextPing || !ServerClient.Ready) return;
+        nextPing = Time.unscaledTime + IntervalSeconds;
+        pending = true;
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req { command = "PING" });
+            if (response == null || !response.success || response.message != "PONG")
+                Debug.LogWarning("[ServerHeartbeat] Server did not acknowledge PING.");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[ServerHeartbeat] " + ex.Message);
+        }
+        finally
+        {
+            pending = false;
+        }
+    }
+}
+
 // Chủ phòng báo trạng thái phòng lên server (mỗi khi đổi, và 8s/lần để giữ phòng còn sống).
 public class RoomReporter : MonoBehaviour
 {
-    private string lastCode, lastSig;
-    private float lastSent, nextCheck;
-
-    private void Update()
-    {
-        if (!ServerClient.Ready) return;
-
-        // Chỉ kiểm tra 2 lần/giây: tránh nối chuỗi "sig" mỗi frame (sinh rác GC liên tục khi ở trong phòng)
-        if (Time.unscaledTime < nextCheck) return;
-        nextCheck = Time.unscaledTime + 0.5f;
-
-        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient)
-        {
-            Room r = PhotonNetwork.CurrentRoom;
-            bool racing = !r.IsOpen;
-            string sig = r.Name + "|" + r.PlayerCount + "|" + r.MaxPlayers + "|" + racing;
-
-            if (sig != lastSig || Time.unscaledTime - lastSent > 8f)
-            {
-                lastSig = sig;
-                lastSent = Time.unscaledTime;
-                lastCode = r.Name;
-                ServerClient.Fire(new Req
-                {
-                    command = "CAPNHATPHONG",
-                    roomId = r.Name,
-                    playerCount = r.PlayerCount,
-                    maxPlayers = r.MaxPlayers,
-                    isRacing = racing
-                });
-            }
-        }
-        else if (lastCode != null)
-        {
-            ServerClient.Fire(new Req { command = "XOAPHONG", roomId = lastCode });
-            lastCode = null;
-            lastSig = null;
-        }
-    }
 }
 
 // Nhận lời mời + làm mới kho/xu bằng 1 lệnh LAYTRANGTHAI. Tần suất hỏi tùy theo người chơi đang làm gì.
@@ -89,8 +76,8 @@ public class InviteListener : MonoBehaviour
 
     private static float KhoangPoll()
     {
-        if (!PhotonNetwork.InRoom) return POLL_NGOAI_PHONG;
-        return PhotonNetwork.CurrentRoom.IsOpen ? POLL_TRONG_PHONG : POLL_DANG_DUA;
+        if (string.IsNullOrWhiteSpace(LauncherArgs.Room)) return POLL_NGOAI_PHONG;
+        return POLL_TRONG_PHONG;
     }
 
     private async void PollAsync()
@@ -99,7 +86,7 @@ public class InviteListener : MonoBehaviour
         try
         {
             // 1 request: kho/xu (tự cập nhật ServerClient.Cache) + lời mời mới (chỉ khi chưa ở trong phòng)
-            Resp r = await ServerClient.LayTrangThai(PhotonNetwork.InRoom);
+            Resp r = await ServerClient.LayTrangThai(!string.IsNullOrWhiteSpace(LauncherArgs.Room));
             if (r != null && r.success && r.invites != null)
                 foreach (InviteDto i in r.invites) queue.Enqueue(i);
         }
@@ -116,13 +103,13 @@ public class InviteListener : MonoBehaviour
             PollAsync();
         }
 
-        if (current == null && queue.Count > 0 && !PhotonNetwork.InRoom)
+        if (current == null && queue.Count > 0 && string.IsNullOrWhiteSpace(LauncherArgs.Room))
         {
             current = queue.Dequeue();
             shownAt = Time.unscaledTime;
         }
 
-        if (current != null && (PhotonNetwork.InRoom || Time.unscaledTime - shownAt > 25f))
+        if (current != null && (!string.IsNullOrWhiteSpace(LauncherArgs.Room) || Time.unscaledTime - shownAt > 25f))
             current = null;
     }
 
@@ -136,7 +123,7 @@ public class InviteListener : MonoBehaviour
         }
         else
         {
-            LauncherArgs.Mode = "room";
+            LauncherArgs.Mode = "multiplayer";
             LauncherArgs.Room = code;
             SceneManager.LoadScene(sceneLobby);
         }
@@ -272,28 +259,22 @@ public class LobbyInviteUI : MonoBehaviour
     {
         if (root == null) return;
 
-        bool inRoom = PhotonNetwork.InRoom;
-
-        // Phòng đã đóng hoặc đang đếm ngược (host + client đều thấy qua room property) -> ẩn.
-        // Đếm ngược bị hủy (phòng mở lại, DemBatDau bị xóa) -> tự hiện lại.
-        bool dangVaoGame = inRoom
-            && (!PhotonNetwork.CurrentRoom.IsOpen
-                || PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey("DemBatDau"));
-
-        bool shouldShow = inRoom && !dangVaoGame;
+        bool inRoom = !string.IsNullOrWhiteSpace(LauncherArgs.Room);
+        bool inLobby = SceneManager.GetActiveScene().name.IndexOf("lobby", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        bool shouldShow = inRoom && inLobby;
         if (root.activeSelf != shouldShow)
             root.SetActive(shouldShow);
     }
 
     private async void SendInvite(string key)
     {
-        if (!PhotonNetwork.InRoom || sending || input == null) return;
+        if (string.IsNullOrWhiteSpace(LauncherArgs.Room) || sending || input == null) return;
         key = (key ?? "").Trim();
         if (key.Length == 0) return;
 
         sending = true;
         status.text = Txt.Sending;
-        Resp r = await ServerClient.CallAsync(new Req { command = "MOIBAN", targetId = key, roomId = PhotonNetwork.CurrentRoom.Name });
+        Resp r = await ServerClient.CallAsync(new Req { command = "MOIBAN", targetId = key, roomId = LauncherArgs.Room });
         sending = false;
         if (this == null) return;
 

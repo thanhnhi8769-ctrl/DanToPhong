@@ -75,7 +75,7 @@ namespace UI.Services
                 UseShellExecute = false
             };
             psi.ArgumentList.Add("--user"); psi.ArgumentList.Add(safeUser);
-            psi.ArgumentList.Add("--token"); psi.ArgumentList.Add(token);
+            psi.Environment["DANTOPHONG_SESSION_TOKEN"] = token;
             psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host);
             psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
             psi.ArgumentList.Add("--tls");

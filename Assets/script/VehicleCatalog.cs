@@ -1,8 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-using Photon.Pun;
-using Photon.Realtime;
-using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 public static class VehicleCatalog
 {
@@ -111,11 +108,8 @@ public static class VehicleCatalog
         PlayerPrefs.SetInt(KeyBackup, index);
         PlayerPrefs.Save();
 
-        if (PhotonNetwork.LocalPlayer != null)
-        {
-            Hashtable properties = new Hashtable { ["Scooter"] = index };
-            PhotonNetwork.LocalPlayer.SetCustomProperties(properties);
-        }
+        if (ServerClient.Ready)
+            ServerClient.Fire(new Req { command = "TRANGBI", category = "Scooter", itemIndex = index });
 
         return true;
     }
@@ -135,14 +129,6 @@ public static class VehicleCatalog
 
         selectedIndexTrongPhien = ketQua;
         return ketQua;
-    }
-
-    public static int GetPlayerVehicleIndex(Player player)
-    {
-        if (player == null) return 0;
-        if (player.CustomProperties.TryGetValue("Scooter", out object value) && value != null)
-            return Mathf.Clamp(System.Convert.ToInt32(value), 0, Count - 1);
-        return 0;
     }
 
     public static GameObject CreatePreviewModel(int index)
