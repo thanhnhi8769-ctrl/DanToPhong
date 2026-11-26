@@ -257,7 +257,10 @@ public class GameNetworkManager : MonoBehaviour
                 };
                 PhotonNetwork.LocalPlayer.SetCustomProperties(trangBi);
             }
-            catch { }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[NETWORK] Could not sync player equipment properties: {ex.Message}");
+            }
 
             object[] dataKhoiTao = new object[] { indexXe };
             xe = PhotonNetwork.Instantiate(tenPrefabXeGoc, viTriSpawn, gocSpawn, 0, dataKhoiTao);
