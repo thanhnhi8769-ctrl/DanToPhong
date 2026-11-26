@@ -12,6 +12,10 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | TC06 | DPI: so sánh plaintext/TLS bằng Wireshark | BLOCKED — TLS chưa hoạt động; không tạo capture chứa dữ liệu nhạy cảm | Chưa có |
 | TC07 | Mất mạng, reconnect và server restart | BLOCKED — không có quyền quản trị từ xa khả dụng (SSM không đăng ký); không thể deploy/cấu hình certificate | Chưa có |
 | TC08 | Build Unity Windows x64 từ các scene đang bật trong Build Settings | PASS — player build hoàn tất; chưa chạy game hoặc xác minh kết nối server | [TC08-unity-build.log](TC08-unity-build.log) |
+| TC09 | Framing TCP: đọc phân mảnh, frame nối liền, EOF, length sai/truncated | PASS — smoke test in-memory của MessageFramer | [TC09-framing-smoke.log](TC09-framing-smoke.log) |
+| TC10 | 10–50 client, slow sender, abort và malformed traffic tới server thật | BLOCKED — cần server chạy với DB/config runtime | Chưa có |
+| TC11 | TCP 3-way handshake và FIN tới cổng 9000 | BLOCKED — chưa capture server thật; không tạo pcap giả | Chưa có |
+| TC12 | TLS handshake/cipher và so sánh plaintext/TLS bằng Wireshark | BLOCKED — TC05 hiện FAIL; cần certificate/deployment TLS hợp lệ | Chưa có |
 
 ### Phân tích TC05
 
@@ -22,3 +26,14 @@ Các ca BLOCKED chưa được thực hiện; không xem là PASS và không có
 ### TC08 — Unity Windows x64 build
 
 Build bằng Unity Editor 6000.3.28f1 qua `BuildPipeline.BuildPlayer` với target Windows x64. Player được tạo trong thư mục `BuildGameRelease`, vốn bị `.gitignore` loại trừ. Script compilation hoàn tất; còn hai cảnh báo `CS0414` về field chưa dùng trong `HelpSystem` và `scooter`. Build thành công không chứng minh game khởi chạy, gameplay hoạt động hoặc server/Photon có thể kết nối; các kiểm thử runtime này vẫn cần thực hiện riêng.
+
+### Phase 4B — kiểm thử giao thức mạng
+
+Chạy kiểm thử framer local bằng lệnh trong [protocol.md](../protocol.md). Smoke
+test chỉ kiểm tra `MessageFramer`, không thay thế tải server thật. TC10–TC12
+chưa thực hiện; không có file `.pcapng`/ảnh vì endpoint, DB và TLS runtime chưa
+sẵn sàng. Khi capture thật, dùng tài khoản/dữ liệu giả và redact IP, email,
+OTP, token trước khi lưu.
+
+Đối với TC11/TC12, xem checklist filter, tên file và nội dung caption trong
+[protocol.md](../protocol.md#7-checklist-capture-wireshark-chua-co-capture-trong-repo).

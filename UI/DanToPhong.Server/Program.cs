@@ -33,6 +33,13 @@ namespace DanToPhong.Server
         private static readonly Regex MapRegex = new(@"^[A-Za-z0-9_ \-]{1,50}$", RegexOptions.Compiled);
 
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ClientSession> ActiveSessions = new();
+        private const int MaxConcurrentClients = 128;
+        private static readonly SemaphoreSlim ClientCapacity = new(MaxConcurrentClients, MaxConcurrentClients);
+        private const int MaxLoginAttemptsPerWindow = 5;
+        private const int MaxLoginRateLimitEntries = 10000;
+        private static readonly long LoginAttemptWindowMilliseconds = (long)TimeSpan.FromMinutes(15).TotalMilliseconds;
+        private static readonly object LoginAttemptsGate = new();
+        private static readonly Dictionary<string, (long WindowStartedAt, int Attempts)> LoginAttempts = new(StringComparer.OrdinalIgnoreCase);
 
         private static X509Certificate2 LoadServerCertificate()
         {
@@ -119,6 +126,13 @@ namespace DanToPhong.Server
                     TcpClient client = await listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
                     string remote = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
 
+                    if (!ClientCapacity.Wait(0))
+                    {
+                        Console.WriteLine("[TCP] Connection rejected: client capacity reached.");
+                        client.Dispose();
+                        continue;
+                    }
+
                     var session = new ClientSession
                     {
                         Client = client,
@@ -127,7 +141,7 @@ namespace DanToPhong.Server
                     ActiveSessions[session.SessionId] = session;
 
                     Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
-                    _ = Task.Run(() => HandleClientAsync(session, repo, state, serverCertificate, cts.Token), cts.Token);
+                    _ = Task.Run(() => HandleClientAsync(session, repo, state, serverCertificate, cts.Token));
                 }
             }
             catch (OperationCanceledException)
@@ -136,6 +150,12 @@ namespace DanToPhong.Server
             finally
             {
                 listener.Stop();
+                ClientSession[] sessions = ActiveSessions.Values.ToArray();
+                foreach (ClientSession active in sessions)
+                {
+                    try { active.Client.Dispose(); } catch { }
+                }
+                await Task.WhenAll(sessions.Select(session => session.Completion.Task)).ConfigureAwait(false);
                 Console.WriteLine("[TCP] Server stopped.");
             }
         }
@@ -147,11 +167,12 @@ namespace DanToPhong.Server
             X509Certificate2? serverCertificate,
             CancellationToken token)
         {
-            Stream stream = session.Client.GetStream();
+            Stream? stream = null;
             SslStream? tlsStream = null;
 
             try
             {
+                stream = session.Client.GetStream();
                 if (UseTls)
                 {
                     tlsStream = new SslStream(stream, leaveInnerStreamOpen: false);
@@ -190,22 +211,33 @@ namespace DanToPhong.Server
             catch (OperationCanceledException)
             {
             }
+            catch (Exception) when (token.IsCancellationRequested)
+            {
+            }
             catch (Exception ex)
             {
                 Console.WriteLine($"[{session.SessionId}] Session error: {ex.Message}");
             }
             finally
             {
-                Console.WriteLine($"[{session.SessionId}] Disconnected ({session.AuthenticatedUsername ?? "guest"})");
-                ActiveSessions.TryRemove(session.SessionId, out _);
-                if (session.AuthenticatedUserId.HasValue &&
-                    !ActiveSessions.Values.Any(s => s.AuthenticatedUserId == session.AuthenticatedUserId))
-                    RoomRegistry.RemoveByOwner(session.AuthenticatedUserId.Value);
-                try { tlsStream?.Dispose(); } catch { }
-                try { stream.Dispose(); } catch { }
-                try { session.Client.Close(); } catch { }
-                try { session.Client.Dispose(); } catch { }
-                session.SendLock.Dispose();
+                try
+                {
+                    Console.WriteLine($"[{session.SessionId}] Disconnected ({session.AuthenticatedUsername ?? "guest"})");
+                    if (session.AuthenticatedUserId.HasValue &&
+                        !ActiveSessions.Values.Any(s => s != session && s.AuthenticatedUserId == session.AuthenticatedUserId))
+                        RoomRegistry.RemoveByOwner(session.AuthenticatedUserId.Value);
+                }
+                finally
+                {
+                    try { tlsStream?.Dispose(); } catch { }
+                    try { stream?.Dispose(); } catch { }
+                    try { session.Client.Close(); } catch { }
+                    try { session.Client.Dispose(); } catch { }
+                    try { session.SendLock.Dispose(); } catch { }
+                    session.Completion.TrySetResult(true);
+                    ActiveSessions.TryRemove(session.SessionId, out _);
+                    ClientCapacity.Release();
+                }
             }
         }
 
@@ -441,7 +473,29 @@ namespace DanToPhong.Server
                 };
             }
 
-            UserInfoDto? user = await repo.DangNhapAsync(username, password, token).ConfigureAwait(false);
+            string remoteAddress = session.Client.Client.RemoteEndPoint is IPEndPoint endpoint
+                ? endpoint.Address.ToString()
+                : "unknown";
+            if (!TryBeginLoginAttempt(remoteAddress))
+            {
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.AuthFailed,
+                    Message = "Invalid username or password."
+                };
+            }
+
+            UserInfoDto? user;
+            try
+            {
+                user = await repo.DangNhapAsync(username, password, token).ConfigureAwait(false);
+            }
+            catch
+            {
+                ReleaseLoginAttempt(remoteAddress);
+                throw;
+            }
             if (user == null)
             {
                 return new ResponsePacket
@@ -451,6 +505,8 @@ namespace DanToPhong.Server
                     Message = "Invalid username or password."
                 };
             }
+
+            ClearLoginAttempts(remoteAddress);
 
             // Chỉ lưu hash của token; game nhận token gốc đúng một lần ở response.
             string authToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
@@ -467,6 +523,64 @@ namespace DanToPhong.Server
                 User = user,
                 Token = authToken
             };
+        }
+
+        private static bool TryBeginLoginAttempt(string remoteAddress)
+        {
+            long now = Environment.TickCount64;
+            lock (LoginAttemptsGate)
+            {
+                if (LoginAttempts.TryGetValue(remoteAddress, out var current))
+                {
+                    if (now - current.WindowStartedAt < LoginAttemptWindowMilliseconds)
+                    {
+                        if (current.Attempts >= MaxLoginAttemptsPerWindow)
+                            return false;
+
+                        LoginAttempts[remoteAddress] = (current.WindowStartedAt, current.Attempts + 1);
+                        return true;
+                    }
+
+                    LoginAttempts.Remove(remoteAddress);
+                }
+
+                if (LoginAttempts.Count >= MaxLoginRateLimitEntries)
+                {
+                    foreach (string key in LoginAttempts
+                        .Where(entry => now - entry.Value.WindowStartedAt >= LoginAttemptWindowMilliseconds)
+                        .Select(entry => entry.Key)
+                        .ToArray())
+                    {
+                        LoginAttempts.Remove(key);
+                    }
+
+                    if (LoginAttempts.Count >= MaxLoginRateLimitEntries)
+                        return false;
+                }
+
+                LoginAttempts[remoteAddress] = (now, 1);
+                return true;
+            }
+        }
+
+        private static void ClearLoginAttempts(string remoteAddress)
+        {
+            lock (LoginAttemptsGate)
+                LoginAttempts.Remove(remoteAddress);
+        }
+
+        private static void ReleaseLoginAttempt(string remoteAddress)
+        {
+            lock (LoginAttemptsGate)
+            {
+                if (!LoginAttempts.TryGetValue(remoteAddress, out var current))
+                    return;
+
+                if (current.Attempts <= 1)
+                    LoginAttempts.Remove(remoteAddress);
+                else
+                    LoginAttempts[remoteAddress] = (current.WindowStartedAt, current.Attempts - 1);
+            }
         }
 
         private static async Task<ResponsePacket> HandleAuthTokenAsync(ClientSession session, RequestPacket req, ServerStateRepository state, CancellationToken token)

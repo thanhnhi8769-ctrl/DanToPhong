@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace DanToPhong.Server
 {
@@ -14,5 +15,6 @@ namespace DanToPhong.Server
         public string? AuthToken { get; set; }
         public DateTime ConnectedAt { get; } = DateTime.Now;
         public SemaphoreSlim SendLock { get; } = new(1, 1);
+        public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

@@ -27,6 +27,7 @@ public class Req
 
 public static class ServerClient
 {
+    private const int MaxPacketBytes = 64 * 1024;
     private static TcpClient tcp;
     private static Stream ns;
     private static readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
@@ -271,6 +272,8 @@ public static class ServerClient
     {
 
         byte[] body = Encoding.UTF8.GetBytes(JsonUtility.ToJson(req));
+        if (body.Length <= 0 || body.Length > MaxPacketBytes)
+            throw new InvalidDataException("Request packet exceeds the 64 KiB protocol limit.");
         byte[] head = new byte[4];
         BinaryPrimitives.WriteInt32BigEndian(head, body.Length);
         await ns.WriteAsync(head, 0, 4);
@@ -278,9 +281,10 @@ public static class ServerClient
 
         byte[] lb = await ReadN(4);
         int len = BinaryPrimitives.ReadInt32BigEndian(lb);
-        if (len <= 0 || len > 256 * 1024) throw new Exception("Bad packet length " + len);
+        if (len <= 0 || len > MaxPacketBytes) throw new InvalidDataException("Response packet length is outside the 64 KiB protocol limit.");
         byte[] rb = await ReadN(len);
         Resp resp = JsonUtility.FromJson<Resp>(Encoding.UTF8.GetString(rb));
+        if (resp == null) throw new InvalidDataException("Server response is not a valid JSON packet.");
 
         bool doi = false;
         if (!closed && CoKho(resp))

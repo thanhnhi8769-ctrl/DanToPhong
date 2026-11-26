@@ -4,7 +4,7 @@ Objective: Build the configured Unity project as a Windows x64 player.
 Unity Editor: 6000.3.28f1
 Build method: BuildPipeline.BuildPlayer via BuildWindowsPlayer.BuildWindows64Release
 Target: StandaloneWindows64
-Result: PASS — build script reported a successful player build; executable and player data were created under the ignored BuildGameRelease directory.
+Result: PASS — rebuilt after aligning Unity TCP frame validation to the shared 64 KiB limit; build script reported a successful player build under the ignored BuildGameRelease directory.
 Compilation warnings: CS0414 for unused fields HelpSystem.daTaoNutXemThem and scooter.batMoiMeshCuaMau.
 Limit: This verifies compilation and packaging only; the player was not launched and gameplay, server connectivity, Photon, TLS, and two-machine behavior were not tested.
 Redaction: Local paths, host/IP, account data, and credentials omitted.
