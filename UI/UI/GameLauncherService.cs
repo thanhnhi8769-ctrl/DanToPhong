@@ -77,6 +77,8 @@ namespace UI.Services
             psi.ArgumentList.Add("--token"); psi.ArgumentList.Add(token);
             psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host);
             psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
+            psi.ArgumentList.Add("--tls");
+            psi.ArgumentList.Add(string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase) ? "true" : "false");
             psi.ArgumentList.Add("--mode"); psi.ArgumentList.Add(safeMode);
             if (!string.IsNullOrWhiteSpace(roomId))
             {

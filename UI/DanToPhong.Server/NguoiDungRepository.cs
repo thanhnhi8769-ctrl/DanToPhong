@@ -302,6 +302,118 @@ namespace DanToPhong.Server
             return (false, ErrorCodes.InsufficientCoins, "Số xu hiện tại không đủ.", user);
         }
 
+        internal async Task<ResponsePacket> CongTruXuTrongGiaoDichAsync(
+            SqlConnection conn, SqlTransaction tx, int userId, int delta, CancellationToken token)
+        {
+            await using var update = new SqlCommand(@"
+                UPDATE dbo.NguoiDung SET Coins=Coins+@delta
+                WHERE UserId=@userId AND Coins+@delta>=0;", conn, tx);
+            update.Parameters.Add("@delta", SqlDbType.Int).Value = delta;
+            update.Parameters.Add("@userId", SqlDbType.Int).Value = userId;
+            int affected = await update.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+
+            bool exists = affected > 0;
+            if (!exists)
+            {
+                await using var check = new SqlCommand("SELECT COUNT(1) FROM dbo.NguoiDung WHERE UserId=@userId;", conn, tx);
+                check.Parameters.Add("@userId", SqlDbType.Int).Value = userId;
+                exists = Convert.ToInt32(await check.ExecuteScalarAsync(token).ConfigureAwait(false)) > 0;
+            }
+
+            InventoryDto? inventory = exists
+                ? await LayKhoTrongGiaoDichAsync(conn, tx, userId, token).ConfigureAwait(false)
+                : null;
+            return new ResponsePacket
+            {
+                Success = affected > 0,
+                Code = affected > 0 ? ErrorCodes.Ok : exists ? ErrorCodes.InsufficientCoins : ErrorCodes.AuthFailed,
+                Message = affected > 0 ? "Đã cập nhật số xu." : exists ? "Số xu hiện tại không đủ." : "Không tìm thấy tài khoản.",
+                Inventory = inventory
+            };
+        }
+
+        internal async Task<ResponsePacket> MuaTrongGiaoDichAsync(
+            SqlConnection conn, SqlTransaction tx, int userId, string category, int itemIndex, int price, CancellationToken token)
+        {
+            int? coins = null;
+            await using (var read = new SqlCommand("SELECT Coins FROM dbo.NguoiDung WITH (UPDLOCK, ROWLOCK) WHERE UserId=@userId;", conn, tx))
+            {
+                read.Parameters.Add("@userId", SqlDbType.Int).Value = userId;
+                object? value = await read.ExecuteScalarAsync(token).ConfigureAwait(false);
+                if (value != null && value != DBNull.Value) coins = Convert.ToInt32(value);
+            }
+
+            bool alreadyOwned = false;
+            if (coins.HasValue)
+            {
+                await using var owned = new SqlCommand(@"
+                    SELECT COUNT(1) FROM dbo.VatPham
+                    WHERE UserId=@userId AND Category=@category AND ItemIndex=@itemIndex;", conn, tx);
+                owned.Parameters.Add("@userId", SqlDbType.Int).Value = userId;
+                owned.Parameters.Add("@category", SqlDbType.NVarChar, 30).Value = category;
+                owned.Parameters.Add("@itemIndex", SqlDbType.Int).Value = itemIndex;
+                alreadyOwned = Convert.ToInt32(await owned.ExecuteScalarAsync(token).ConfigureAwait(false)) > 0;
+            }
+
+            bool success = coins.HasValue && !alreadyOwned && coins.Value >= price;
+            if (success)
+            {
+                await using var purchase = new SqlCommand(@"
+                    UPDATE dbo.NguoiDung SET Coins=Coins-@price WHERE UserId=@userId;
+                    INSERT dbo.VatPham(UserId,Category,ItemIndex,IsEquipped) VALUES(@userId,@category,@itemIndex,0);", conn, tx);
+                purchase.Parameters.Add("@userId", SqlDbType.Int).Value = userId;
+                purchase.Parameters.Add("@category", SqlDbType.NVarChar, 30).Value = category;
+                purchase.Parameters.Add("@itemIndex", SqlDbType.Int).Value = itemIndex;
+                purchase.Parameters.Add("@price", SqlDbType.Int).Value = price;
+                await purchase.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+
+            InventoryDto? inventory = coins.HasValue
+                ? await LayKhoTrongGiaoDichAsync(conn, tx, userId, token).ConfigureAwait(false)
+                : null;
+            string code = success ? ErrorCodes.Ok : coins.HasValue && !alreadyOwned && coins.Value < price
+                ? ErrorCodes.InsufficientCoins : ErrorCodes.InvalidInput;
+            return new ResponsePacket
+            {
+                Success = success,
+                Code = code,
+                Message = success ? "Purchased." : "Purchase failed.",
+                Inventory = inventory
+            };
+        }
+
+        internal void XoaCacheKhoSauGiaoDich(int userId) => XoaCacheKho(userId);
+
+        private static async Task<InventoryDto> LayKhoTrongGiaoDichAsync(
+            SqlConnection conn, SqlTransaction tx, int userId, CancellationToken token)
+        {
+            var inventory = new InventoryDto();
+            await using var command = new SqlCommand(@"
+                SET NOCOUNT ON;
+                IF NOT EXISTS (SELECT 1 FROM dbo.VatPham WHERE UserId=@userId AND Category='Scooter' AND ItemIndex=0)
+                    INSERT dbo.VatPham(UserId,Category,ItemIndex,IsEquipped) VALUES(@userId,'Scooter',0,1);
+                SELECT Coins, SelectedMap FROM dbo.NguoiDung WHERE UserId=@userId;
+                SELECT Category, ItemIndex, IsEquipped FROM dbo.VatPham WHERE UserId=@userId;", conn, tx);
+            command.Parameters.Add("@userId", SqlDbType.Int).Value = userId;
+            await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+            if (await reader.ReadAsync(token).ConfigureAwait(false))
+            {
+                inventory.Coins = reader.GetInt32(0);
+                inventory.SelectedMap = reader.GetString(1);
+            }
+            await reader.NextResultAsync(token).ConfigureAwait(false);
+            while (await reader.ReadAsync(token).ConfigureAwait(false))
+            {
+                inventory.Items.Add(new ItemDto
+                {
+                    Category = reader.GetString(0),
+                    ItemIndex = reader.GetInt32(1),
+                    IsEquipped = reader.GetBoolean(2)
+                });
+            }
+            return inventory;
+        }
+
         public async Task<(bool Success, string Code, string Message)> DoiMatKhauAsync(
             string username,
             string email,
@@ -313,6 +425,7 @@ namespace DanToPhong.Server
 
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(token).ConfigureAwait(false);
 
             const string verifySql = @"
                 SELECT UserId
@@ -322,7 +435,7 @@ namespace DanToPhong.Server
                   AND LOWER(LTRIM(RTRIM(Email))) = LOWER(@Email);";
 
             int userId;
-            await using (var verifyCmd = new SqlCommand(verifySql, conn))
+            await using (var verifyCmd = new SqlCommand(verifySql, conn, tx))
             {
                 verifyCmd.Parameters.Add("@Username", SqlDbType.NVarChar, 20).Value = cleanUser;
                 verifyCmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = cleanEmail;
@@ -342,7 +455,7 @@ namespace DanToPhong.Server
                     PasswordSalt = @PasswordSalt
                 WHERE UserId = @UserId;";
 
-            await using var updateCmd = new SqlCommand(updateSql, conn);
+            await using var updateCmd = new SqlCommand(updateSql, conn, tx);
             updateCmd.Parameters.Add("@PasswordHash", SqlDbType.NVarChar, 128).Value = hash;
             updateCmd.Parameters.Add("@PasswordSalt", SqlDbType.NVarChar, 64).Value = salt;
             updateCmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
@@ -350,6 +463,15 @@ namespace DanToPhong.Server
             int affected = await updateCmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
             if (affected <= 0)
                 return (false, ErrorCodes.ServerError, "Unable to update password.");
+
+            await using (var revoke = new SqlCommand(@"
+                UPDATE dbo.AuthTokens SET RevokedAt=SYSUTCDATETIME()
+                WHERE UserId=@UserId AND RevokedAt IS NULL;", conn, tx))
+            {
+                revoke.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                await revoke.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+            await tx.CommitAsync(token).ConfigureAwait(false);
 
             return (true, ErrorCodes.Ok, "Password updated successfully.");
         }

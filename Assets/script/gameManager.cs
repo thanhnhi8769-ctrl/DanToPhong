@@ -2927,8 +2927,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
     public void RestartGame()
     {
-        Time.timeScale = 1f;
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+        VePhongChung();
     }
 
     public void QuitGame()
@@ -2947,6 +2946,9 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     [Header("Về phòng chờ (Solo & Nhiều người)")]
     [Tooltip("Tên scene phòng chờ / sảnh chọn xe & map")]
     public string tenScenePhongCho = "SelectScene";
+    [Tooltip("Chơi nhiều người (đang trong phòng Photon): chơi lại thì về scene Lobby, giữ nguyên phòng")]
+    public string tenSceneLobbyNhieuNguoi = "LobbyScene";
+    public string chuNutVeLobbyNhieuNguoi = "BACK TO LOBBY";
 
     private bool dangVePhongChung = false;
 
@@ -3004,15 +3006,21 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
                 });
             }
 
-            if (!string.IsNullOrEmpty(tenScenePhongCho))
+            string sceneLobby = tenSceneLobbyNhieuNguoi;
+            if (string.IsNullOrEmpty(sceneLobby) || !Application.CanStreamedLevelBeLoaded(sceneLobby))
             {
-                SceneManager.LoadScene(tenScenePhongCho);
+                Debug.LogError($"[GameManager] Không tìm thấy scene '{sceneLobby}' trong Build Settings, tạm dùng '{tenScenePhongCho}'.");
+                sceneLobby = tenScenePhongCho;
+            }
+
+            if (!string.IsNullOrEmpty(sceneLobby))
+            {
+                SceneManager.LoadScene(sceneLobby);
                 return;
             }
         }
         else if (!string.IsNullOrEmpty(tenScenePhongCho))
         {
-            // Chế độ 1 mình (solo) hoặc chưa vào Room: chuyển thẳng về scene phòng chờ
             SceneManager.LoadScene(tenScenePhongCho);
             return;
         }
@@ -3086,12 +3094,9 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
             rtMoi.anchoredPosition = new Vector2(rtMau.anchoredPosition.x + wGoc + gap, rtMau.anchoredPosition.y) + doLechNutMoi;
         }
 
-        var tmp = nutMoiObj.GetComponentInChildren<TMPro.TMP_Text>(true);
-        if (tmp != null) tmp.text = chuNutVePhongCho;
-
-        var uiText = nutMoiObj.GetComponentInChildren<UnityEngine.UI.Text>(true);
-        if (uiText != null) uiText.text = chuNutVePhongCho;
-
+        string chu = cheDoNhieuNguoi ? chuNutVeLobbyNhieuNguoi : chuNutVePhongCho;
+        foreach (TMP_Text t in nutMoiObj.GetComponentsInChildren<TMP_Text>(true))
+            t.text = chu;
         Button btnMoi = nutMoiObj.GetComponent<Button>();
         if (btnMoi != null)
         {

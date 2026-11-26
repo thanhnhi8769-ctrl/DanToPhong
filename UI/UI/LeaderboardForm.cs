@@ -20,12 +20,14 @@ namespace UI
             _me = currentUsername;
 
             Text = "Leaderboard";
+            AutoScaleMode = AutoScaleMode.Font;
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
             ClientSize = new Size(580, 540);
+            MinimumSize = new Size(480, 360);
             BackColor = Color.FromArgb(253, 251, 247);
 
             var header = new Label

@@ -167,6 +167,12 @@ namespace UI
         {
             base.OnShown(e);
             CauHinhNutDoExit();
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+            int width = Math.Min(ClientSize.Width, Math.Max(800, workArea.Width - 16));
+            int height = Math.Min(ClientSize.Height, Math.Max(440, workArea.Height - 16));
+            if (width != ClientSize.Width || height != ClientSize.Height)
+                ClientSize = new Size(width, height);
+            CanGiuaBoCuc();
         }
 
         private void btnChooseAvatar_Click(object? sender, EventArgs e)
@@ -259,8 +265,15 @@ namespace UI
             int topOffset = pnlTitleBar.Height + pnlHeaderBar.Height;
             int usableHeight = Math.Max(0, ClientSize.Height - topOffset);
 
+            const int designPanelWidth = 926;
+            const int designPanelHeight = 659;
+            nightPanel1.Width = Math.Min(designPanelWidth, Math.Max(560, ClientSize.Width - 32));
+            nightPanel1.Height = Math.Min(designPanelHeight, Math.Max(420, usableHeight - 12));
+            nightPanel1.AutoScroll = nightPanel1.Width < designPanelWidth || nightPanel1.Height < designPanelHeight;
+            nightPanel1.AutoScrollMinSize = new Size(designPanelWidth, designPanelHeight);
+
             int x = Math.Max(16, (ClientSize.Width - nightPanel1.Width) / 2);
-            int y = topOffset + Math.Max(6, (usableHeight - nightPanel1.Height) / 2);
+            int y = topOffset + Math.Max(4, (usableHeight - nightPanel1.Height) / 2);
 
             nightPanel1.Location = new Point(x, y);
             panelShadow.Size = nightPanel1.Size;
@@ -338,7 +351,8 @@ namespace UI
             lblCodeStatus.Location = new Point(rightColLeft, txtVerificationCode.Bottom + 5);
 
             int fullWidth = nightPanel1.Width - left * 2;
-            int btnY = nightPanel1.Height - btnRegister.Height - 24;
+            int contentHeight = nightPanel1.AutoScroll ? Math.Max(nightPanel1.Height, nightPanel1.AutoScrollMinSize.Height) : nightPanel1.Height;
+            int btnY = contentHeight - btnRegister.Height - 24;
             int cancelWidth = 132;
             int btnGap = 12;
             btnRegister.Location = new Point(left, btnY);

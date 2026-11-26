@@ -47,6 +47,17 @@ namespace DanToPhong.Server
                 }
             }
 
+            await using (var verify = new SqlCommand(@"
+                IF OBJECT_ID('dbo.AuthTokens') IS NULL OR
+                   OBJECT_ID('dbo.VerificationCodes') IS NULL OR
+                   OBJECT_ID('dbo.RequestIdempotency') IS NULL
+                BEGIN
+                    THROW 51000, 'Required security-state tables are missing.', 1;
+                END;", db))
+            {
+                await verify.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+
             Console.WriteLine("[DB] Database setup OK.");
         }
 
@@ -102,7 +113,45 @@ namespace DanToPhong.Server
                   CREATE UNIQUE INDEX UX_NguoiDung_RacerId ON dbo.NguoiDung(RacerId) WHERE RacerId IS NOT NULL;",
 
             @"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_NguoiDung_Coins')
-                  CREATE INDEX IX_NguoiDung_Coins ON dbo.NguoiDung(Coins DESC);"
+                  CREATE INDEX IX_NguoiDung_Coins ON dbo.NguoiDung(Coins DESC);",
+
+            @"IF OBJECT_ID('dbo.AuthTokens') IS NULL
+              CREATE TABLE dbo.AuthTokens (
+                  TokenHash CHAR(64) NOT NULL CONSTRAINT PK_AuthTokens PRIMARY KEY,
+                  UserId INT NOT NULL,
+                  Username NVARCHAR(20) NOT NULL,
+                  ExpiresAt DATETIME2 NOT NULL,
+                  RevokedAt DATETIME2 NULL,
+                  CONSTRAINT FK_AuthTokens_NguoiDung FOREIGN KEY (UserId) REFERENCES dbo.NguoiDung(UserId)
+              );
+              IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_AuthTokens_UserId')
+                  CREATE INDEX IX_AuthTokens_UserId ON dbo.AuthTokens(UserId, RevokedAt, ExpiresAt);",
+
+            @"IF OBJECT_ID('dbo.VerificationCodes') IS NULL
+              CREATE TABLE dbo.VerificationCodes (
+                  KeyHash CHAR(64) NOT NULL CONSTRAINT PK_VerificationCodes PRIMARY KEY,
+                  CodeHash BINARY(32) NULL,
+                  CodeSalt BINARY(16) NULL,
+                  ExpiresAt DATETIME2 NULL,
+                  Attempts INT NOT NULL,
+                  CooldownUntil DATETIME2 NOT NULL
+              );
+              IF COL_LENGTH('dbo.VerificationCodes', 'CodeSalt') IS NULL
+                  ALTER TABLE dbo.VerificationCodes ADD CodeSalt BINARY(16) NULL;",
+
+            @"IF OBJECT_ID('dbo.RequestIdempotency') IS NULL
+              CREATE TABLE dbo.RequestIdempotency (
+                  UserId INT NOT NULL,
+                  Command VARCHAR(20) NOT NULL,
+                  RequestId UNIQUEIDENTIFIER NOT NULL,
+                  Fingerprint CHAR(64) NOT NULL,
+                  ResponseJson NVARCHAR(MAX) NULL,
+                  CreatedAt DATETIME2 NOT NULL,
+                  CONSTRAINT PK_RequestIdempotency PRIMARY KEY(UserId, Command, RequestId),
+                  CONSTRAINT FK_RequestIdempotency_NguoiDung FOREIGN KEY(UserId) REFERENCES dbo.NguoiDung(UserId)
+              );
+              IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_RequestIdempotency_CreatedAt')
+                  CREATE INDEX IX_RequestIdempotency_CreatedAt ON dbo.RequestIdempotency(CreatedAt);"
         };
     }
 }

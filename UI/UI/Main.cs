@@ -1099,6 +1099,13 @@ namespace UI
 
         private async void Main_Shown(object? sender, EventArgs e)
         {
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+            int width = Math.Min(ClientSize.Width, Math.Max(640, workArea.Width - 16));
+            int height = Math.Min(ClientSize.Height, Math.Max(440, workArea.Height - 16));
+            if (width != ClientSize.Width || height != ClientSize.Height)
+                ClientSize = new Size(width, height);
+            ThuGonVaTachBoCuc();
+
             if (_netClient == null || _isClosing) return;
 
             try
@@ -1539,11 +1546,6 @@ namespace UI
 
         private void ThuGonVaTachBoCuc()
         {
-            MinimumSize = new Size(1020, 700);
-            if (WindowState == FormWindowState.Normal && (ClientSize.Width < 1080 || ClientSize.Height < 730))
-            {
-                ClientSize = new Size(1120, 760);
-            }
             CanGiuaBoCuc();
         }
 
@@ -1588,11 +1590,12 @@ namespace UI
                 sidePadX,
                 Math.Max(tabTop + sideTabs.Length * (tabH + tabGap) + 36, pnlSidebar.Height - btnLogout.Height - 32));
 
-            int cardWidth = Math.Min(760, Math.Max(640, pnlContentHost.Width * 78 / 100));
-            int cardHeight = Math.Min(650, Math.Max(590, pnlContentHost.Height - 52));
+            int cardWidth = Math.Min(760, Math.Max(500, pnlContentHost.Width - 32));
+            int cardHeight = Math.Min(650, Math.Max(320, pnlContentHost.Height - 32));
+            bool compactCards = cardWidth < 640 || cardHeight < 590;
 
-            int x = Math.Max(28, (pnlContentHost.Width - cardWidth) / 2);
-            int y = Math.Max(16, (pnlContentHost.Height - cardHeight) / 2);
+            int x = Math.Max(12, (pnlContentHost.Width - cardWidth) / 2);
+            int y = Math.Max(12, (pnlContentHost.Height - cardHeight) / 2);
 
             shadowContent.Size = new Size(cardWidth, cardHeight);
             shadowContent.Location = new Point(x + 8, y + 8);
@@ -1602,6 +1605,12 @@ namespace UI
             Control[] cards = { cardMenu, cardRooms, cardRacer, cardSettings, cardReview };
             foreach (Control c in cards)
             {
+                if (c is Panel panel)
+                {
+                    panel.AutoScroll = compactCards;
+                    panel.AutoScrollMinSize = compactCards ? new Size(640, 590) : Size.Empty;
+                    if (compactCards) panel.AutoScrollPosition = Point.Empty;
+                }
                 c.Size = new Size(cardWidth, cardHeight);
                 c.Location = new Point(x, y);
                 c.BringToFront();

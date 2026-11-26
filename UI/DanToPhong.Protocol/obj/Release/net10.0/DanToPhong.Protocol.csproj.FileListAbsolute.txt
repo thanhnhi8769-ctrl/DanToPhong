@@ -1,0 +1,15 @@
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.deps.json
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.dll
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.pdb
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.GeneratedMSBuildEditorConfig.editorconfig
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.AssemblyInfoInputs.cache
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.AssemblyInfo.cs
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.csproj.CoreCompileInputs.cache
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.sourcelink.json
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.dll
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\refint\DanToPhong.Protocol.dll
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\DanToPhong.Protocol.pdb
+D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\obj\Release\net10.0\ref\DanToPhong.Protocol.dll
+D:\DanToPhong\LauncherRelease\DanToPhong.Protocol.deps.json
+D:\DanToPhong\LauncherRelease\DanToPhong.Protocol.dll
+D:\DanToPhong\LauncherRelease\DanToPhong.Protocol.pdb

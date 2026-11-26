@@ -244,6 +244,17 @@ namespace UI
             if (WindowState != FormWindowState.Minimized) CanGiuaBoCuc();
         }
 
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+            int width = Math.Min(ClientSize.Width, Math.Max(400, workArea.Width - 16));
+            int height = Math.Min(ClientSize.Height, Math.Max(400, workArea.Height - 16));
+            if (width != ClientSize.Width || height != ClientSize.Height)
+                ClientSize = new Size(width, height);
+            CanGiuaBoCuc();
+        }
+
         private void CanGiuaBoCuc()
         {
             if (nightPanel1 == null || panelShadow == null || WindowState == FormWindowState.Minimized) return;
@@ -251,8 +262,8 @@ namespace UI
             SuspendLayout();
 
             int topOffset = pnlTitleBar.Height + pnlHeaderBar.Height;
-            int usableHeight = Math.Max(380, ClientSize.Height - topOffset);
-            bool twoCols = ClientSize.Width >= 780;
+            int usableHeight = Math.Max(0, ClientSize.Height - topOffset);
+            bool twoCols = ClientSize.Width >= 780 && usableHeight >= 540;
 
             int cardW = twoCols
                 ? Math.Min(860, Math.Max(700, ClientSize.Width - 100))
@@ -261,6 +272,8 @@ namespace UI
                 ? Math.Min(600, Math.Max(460, usableHeight - 12))
                 : Math.Min(650, usableHeight - 10);
             nightPanel1.Size = new Size(cardW, cardH);
+            nightPanel1.AutoScroll = cardW < 580 || cardH < 640;
+            nightPanel1.AutoScrollMinSize = nightPanel1.AutoScroll ? new Size(580, 640) : Size.Empty;
 
             int leftMargin = 44;
             int contentWidth = nightPanel1.Width - leftMargin * 2;

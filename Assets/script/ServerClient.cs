@@ -2,6 +2,9 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Authentication;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,7 +28,7 @@ public class Req
 public static class ServerClient
 {
     private static TcpClient tcp;
-    private static NetworkStream ns;
+    private static Stream ns;
     private static readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
 
     private static bool closed;      // Close() đã được gọi: không tự nối lại nữa
@@ -121,27 +124,66 @@ public static class ServerClient
 
         TcpClient client = new TcpClient();
         tcp = client;
-        Task connect = client.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
-        using (var timeout = new CancellationTokenSource())
+        Stream stream = null;
+        try
         {
-            Task delay = Task.Delay(TIMEOUT_MS, timeout.Token);
-            if (await Task.WhenAny(connect, delay) != connect)
+            Task connect = client.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
+            using (var timeout = new CancellationTokenSource())
             {
-                try { client.Close(); } catch { }
-                if (ReferenceEquals(tcp, client)) tcp = null;
-                throw new TimeoutException("Connection timeout");
+                Task delay = Task.Delay(TIMEOUT_MS, timeout.Token);
+                if (await Task.WhenAny(connect, delay) != connect)
+                {
+                    _ = connect.ContinueWith(x => { var ignored = x.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                    throw new TimeoutException("Connection timeout");
+                }
+                timeout.Cancel();
             }
-            timeout.Cancel();
+            await connect;
+            if (closed || expectedVersion != Volatile.Read(ref lifecycleVersion))
+                throw new OperationCanceledException("Connection attempt was canceled.");
+
+            stream = client.GetStream();
+            if (LauncherArgs.UseTls)
+            {
+                var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
+                try
+                {
+                    Task authenticate = ssl.AuthenticateAsClientAsync(LauncherArgs.Host);
+                    using (var timeout = new CancellationTokenSource())
+                    {
+                        Task delay = Task.Delay(TIMEOUT_MS, timeout.Token);
+                        if (await Task.WhenAny(authenticate, delay) != authenticate)
+                        {
+                            _ = authenticate.ContinueWith(x => { var ignored = x.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                            throw new TimeoutException("TLS handshake timeout");
+                        }
+                        timeout.Cancel();
+                    }
+                    await authenticate;
+                    stream = ssl;
+                }
+                catch
+                {
+                    try { ssl.Dispose(); } catch { }
+                    throw;
+                }
+            }
+
+            if (closed || expectedVersion != Volatile.Read(ref lifecycleVersion))
+                throw new OperationCanceledException("Connection attempt was canceled.");
+
+            ns = stream;
+            connId++;
         }
-        await connect;
-        if (closed || expectedVersion != Volatile.Read(ref lifecycleVersion))
+        catch
         {
+            try { stream?.Dispose(); } catch { }
             try { client.Close(); } catch { }
+            try { client.Dispose(); } catch { }
+            if (ReferenceEquals(ns, stream)) ns = null;
             if (ReferenceEquals(tcp, client)) tcp = null;
-            throw new OperationCanceledException("Connection attempt was canceled.");
+            throw;
         }
-        ns = client.GetStream();
-        connId++;
     }
 
     // Nối lại + xác thực lại bằng token cũ (server giữ token 6 giờ, dùng lại được).

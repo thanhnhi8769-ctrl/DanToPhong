@@ -978,7 +978,8 @@ namespace UI
             btnSubmitReview.Click += btnSubmitReview_Click;
 
             // Main form
-            AutoScaleMode = AutoScaleMode.None;
+            AutoScaleDimensions = new SizeF(6F, 13F);
+            AutoScaleMode = AutoScaleMode.Font;
             BackColor = Color.FromArgb(244, 240, 232);
             ClientSize = new Size(1120, 760);
             Controls.Add(pnlContentHost);
@@ -986,7 +987,7 @@ namespace UI
             Controls.Add(pnlHeaderBar);
             Controls.Add(pnlTitleBar);
             FormBorderStyle = FormBorderStyle.None;
-            MinimumSize = new Size(1020, 700);
+            MinimumSize = new Size(640, 440);
             Name = "Main";
             StartPosition = FormStartPosition.CenterScreen;
             Text = "Scooter Racing";

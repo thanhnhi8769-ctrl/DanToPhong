@@ -220,8 +220,15 @@ namespace UI
             int topOffset = pnlTitleBar.Height + pnlHeaderBar.Height;
             int usableHeight = Math.Max(0, ClientSize.Height - topOffset);
 
+            const int designPanelWidth = 470;
+            const int designPanelHeight = 583;
+            nightPanel1.Width = Math.Min(designPanelWidth, Math.Max(380, ClientSize.Width - 40));
+            nightPanel1.Height = Math.Min(designPanelHeight, Math.Max(360, usableHeight - 24));
+            nightPanel1.AutoScroll = nightPanel1.Width < designPanelWidth || nightPanel1.Height < designPanelHeight;
+            nightPanel1.AutoScrollMinSize = new Size(designPanelWidth, designPanelHeight);
+
             int x = Math.Max(20, (ClientSize.Width - nightPanel1.Width) / 2);
-            int y = topOffset + Math.Max(16, (usableHeight - nightPanel1.Height) / 2);
+            int y = topOffset + Math.Max(8, (usableHeight - nightPanel1.Height) / 2);
 
             nightPanel1.Location = new Point(x, y);
             panelShadow.Size = nightPanel1.Size;
@@ -230,7 +237,7 @@ namespace UI
             panelShadow.SendToBack();
             nightPanel1.BringToFront();
 
-            int leftMargin = 42;
+            int leftMargin = Math.Min(42, Math.Max(16, (nightPanel1.Width - 300) / 2));
             int contentWidth = nightPanel1.Width - leftMargin * 2;
 
             lblTitle.Location = new Point((nightPanel1.Width - lblTitle.Width) / 2, 20);
@@ -262,6 +269,17 @@ namespace UI
             BoGocControl(panelShadow, 16);
 
             ResumeLayout(true);
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+            int width = Math.Min(ClientSize.Width, Math.Max(400, workArea.Width - 16));
+            int height = Math.Min(ClientSize.Height, Math.Max(420, workArea.Height - 16));
+            if (width != ClientSize.Width || height != ClientSize.Height)
+                ClientSize = new Size(width, height);
+            CanGiuaBoCuc();
         }
 
         private static void BoGocControl(Control ctrl, int radius)

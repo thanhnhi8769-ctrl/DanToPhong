@@ -23,9 +23,9 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
     [Header("Di chuyển")]
     [SerializeField] private float tocDoXe = 15f;
     [SerializeField] private float heSoTangToc = 1.6f;
-    [SerializeField] private float lucReXe = 85f;
-    [SerializeField] private float giaToc = 6f;
-    [SerializeField] private float doMuotLai = 10f;
+    [SerializeField] private float lucReXe = 140f;    // cũ 85: tốc độ xoay (độ/giây)
+    [SerializeField] private float giaToc = 12f;      // cũ 6: tăng/giảm tốc nhanh hơn
+    [SerializeField] private float doMuotLai = 20f;   // cũ 10: đánh lái vào nhanh hơn
 
     [Header("Phanh & Lùi")]
     [SerializeField] private GameObject hieuUngPhanh;
@@ -1068,7 +1068,13 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         }
 
         float doc = Input.GetAxisRaw("Vertical");
-        dauVaoRe = Input.GetAxisRaw("Horizontal");
+        if (Input.GetKey(KeyCode.W)) doc = 1f;
+        else if (Input.GetKey(KeyCode.S)) doc = -1f;
+
+        float re = Input.GetAxisRaw("Horizontal");
+        if (Input.GetKey(KeyCode.D)) re = 1f;
+        else if (Input.GetKey(KeyCode.A)) re = -1f;
+        dauVaoRe = re;
 
         dangTangToc = doc > 0.1f;
         dangLui = doc < -0.1f;
@@ -1164,7 +1170,8 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
             thoiGianBiChan = 0f;
         }
 
-        tocDoDangChay = Mathf.Lerp(tocDoDangChay, tocDoMucTieu, Mathf.Clamp01(giaToc * dt));
+        float tocDoThayDoi = (Mathf.Abs(tocDoMucTieu) > Mathf.Abs(tocDoDangChay) ? giaToc * 3f : giaToc * 5f);
+        tocDoDangChay = Mathf.MoveTowards(tocDoDangChay, tocDoMucTieu, tocDoThayDoi * dt * 3f);
 
         QuetVatCanCungPhiaTruoc(huongTien, dt);
         ChanMepDuong(huongTien);
@@ -1215,14 +1222,13 @@ public class scooter : MonoBehaviour, IPunInstantiateMagicCallback
         if (Mathf.Abs(tocDoDangChay) >= 0.1f && !Mathf.Approximately(dauVaoRe, 0f))
             huongMucTieu = tocDoDangChay < 0f ? -dauVaoRe : dauVaoRe;
 
-        gocReHienTai = Mathf.Lerp(gocReHienTai, huongMucTieu, doMuotLai * Time.fixedDeltaTime);
+        gocReHienTai = Mathf.MoveTowards(gocReHienTai, huongMucTieu, doMuotLai * Time.fixedDeltaTime);
 
         if (Mathf.Abs(gocReHienTai) < 0.001f) return;
 
         Quaternion re = Quaternion.Euler(0f, gocReHienTai * lucReXe * Time.fixedDeltaTime, 0f);
         rb.MoveRotation(rb.rotation * re);
     }
-
     public void PhanhXe()
     {
         if (hieuUngPhanh == null) return;

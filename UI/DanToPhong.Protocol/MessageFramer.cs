@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Buffers.Binary;
 using System.IO;
-using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,7 +17,7 @@ namespace DanToPhong.Protocol
             PropertyNameCaseInsensitive = true
         };
 
-        public static async Task SendAsync<T>(NetworkStream stream, T payload, CancellationToken token = default)
+        public static async Task SendAsync<T>(Stream stream, T payload, CancellationToken token = default)
         {
             byte[] body = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
             if (body.Length > MaxPacketBytes)
@@ -32,7 +31,7 @@ namespace DanToPhong.Protocol
             await stream.FlushAsync(token).ConfigureAwait(false);
         }
 
-        public static async Task<T?> ReceiveAsync<T>(NetworkStream stream, CancellationToken token = default)
+        public static async Task<T?> ReceiveAsync<T>(Stream stream, CancellationToken token = default)
         {
             byte[] lenBuf = new byte[4];
             if (!await ReadExactAsync(stream, lenBuf, token).ConfigureAwait(false))
@@ -49,7 +48,7 @@ namespace DanToPhong.Protocol
             return JsonSerializer.Deserialize<T>(body, JsonOptions);
         }
 
-        private static async Task<bool> ReadExactAsync(NetworkStream stream, byte[] buffer, CancellationToken token)
+        private static async Task<bool> ReadExactAsync(Stream stream, byte[] buffer, CancellationToken token)
         {
             int offset = 0;
             while (offset < buffer.Length)

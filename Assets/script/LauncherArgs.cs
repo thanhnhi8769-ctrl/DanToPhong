@@ -7,6 +7,7 @@ public static class LauncherArgs
     public static string Token = "";
     public static string Host = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST") ?? "";
     public static int Port = ParsePort(Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT"));
+    public static bool UseTls = string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase);
     public static string Mode = "single";
     public static string Room = "";
     public static string RacerId = "";
@@ -30,6 +31,7 @@ public static class LauncherArgs
                 case "--token": Token = a[++i]; break;
                 case "--host": Host = a[++i]; break;
                 case "--port": Port = ParsePort(a[++i]); break;
+                case "--tls": UseTls = string.Equals(a[++i], "true", StringComparison.OrdinalIgnoreCase); break;
                 case "--mode": Mode = a[++i]; break;
                 case "--room": Room = a[++i]; break;
             }

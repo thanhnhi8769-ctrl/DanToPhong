@@ -59,6 +59,11 @@ public static class PlayerInventory
         {
             int delta = amount - ServerClient.Cache.coins;
             if (delta == 0) return;
+            if (delta > 0)
+            {
+                Debug.LogWarning("[PlayerInventory] Positive client coin updates are disabled; the server must validate match rewards.");
+                return;
+            }
             ServerClient.Cache.coins = amount;
             NotifyChanged();
             ServerClient.Fire(new Req { command = "CAPNHATXU", coinsDelta = delta, requestId = Guid.NewGuid().ToString("N") });
@@ -76,6 +81,11 @@ public static class PlayerInventory
         if (amount == 0) return;
         if (UseServer)
         {
+            if (amount > 0)
+            {
+                Debug.LogWarning("[PlayerInventory] Client coin rewards are disabled until the server validates the match result.");
+                return;
+            }
             ServerClient.Cache.coins = Mathf.Max(0, ServerClient.Cache.coins + amount);
             NotifyChanged();
             ServerClient.Fire(new Req { command = "CAPNHATXU", coinsDelta = amount, requestId = Guid.NewGuid().ToString("N") });

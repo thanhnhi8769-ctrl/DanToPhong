@@ -3,6 +3,8 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
+using System.Net.Security;
+using System.Security.Authentication;
 using System.Text.Json;
 using DanToPhong.Protocol;
 
@@ -12,10 +14,11 @@ namespace UI.Services
     {
         private readonly string _host;
         private readonly int _port;
+        private readonly bool _useTls;
         private readonly SemaphoreSlim _ioLock = new(1, 1);
 
         private TcpClient? _client;
-        private NetworkStream? _stream;
+        private Stream? _stream;
         private bool _disposed;
 
         // MỚI: launcher truyền cho game Unity
@@ -52,6 +55,7 @@ namespace UI.Services
             _host = host ?? Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST") ?? fileHost ?? string.Empty;
             string? envPort = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT");
             _port = port ?? (int.TryParse(envPort, out int parsedPort) ? parsedPort : filePort ?? 9000);
+            _useTls = string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase);
             if (string.IsNullOrWhiteSpace(_host) || _port is < 1 or > 65535)
                 throw new InvalidOperationException("Thiếu cấu hình DANTOPHONG_SERVER_HOST/PORT hoặc file server.json.");
         }
@@ -72,9 +76,22 @@ namespace UI.Services
                 timeout.CancelAfter(NetworkTimeout);
                 await client.ConnectAsync(_host, _port, timeout.Token);
 
-                _stream = client.GetStream();
+                Stream stream = client.GetStream();
+                _stream = stream;
+                if (_useTls)
+                {
+                    var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
+                    _stream = ssl;
+                    await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+                    {
+                        TargetHost = _host,
+                        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+                    }, timeout.Token);
+                    stream = ssl;
+                }
+                _stream = stream;
 
-                ConnectionStatusChanged?.Invoke(true, "Connected");
+                ConnectionStatusChanged?.Invoke(true, _useTls ? "Connected (TLS)" : "Connected");
                 return true;
             }
             catch (Exception ex)
@@ -189,6 +206,14 @@ namespace UI.Services
 
         public Task<ResponsePacket> UpdateCoinsAsync(int delta, CancellationToken token = default)
         {
+            if (delta >= 0 || delta < -5000)
+                return Task.FromResult(new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.InvalidInput,
+                    Message = "Client coin grants are disabled; rewards must be confirmed by the server."
+                });
+
             return SendAndReceiveAsync(new RequestPacket
             {
                 Command = Commands.UpdateCoins,

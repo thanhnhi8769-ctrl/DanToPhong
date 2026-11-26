@@ -1,9 +1,12 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
+using System.IO;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -16,6 +19,7 @@ namespace DanToPhong.Server
     internal static class Program
     {
         private static readonly int Port = ReadPort();
+        private static readonly bool UseTls = string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase);
         private const int MaxCoinsDeltaPerRequest = 5000;
         private static readonly string ConnectionString = Environment.GetEnvironmentVariable("DANTOPHONG_DB_CONNECTION") ?? string.Empty;
 
@@ -28,15 +32,22 @@ namespace DanToPhong.Server
         private static readonly Regex TargetRegex = new(@"^[A-Za-z0-9_]{1,20}$", RegexOptions.Compiled);
         private static readonly Regex MapRegex = new(@"^[A-Za-z0-9_ \-]{1,50}$", RegexOptions.Compiled);
 
-        // Token do launcher giữ, truyền cho game Unity. Chỉ nằm trong RAM server.
-        private static readonly ConcurrentDictionary<string, (int UserId, string Username, DateTime Exp)> Tokens = new();
-        private static readonly ConcurrentDictionary<string, ClientSession> ActiveSessions = new();
-        private sealed record ResetCode(byte[] Hash, DateTime ExpiresAt, int Attempts);
-        private static readonly ConcurrentDictionary<string, ResetCode> ResetCodes = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly ConcurrentDictionary<string, DateTime> ResetCodeCooldowns = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly SemaphoreSlim ResetPasswordGate = new(1, 1);
-        private sealed record CachedRequest(DateTime CreatedAt, string Fingerprint, Lazy<Task<ResponsePacket>> Result);
-        private static readonly ConcurrentDictionary<string, CachedRequest> RequestResults = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ClientSession> ActiveSessions = new();
+
+        private static X509Certificate2 LoadServerCertificate()
+        {
+            string path = Environment.GetEnvironmentVariable("DANTOPHONG_CERT_PATH") ?? string.Empty;
+            string password = Environment.GetEnvironmentVariable("DANTOPHONG_CERT_PASSWORD") ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                throw new InvalidOperationException("TLS is enabled but DANTOPHONG_CERT_PATH is missing or unavailable.");
+            X509Certificate2 certificate = X509CertificateLoader.LoadPkcs12FromFile(path, password, X509KeyStorageFlags.EphemeralKeySet);
+            if (!certificate.HasPrivateKey || DateTime.UtcNow < certificate.NotBefore.ToUniversalTime() || DateTime.UtcNow >= certificate.NotAfter.ToUniversalTime())
+            {
+                certificate.Dispose();
+                throw new InvalidOperationException("TLS certificate is expired, not yet valid, or has no private key.");
+            }
+            return certificate;
+        }
 
         private static int ReadPort()
         {
@@ -44,8 +55,7 @@ namespace DanToPhong.Server
             return int.TryParse(raw, out int port) && port is > 0 and <= 65535 ? port : 9000;
         }
 
-        // Bảng giá phía server. Nếu có key ở đây thì dùng giá này; chưa có thì tạm dùng giá client gửi (đã kẹp 0..5000).
-        // Điền theo VehicleCatalog, ví dụ: { ("Scooter", 1), 300 }, { ("Scooter", 2), 500 }
+        // Giá phía server là nguồn duy nhất; không nhận loại vật phẩm/giá do client tự đặt.
         // Giá xe theo index trong VehicleCatalog. Thêm xe mới vào catalog thì thêm giá vào đây.
         private static readonly int[] ScooterPrices =
         {
@@ -61,6 +71,8 @@ namespace DanToPhong.Server
                 throw new InvalidOperationException("Set DANTOPHONG_DB_CONNECTION before starting the server.");
 
             var repo = new NguoiDungRepository(ConnectionString);
+            var state = new ServerStateRepository(ConnectionString);
+            using X509Certificate2? serverCertificate = UseTls ? LoadServerCertificate() : null;
             using var cts = new CancellationTokenSource();
 
             Console.CancelKeyPress += (_, e) =>
@@ -73,17 +85,18 @@ namespace DanToPhong.Server
             {
                 await DatabaseInitializer.EnsureAsync(ConnectionString, cts.Token);   // tự tạo DB + bảng nếu chưa có
                 await repo.KiemTraKetNoiAsync(cts.Token);
+                await state.PruneExpiredStateAsync(cts.Token);
                 Console.WriteLine("[DB] Connected to DanToPhongDB successfully.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DB] Warning: Cannot connect to DanToPhongDB at startup. ({ex.Message})");
+                Console.Error.WriteLine($"[DB] Startup failed; refusing to listen without persistent security state. ({ex.Message})");
+                throw;
             }
-           
 
             var listener = new TcpListener(IPAddress.Any, Port);
             listener.Start();
-            Console.WriteLine($"[TCP] Server listening on port {Port}...");
+            Console.WriteLine($"[TCP] Server listening on port {Port}; TLS={(UseTls ? "enabled" : "disabled")}.");
 
             try
             {
@@ -100,7 +113,7 @@ namespace DanToPhong.Server
                     ActiveSessions[session.SessionId] = session;
 
                     Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
-                    _ = Task.Run(() => HandleClientAsync(session, repo, cts.Token), cts.Token);
+                    _ = Task.Run(() => HandleClientAsync(session, repo, state, serverCertificate, cts.Token), cts.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -116,12 +129,29 @@ namespace DanToPhong.Server
         private static async Task HandleClientAsync(
             ClientSession session,
             NguoiDungRepository repo,
+            ServerStateRepository state,
+            X509Certificate2? serverCertificate,
             CancellationToken token)
         {
-            NetworkStream stream = session.Client.GetStream();
+            Stream stream = session.Client.GetStream();
+            SslStream? tlsStream = null;
 
             try
             {
+                if (UseTls)
+                {
+                    tlsStream = new SslStream(stream, leaveInnerStreamOpen: false);
+                    using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    handshakeTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                    await tlsStream.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+                    {
+                        ServerCertificate = serverCertificate ?? throw new InvalidOperationException("TLS certificate is unavailable."),
+                        EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                        ClientCertificateRequired = false
+                    }, handshakeTimeout.Token).ConfigureAwait(false);
+                    stream = tlsStream;
+                }
+
                 while (!token.IsCancellationRequested && session.Client.Connected)
                 {
                     using var idleTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -130,7 +160,7 @@ namespace DanToPhong.Server
                     if (request == null)
                         break;
 
-                    ResponsePacket response = await DispatchAsync(session, request, repo, token).ConfigureAwait(false);
+                    ResponsePacket response = await DispatchAsync(session, request, repo, state, token).ConfigureAwait(false);
 
                     await session.SendLock.WaitAsync(token).ConfigureAwait(false);
                     try
@@ -157,6 +187,7 @@ namespace DanToPhong.Server
                 if (session.AuthenticatedUserId.HasValue &&
                     !ActiveSessions.Values.Any(s => s.AuthenticatedUserId == session.AuthenticatedUserId))
                     RoomRegistry.RemoveByOwner(session.AuthenticatedUserId.Value);
+                try { tlsStream?.Dispose(); } catch { }
                 try { stream.Dispose(); } catch { }
                 try { session.Client.Close(); } catch { }
                 try { session.Client.Dispose(); } catch { }
@@ -164,37 +195,55 @@ namespace DanToPhong.Server
             }
         }
 
-        private static Task<ResponsePacket> DispatchAsync(
+        private static async Task<ResponsePacket> DispatchAsync(
             ClientSession session,
             RequestPacket req,
             NguoiDungRepository repo,
+            ServerStateRepository state,
             CancellationToken token)
         {
             string command = (req.Command ?? string.Empty).Trim().ToUpperInvariant();
             bool mustDeduplicate = command is Commands.UpdateCoins or Commands.BuyItem;
-            if (!mustDeduplicate) return DispatchCoreAsync(session, req, repo, token);
+            if (!mustDeduplicate) return await DispatchCoreAsync(session, req, repo, state, token).ConfigureAwait(false);
 
             if (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out Guid requestGuid))
-                return Task.FromResult(new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "A valid request id is required." });
-
-            DateTime now = DateTime.UtcNow;
-            foreach (var pair in RequestResults)
-                if (now - pair.Value.CreatedAt > TimeSpan.FromMinutes(2)) RequestResults.TryRemove(pair.Key, out _);
-            string key = $"{session.AuthenticatedUserId.Value}:{command}:{requestGuid:N}";
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "A valid request id is required." };
             string fingerprint = command == Commands.UpdateCoins
                 ? $"delta:{req.CoinsDelta?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}"
                 : $"item:{req.Category?.Trim()}:{req.ItemIndex?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}:{req.Price?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}";
-            CachedRequest cached = RequestResults.GetOrAdd(key, _ => new CachedRequest(now, fingerprint,
-                new Lazy<Task<ResponsePacket>>(() => DispatchCoreAsync(session, req, repo, token))));
-            if (!string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
-                return Task.FromResult(new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Request id was already used for a different transaction." });
-            return cached.Result.Value;
+            string fingerprintHash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprint)));
+            int userId = session.AuthenticatedUserId.Value;
+            ResponsePacket response = await state.ExecuteIdempotentAsync(
+                userId, command, requestGuid, fingerprintHash,
+                async (conn, tx) =>
+                {
+                    if (command == Commands.UpdateCoins)
+                    {
+                        if (!req.CoinsDelta.HasValue || req.CoinsDelta.Value >= 0 || req.CoinsDelta.Value < -MaxCoinsDeltaPerRequest)
+                            return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Client coin grants are disabled; rewards must be confirmed by the server." };
+                        return await repo.CongTruXuTrongGiaoDichAsync(conn, tx, userId, req.CoinsDelta.Value, token).ConfigureAwait(false);
+                    }
+
+                    string category = (req.Category ?? string.Empty).Trim();
+                    int itemIndex = req.ItemIndex ?? -1;
+                    if (!CategoryRegex.IsMatch(category) || !string.Equals(category, "Scooter", StringComparison.Ordinal) ||
+                        itemIndex < 0 || itemIndex >= ScooterPrices.Length)
+                        return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid item." };
+
+                    return await repo.MuaTrongGiaoDichAsync(conn, tx, userId, category, itemIndex, ScooterPrices[itemIndex], token).ConfigureAwait(false);
+                }, token).ConfigureAwait(false);
+
+            repo.XoaCacheKhoSauGiaoDich(userId);
+            if (response.Inventory != null)
+                response.Inventory = await repo.LayKhoAsync(userId, token).ConfigureAwait(false);
+            return response;
         }
 
         private static async Task<ResponsePacket> DispatchCoreAsync(
             ClientSession session,
             RequestPacket req,
             NguoiDungRepository repo,
+            ServerStateRepository state,
             CancellationToken token)
         {
             string cmd = (req.Command ?? string.Empty).Trim().ToUpperInvariant();
@@ -203,20 +252,18 @@ namespace DanToPhong.Server
             {
                 return cmd switch
                 {
-                    Commands.Register => await HandleRegisterAsync(req, repo, token).ConfigureAwait(false),
-                    Commands.Login => await HandleLoginAsync(session, req, repo, token).ConfigureAwait(false),
+                    Commands.Register => await HandleRegisterAsync(req, repo, state, token).ConfigureAwait(false),
+                    Commands.Login => await HandleLoginAsync(session, req, repo, state, token).ConfigureAwait(false),
                     Commands.GetInfo => await HandleGetInfoAsync(session, repo, token).ConfigureAwait(false),
-                    Commands.Logout => HandleLogout(session),
-                    Commands.ResetPassword => await HandleResetPasswordAsync(req, repo, token).ConfigureAwait(false),
-                    Commands.RequestResetCode => await HandleRequestResetCodeAsync(req, repo, token).ConfigureAwait(false),
-                    Commands.RequestRegistrationCode => await HandleRequestRegistrationCodeAsync(req, repo, token).ConfigureAwait(false),
-                    Commands.UpdateCoins => await HandleUpdateCoinsAsync(session, req, repo, token).ConfigureAwait(false),
+                    Commands.Logout => await HandleLogoutAsync(session, state, token).ConfigureAwait(false),
+                    Commands.ResetPassword => await HandleResetPasswordAsync(req, repo, state, token).ConfigureAwait(false),
+                    Commands.RequestResetCode => await HandleRequestResetCodeAsync(req, repo, state, token).ConfigureAwait(false),
+                    Commands.RequestRegistrationCode => await HandleRequestRegistrationCodeAsync(req, repo, state, token).ConfigureAwait(false),
                     Commands.JoinRoom => await HandleJoinRoomAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.ChangeAvatar => await HandleChangeAvatarAsync(session, req, repo, token).ConfigureAwait(false),
 
-                    Commands.AuthToken => HandleAuthToken(session, req),
+                    Commands.AuthToken => await HandleAuthTokenAsync(session, req, state, token).ConfigureAwait(false),
                     Commands.GetInventory => await HandleGetInventoryAsync(session, repo, token).ConfigureAwait(false),
-                    Commands.BuyItem => await HandleBuyAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.Equip => await HandleEquipAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.SetMap => await HandleSetMapAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.UploadAvatar => await HandleUploadAvatarAsync(session, req, repo, token).ConfigureAwait(false),
@@ -268,13 +315,12 @@ namespace DanToPhong.Server
             Message = "Session is not authenticated."
         };
 
-        private static ResponsePacket HandleLogout(ClientSession session)
+        private static async Task<ResponsePacket> HandleLogoutAsync(ClientSession session, ServerStateRepository state, CancellationToken token)
         {
             int? userId = session.AuthenticatedUserId;
             if (userId.HasValue)
             {
-                foreach (var pair in Tokens)
-                    if (pair.Value.UserId == userId.Value) Tokens.TryRemove(pair.Key, out _);
+                await state.RevokeUserTokensAsync(userId.Value, token).ConfigureAwait(false);
                 foreach (ClientSession active in ActiveSessions.Values.Where(s => s.AuthenticatedUserId == userId.Value && s != session))
                 {
                     active.AuthenticatedUserId = null;
@@ -298,6 +344,7 @@ namespace DanToPhong.Server
         private static async Task<ResponsePacket> HandleRegisterAsync(
             RequestPacket req,
             NguoiDungRepository repo,
+            ServerStateRepository state,
             CancellationToken token)
         {
             string? racerId = req.RacerId?.Trim();
@@ -340,16 +387,9 @@ namespace DanToPhong.Server
                 }
             }
 
-            await ResetPasswordGate.WaitAsync(token).ConfigureAwait(false);
-            (bool Success, string Code, string Message, string? RacerId) result;
-            try
-            {
-                if (!ValidateVerificationCode(verificationKey, req.VerificationCode))
-                    return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
-                result = await repo.DangKyAsync(req, token).ConfigureAwait(false);
-                if (result.Success) ResetCodes.TryRemove(verificationKey, out _);
-            }
-            finally { ResetPasswordGate.Release(); }
+            if (!await state.VerifyAndConsumeCodeAsync(verificationKey, req.VerificationCode, token).ConfigureAwait(false))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
+            var result = await repo.DangKyAsync(req, token).ConfigureAwait(false);
             return new ResponsePacket
             {
                 Success = result.Success,
@@ -371,6 +411,7 @@ namespace DanToPhong.Server
             ClientSession session,
             RequestPacket req,
             NguoiDungRepository repo,
+            ServerStateRepository state,
             CancellationToken token)
         {
             string username = (req.Username ?? string.Empty).Trim();
@@ -397,15 +438,11 @@ namespace DanToPhong.Server
                 };
             }
 
+            // Chỉ lưu hash của token; game nhận token gốc đúng một lần ở response.
+            string authToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+            await state.SaveTokenAsync(authToken, user.UserId, user.Username, DateTime.UtcNow.AddHours(6), token).ConfigureAwait(false);
             session.AuthenticatedUserId = user.UserId;
             session.AuthenticatedUsername = user.Username;
-
-            // dọn token hết hạn, rồi cấp token mới cho game Unity
-            foreach (var kv in Tokens)
-                if (kv.Value.Exp < DateTime.UtcNow) Tokens.TryRemove(kv.Key, out _);
-
-            string authToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-            Tokens[authToken] = (user.UserId, user.Username, DateTime.UtcNow.AddHours(6));
             session.AuthToken = authToken;
 
             return new ResponsePacket
@@ -418,16 +455,18 @@ namespace DanToPhong.Server
             };
         }
 
-        private static ResponsePacket HandleAuthToken(ClientSession session, RequestPacket req)
+        private static async Task<ResponsePacket> HandleAuthTokenAsync(ClientSession session, RequestPacket req, ServerStateRepository state, CancellationToken token)
         {
-            if (!string.IsNullOrEmpty(req.Token) &&
-                Tokens.TryGetValue(req.Token, out var t) &&
-                t.Exp > DateTime.UtcNow)
+            if (!string.IsNullOrEmpty(req.Token))
             {
-                session.AuthenticatedUserId = t.UserId;
-                session.AuthenticatedUsername = t.Username;
-                session.AuthToken = req.Token;
-                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "OK" };
+                var stored = await state.ValidateTokenAsync(req.Token, token).ConfigureAwait(false);
+                if (stored.HasValue)
+                {
+                    session.AuthenticatedUserId = stored.Value.UserId;
+                    session.AuthenticatedUsername = stored.Value.Username;
+                    session.AuthToken = req.Token;
+                    return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "OK" };
+                }
             }
 
             return new ResponsePacket
@@ -439,7 +478,7 @@ namespace DanToPhong.Server
         }
 
         private static async Task<ResponsePacket> HandleRequestResetCodeAsync(
-            RequestPacket req, NguoiDungRepository repo, CancellationToken token)
+            RequestPacket req, NguoiDungRepository repo, ServerStateRepository state, CancellationToken token)
         {
             string username = (req.Username ?? string.Empty).Trim();
             string email = (req.Email ?? string.Empty).Trim();
@@ -447,8 +486,7 @@ namespace DanToPhong.Server
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
 
             string key = $"reset|{username}|{email.ToLowerInvariant()}";
-            DateTime now = DateTime.UtcNow;
-            if (ResetCodeCooldowns.TryGetValue(key, out DateTime nextAllowed) && nextAllowed > now)
+            if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
                 return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "If the account matches, a code has been sent to the registered email." };
 
             UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
@@ -459,8 +497,7 @@ namespace DanToPhong.Server
                 try
                 {
                     await EmailVerificationService.SendCodeAsync(email, code, passwordReset: true).ConfigureAwait(false);
-                    ResetCodes[key] = new ResetCode(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(code)), now.AddMinutes(10), 0);
-                    ResetCodeCooldowns[key] = now.AddSeconds(60);
+                    await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -474,7 +511,7 @@ namespace DanToPhong.Server
         }
 
         private static async Task<ResponsePacket> HandleRequestRegistrationCodeAsync(
-            RequestPacket req, NguoiDungRepository repo, CancellationToken token)
+            RequestPacket req, NguoiDungRepository repo, ServerStateRepository state, CancellationToken token)
         {
             string username = (req.Username ?? string.Empty).Trim();
             string email = (req.Email ?? string.Empty).Trim();
@@ -483,8 +520,7 @@ namespace DanToPhong.Server
 
             string key = $"register|{username}|{email.ToLowerInvariant()}";
             string responseMessage = "If the username is available, a code has been sent to the email.";
-            DateTime now = DateTime.UtcNow;
-            if (ResetCodeCooldowns.TryGetValue(key, out DateTime nextAllowed) && nextAllowed > now)
+            if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
                 return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
 
             if (!await repo.UsernameExistsAsync(username, token).ConfigureAwait(false))
@@ -493,8 +529,7 @@ namespace DanToPhong.Server
                 try
                 {
                     await EmailVerificationService.SendCodeAsync(email, code, passwordReset: false).ConfigureAwait(false);
-                    ResetCodes[key] = new ResetCode(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(code)), now.AddMinutes(10), 0);
-                    ResetCodeCooldowns[key] = now.AddSeconds(60);
+                    await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -503,16 +538,6 @@ namespace DanToPhong.Server
                 }
             }
             return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
-        }
-
-        private static bool ValidateVerificationCode(string key, string? code)
-        {
-            if (!ResetCodes.TryGetValue(key, out ResetCode? pending) || pending.ExpiresAt <= DateTime.UtcNow || pending.Attempts >= 5)
-                return false;
-            byte[] suppliedHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(code ?? string.Empty));
-            if (CryptographicOperations.FixedTimeEquals(suppliedHash, pending.Hash)) return true;
-            ResetCodes[key] = pending with { Attempts = pending.Attempts + 1 };
-            return false;
         }
 
         private static async Task<ResponsePacket> HandleGetInfoAsync(
@@ -544,39 +569,6 @@ namespace DanToPhong.Server
             };
         }
 
-        private static async Task<ResponsePacket> HandleUpdateCoinsAsync(
-            ClientSession session,
-            RequestPacket req,
-            NguoiDungRepository repo,
-            CancellationToken token)
-        {
-            if (!session.AuthenticatedUserId.HasValue) return Unauth();
-
-            if (!req.CoinsDelta.HasValue || req.CoinsDelta.Value == 0)
-            {
-                return new ResponsePacket
-                {
-                    Success = false,
-                    Code = ErrorCodes.InvalidInput,
-                    Message = "Invalid coins delta."
-                };
-            }
-
-            int delta = Math.Clamp(req.CoinsDelta.Value, -MaxCoinsDeltaPerRequest, MaxCoinsDeltaPerRequest);
-
-            var result = await repo.CongTruXuAsync(session.AuthenticatedUserId.Value, delta, token)
-                .ConfigureAwait(false);
-
-            return new ResponsePacket
-            {
-                Success = result.Success,
-                Code = result.Code,
-                Message = result.Message,
-                User = result.User,
-                Inventory = await repo.LayKhoAsync(session.AuthenticatedUserId.Value, token).ConfigureAwait(false)
-            };
-        }
-
         private static async Task<ResponsePacket> HandleGetInventoryAsync(
             ClientSession session,
             NguoiDungRepository repo,
@@ -584,38 +576,6 @@ namespace DanToPhong.Server
         {
             if (!session.AuthenticatedUserId.HasValue) return Unauth();
             return await InvResp(session, repo, token, true, ErrorCodes.Ok, "OK").ConfigureAwait(false);
-        }
-
-        private static async Task<ResponsePacket> HandleBuyAsync(
-            ClientSession session,
-            RequestPacket req,
-            NguoiDungRepository repo,
-            CancellationToken token)
-        {
-            if (!session.AuthenticatedUserId.HasValue) return Unauth();
-
-            string cat = (req.Category ?? "").Trim();
-            int idx = req.ItemIndex ?? -1;
-            if (!CategoryRegex.IsMatch(cat) || idx < 0 || idx > 999)
-                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid item." };
-
-            int price;
-            if (cat == "Scooter")
-            {
-                if (idx >= ScooterPrices.Length)
-                    return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid item." };
-                price = ScooterPrices[idx];   // luôn dùng giá server, bỏ qua giá client gửi
-            }
-            else
-            {
-                price = Math.Clamp(req.Price ?? 0, 0, MaxCoinsDeltaPerRequest);
-            }
-
-            var (ok, code) = await repo.MuaAsync(session.AuthenticatedUserId.Value, cat, idx, price, token)
-                .ConfigureAwait(false);
-
-            return await InvResp(session, repo, token, ok, code, ok ? "Purchased." : "Purchase failed.")
-                .ConfigureAwait(false);
         }
 
         private static async Task<ResponsePacket> HandleEquipAsync(
@@ -923,6 +883,7 @@ namespace DanToPhong.Server
         private static async Task<ResponsePacket> HandleResetPasswordAsync(
             RequestPacket req,
             NguoiDungRepository repo,
+            ServerStateRepository state,
             CancellationToken token)
         {
             string username = (req.Username ?? string.Empty).Trim();
@@ -942,41 +903,26 @@ namespace DanToPhong.Server
             }
 
             string key = $"reset|{username}|{email.ToLowerInvariant()}";
-            await ResetPasswordGate.WaitAsync(token).ConfigureAwait(false);
-            try
+            if (!await state.VerifyAndConsumeCodeAsync(key, req.VerificationCode, token).ConfigureAwait(false))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
+
+            var result = await repo.DoiMatKhauAsync(username, email, newPassword, token).ConfigureAwait(false);
+            if (result.Success)
             {
-                if (!ResetCodes.TryGetValue(key, out ResetCode? pending) || pending.ExpiresAt <= DateTime.UtcNow || pending.Attempts >= 5)
-                    return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
-
-                byte[] suppliedHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(req.VerificationCode ?? string.Empty));
-                if (!CryptographicOperations.FixedTimeEquals(suppliedHash, pending.Hash))
+                UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
+                if (user != null)
                 {
-                    ResetCodes[key] = pending with { Attempts = pending.Attempts + 1 };
-                    return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
-                }
-
-                var result = await repo.DoiMatKhauAsync(username, email, newPassword, token).ConfigureAwait(false);
-                if (result.Success)
-                {
-                    ResetCodes.TryRemove(key, out _);
-                    ResetCodeCooldowns.TryRemove(key, out _);
-                    UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
-                    if (user != null)
+                    RoomRegistry.RemoveByOwner(user.UserId);
+                    foreach (ClientSession active in ActiveSessions.Values.Where(s => s.AuthenticatedUserId == user.UserId))
                     {
-                        RoomRegistry.RemoveByOwner(user.UserId);
-                        foreach (var pair in Tokens)
-                            if (pair.Value.UserId == user.UserId) Tokens.TryRemove(pair.Key, out _);
-                        foreach (ClientSession active in ActiveSessions.Values.Where(s => s.AuthenticatedUserId == user.UserId))
-                        {
-                            active.AuthenticatedUserId = null;
-                            active.AuthenticatedUsername = null;
-                            try { active.Client.Close(); } catch { }
-                        }
+                        active.AuthenticatedUserId = null;
+                        active.AuthenticatedUsername = null;
+                        active.AuthToken = null;
+                        try { active.Client.Close(); } catch { }
                     }
                 }
-                return new ResponsePacket { Success = result.Success, Code = result.Code, Message = result.Message };
             }
-            finally { ResetPasswordGate.Release(); }
+            return new ResponsePacket { Success = result.Success, Code = result.Code, Message = result.Message };
         }
 
         private static bool IsValidPassword(string password)

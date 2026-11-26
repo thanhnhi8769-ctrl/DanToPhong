@@ -209,9 +209,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   tocDoXe: 15
   heSoTangToc: 1.6
-  lucReXe: 85
+  lucReXe: 120
   giaToc: 6
-  doMuotLai: 20
+  doMuotLai: 5
   hieuUngPhanh: {fileID: 0}
   lucNhay: 5
   thoiGianCoyote: 0.05
@@ -329,6 +329,7 @@ MonoBehaviour:
   doTreNoiSuy: 0.15
   thoiGianDuDoanToiDa: 0.22
   khoangCachDichChuyen: 6
+  tyLeHermite: 0.72
   khoaVatLyXeNguoiKhac: 1
 --- !u!1 &3910131602830119342
 GameObject:
