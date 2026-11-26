@@ -214,7 +214,7 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 - Không ghi DB, SMTP, certificate secret hoặc private key thật trong repo. File env mẫu chỉ chứa placeholder; file vận hành phải ở SSM/secret store hoặc path hạn chế quyền.
 - Client server config không nên chứa credential bí mật. Host/port/TLS là cấu hình public; sau khi có EIP thật cần cập nhật config release.
 - TLS đã có tùy chọn hai đầu nhưng phải bật đồng bộ và dùng chứng chỉ hợp lệ cho host client kết nối. Không dùng TLS `false` cho tài khoản thật qua Internet: TCP plaintext có thể lộ mật khẩu/token.
-- RDS không public; DB account nên có quyền tối thiểu cần thiết. SMTP sender cần App Password riêng và rotation nếu từng bị commit/ghi log.
+- RDS hiện `PubliclyAccessible=true` dù Security Group giới hạn inbound; ưu tiên chuyển sang private-only khi được duyệt. DB account nên có quyền tối thiểu cần thiết. SMTP sender cần App Password riêng và rotation nếu từng bị commit/ghi log.
 - Photon App ID là định danh cấu hình client; không đặt DB/SMTP secret trong Unity assets.
 - `.gitignore` trước đây bỏ qua toàn bộ `.unity` nên scene chính không xuất hiện trong clone; đồng thời bỏ qua `.csproj` Launcher/Server. Nay chỉ mở lại scene `Assets/scene/*.unity` và project `.csproj` bên `UI`, còn scene demo package/cache/build vẫn bỏ qua.
 - Cần `git status --short` trước khi push và kiểm tra history nếu secret từng commit. `.gitignore` không xóa secret đã nằm trong commit cũ.
@@ -235,7 +235,7 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 | Source OTP/config | Luồng 465/587 dùng chế độ TLS đúng; lỗi gửi có cleanup reservation; cooldown 60 giây tách với hạn OTP 10 phút; cấu hình port/TLS fail-fast. |
 | Build Server | Sau các sửa đổi cấu hình gần nhất, `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore`: thành công, 0 warning, 0 error. |
 | Build/Publish Launcher | `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o D:\DanToPhong\LauncherRelease`: thành công; output có `UI.exe`; 7 warning (6 nullable annotations trong Designer, 1 trường avatar chưa gán). `server.json` vẫn placeholder TLS; chưa có EIP gắn EC2. |
-| Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp; lệnh AWS chỉ được parse, không chạy. |
+| Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp. Runbook AWS đã được thực thi một lần sau khi người dùng duyệt start; resource cuối cùng đã dừng, không đổi EIP/Security Group. |
 | Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; bổ sung `game` fallback bị thiếu. |
 | Git hygiene | `.gitignore` bỏ qua output; 268 file `bin/obj` và hai `.slnx` đã được gỡ khỏi index. Các thay đổi đã commit cục bộ; chưa push. |
 | Secret scan | Quét signature AWS key/private key và mẫu password cụ thể trong source/config/doc không có kết quả; không thay thế quét Git history/rotation. |

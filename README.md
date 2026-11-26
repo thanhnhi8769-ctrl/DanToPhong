@@ -136,7 +136,7 @@ Xe dùng Rigidbody và xử lý input/vật lý ở máy chủ sở hữu; `Smoo
 ## 7. Bảo mật và kiểm thử trước khi phát hành
 
 - Không commit `.env`, `server.env`, private key/certificate, DB password, SMTP App Password, hoặc dữ liệu cá nhân. Dùng `.gitignore` và kiểm tra `git status --ignored`.
-- TCP/9000 cần TLS trước khi dùng tài khoản thật qua Internet. RDS không public; chỉ EC2 được truy cập cổng DB.
+- TCP/9000 cần TLS trước khi dùng tài khoản thật qua Internet. RDS hiện `PubliclyAccessible=true`; Security Group giới hạn cổng 1433 theo IP quản trị `/32` và Security Group EC2, nhưng nên chuyển RDS sang private-only trong một thay đổi được duyệt.
 - Photon App ID là cấu hình client, không phải secret; không nhúng DB/SMTP credential vào Unity hay Launcher.
 - Mỗi clone cần .NET 10 Desktop Runtime, Launcher Release và `server.json` có endpoint public; Photon phải có cấu hình hợp lệ. Không cần người chơi cài SQL Server khi dùng service cloud.
 - Chạy kiểm thử thủ công: đăng ký+OTP, OTP sai/hết hạn/dùng lại, login/logout và token, mở game bằng token, Solo qua chọn map/kết thúc/reset, hai máy tạo/vào phòng/rời phòng, scene sync và network jitter. Kiểm tra log `journalctl -u dantophong` khi lỗi.
