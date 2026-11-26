@@ -115,7 +115,7 @@ public static class ServerClient
         if (closed || expectedVersion != Volatile.Read(ref lifecycleVersion))
             throw new OperationCanceledException("Connection attempt was canceled.");
 
-        NetworkStream oldStream = ns;
+        Stream oldStream = ns;
         TcpClient oldClient = tcp;
         ns = null;
         tcp = null;

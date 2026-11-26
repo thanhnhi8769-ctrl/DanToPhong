@@ -11,9 +11,14 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | TC05 | TLS handshake và từ chối client plaintext | FAIL — endpoint hiện tại nhận bản tin ứng dụng plaintext; không gửi thông tin đăng nhập | [TC05-tls-plaintext.log](TC05-tls-plaintext.log) |
 | TC06 | DPI: so sánh plaintext/TLS bằng Wireshark | BLOCKED — TLS chưa hoạt động; không tạo capture chứa dữ liệu nhạy cảm | Chưa có |
 | TC07 | Mất mạng, reconnect và server restart | BLOCKED — không có quyền quản trị từ xa khả dụng (SSM không đăng ký); không thể deploy/cấu hình certificate | Chưa có |
+| TC08 | Build Unity Windows x64 từ các scene đang bật trong Build Settings | PASS — player build hoàn tất; chưa chạy game hoặc xác minh kết nối server | [TC08-unity-build.log](TC08-unity-build.log) |
 
 ### Phân tích TC05
 
 TLS handshake không hoàn tất; probe plaintext riêng biệt nhận phản hồi `ERR_INVALID_INPUT` cho một lệnh không tồn tại. Không gửi token, mật khẩu, OTP hay dữ liệu tài khoản. Kết quả cho thấy listener đang chấp nhận protocol plaintext. Không thể sửa cấu hình runtime từ phiên này vì không có SSM, certificate hoặc file cấu hình bí mật ngoài repo. EC2 và RDS đã được dừng sau phép thử.
 
 Các ca BLOCKED chưa được thực hiện; không xem là PASS và không có ảnh/log giả lập.
+
+### TC08 — Unity Windows x64 build
+
+Build bằng Unity Editor 6000.3.28f1 qua `BuildPipeline.BuildPlayer` với target Windows x64. Player được tạo trong thư mục `BuildGameRelease`, vốn bị `.gitignore` loại trừ. Script compilation hoàn tất; còn hai cảnh báo `CS0414` về field chưa dùng trong `HelpSystem` và `scooter`. Build thành công không chứng minh game khởi chạy, gameplay hoạt động hoặc server/Photon có thể kết nối; các kiểm thử runtime này vẫn cần thực hiện riêng.
