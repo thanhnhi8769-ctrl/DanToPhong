@@ -36,7 +36,6 @@ public class GameNetworkManager : MonoBehaviour
     private float thoiDiemQuetTiepTheo = 0f;
 
     // Renderer đã được tách material riêng (mỗi xe một bản, tránh dùng chung màu giữa các xe)
-    private static readonly HashSet<int> rendererDaTachMat = new HashSet<int>();
     private static readonly RaycastHit[] bufferRay = new RaycastHit[32];
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -52,7 +51,6 @@ public class GameNetworkManager : MonoBehaviour
 
     private static void KhiChuyenScene(Scene scene, LoadSceneMode mode)
     {
-        rendererDaTachMat.Clear();
         KiemTraVaTaoManager(scene);
     }
 
@@ -574,14 +572,7 @@ public class GameNetworkManager : MonoBehaviour
 
         if (coDuLieu)
         {
-            // Mỗi xe một bản material riêng: đổi màu xe này không làm đổi màu các xe khác
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                Renderer r = renderers[i];
-                if (r == null || !rendererDaTachMat.Add(r.GetInstanceID())) continue;
-                r.materials = r.materials;
-            }
-
+            // ApplyPaint uses per-renderer property blocks; source/prefab materials stay unchanged.
             VehicleCatalog.ApplyPaint(mauDuocChon.gameObject, du.color);
         }
     }

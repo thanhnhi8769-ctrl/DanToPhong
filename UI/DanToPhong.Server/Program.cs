@@ -35,7 +35,7 @@ namespace DanToPhong.Server
         private static readonly ConcurrentDictionary<string, ResetCode> ResetCodes = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> ResetCodeCooldowns = new(StringComparer.OrdinalIgnoreCase);
         private static readonly SemaphoreSlim ResetPasswordGate = new(1, 1);
-        private sealed record CachedRequest(DateTime CreatedAt, Lazy<Task<ResponsePacket>> Result);
+        private sealed record CachedRequest(DateTime CreatedAt, string Fingerprint, Lazy<Task<ResponsePacket>> Result);
         private static readonly ConcurrentDictionary<string, CachedRequest> RequestResults = new();
 
         private static int ReadPort()
@@ -172,17 +172,22 @@ namespace DanToPhong.Server
         {
             string command = (req.Command ?? string.Empty).Trim().ToUpperInvariant();
             bool mustDeduplicate = command is Commands.UpdateCoins or Commands.BuyItem;
-            if (!mustDeduplicate && (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out _)))
-                return DispatchCoreAsync(session, req, repo, token);
-            if (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out _))
+            if (!mustDeduplicate) return DispatchCoreAsync(session, req, repo, token);
+
+            if (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out Guid requestGuid))
                 return Task.FromResult(new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "A valid request id is required." });
 
             DateTime now = DateTime.UtcNow;
             foreach (var pair in RequestResults)
                 if (now - pair.Value.CreatedAt > TimeSpan.FromMinutes(2)) RequestResults.TryRemove(pair.Key, out _);
-            string key = $"{session.AuthenticatedUserId.Value}:{command}:{req.RequestId}";
-            CachedRequest cached = RequestResults.GetOrAdd(key, _ => new CachedRequest(now,
+            string key = $"{session.AuthenticatedUserId.Value}:{command}:{requestGuid:N}";
+            string fingerprint = command == Commands.UpdateCoins
+                ? $"delta:{req.CoinsDelta?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}"
+                : $"item:{req.Category?.Trim()}:{req.ItemIndex?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}:{req.Price?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}";
+            CachedRequest cached = RequestResults.GetOrAdd(key, _ => new CachedRequest(now, fingerprint,
                 new Lazy<Task<ResponsePacket>>(() => DispatchCoreAsync(session, req, repo, token))));
+            if (!string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
+                return Task.FromResult(new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Request id was already used for a different transaction." });
             return cached.Result.Value;
         }
 

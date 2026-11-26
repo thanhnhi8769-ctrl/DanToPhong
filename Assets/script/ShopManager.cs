@@ -24,12 +24,15 @@ public class NutHieuUng : MonoBehaviour,
     private bool hover, bam;
     private float tHover;
     private float scaleHienTai = 1f;
+    private bool namTrongLayout;
+    private bool taoOutlineRieng;
 
     private void Awake()
     {
         sel = GetComponent<Selectable>();
         chu = GetComponentInChildren<TMP_Text>(true);
         scaleGoc = transform.localScale;
+        namTrongLayout = GetComponentInParent<LayoutGroup>() != null;
 
         if (chu != null)
             mauChuGoc = chu.color;
@@ -37,9 +40,9 @@ public class NutHieuUng : MonoBehaviour,
         Graphic nen = GetComponent<Graphic>();
         if (nen != null)
         {
-            vien = GetComponent<Outline>();
-            if (vien == null)
-                vien = gameObject.AddComponent<Outline>();
+            // Keep authored outlines untouched; this component owns its temporary hover outline.
+            vien = gameObject.AddComponent<Outline>();
+            taoOutlineRieng = true;
 
             vien.effectDistance = new Vector2(2f, -2f);
             vien.effectColor = new Color(1f, 1f, 1f, 0.35f);
@@ -57,10 +60,15 @@ public class NutHieuUng : MonoBehaviour,
         bam = false;
         tHover = 0f;
         scaleHienTai = 1f;
-        transform.localScale = scaleGoc;
+        if (!namTrongLayout) transform.localScale = scaleGoc;
 
         if (chu != null)
             chu.color = mauChuGoc;
+    }
+
+    private void OnDestroy()
+    {
+        if (taoOutlineRieng && vien != null) Destroy(vien);
     }
 
     private void Update()
@@ -74,7 +82,7 @@ public class NutHieuUng : MonoBehaviour,
         if (ok && bam) s *= nenBam;
 
         scaleHienTai = Mathf.Lerp(scaleHienTai, s, 1f - Mathf.Exp(-20f * dt));
-        transform.localScale = scaleGoc * scaleHienTai;
+        if (!namTrongLayout) transform.localScale = scaleGoc * scaleHienTai;
 
         if (vien != null)
         {

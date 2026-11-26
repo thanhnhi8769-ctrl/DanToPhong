@@ -20,6 +20,7 @@ public class ButtonFx : MonoBehaviour,
     private Outline vien;
     private Vector3 scaleGoc;
     private bool hover, bam;
+    private bool namTrongLayout;
     private float tHover;
     private float scaleHienTai = 1f;
 
@@ -27,12 +28,13 @@ public class ButtonFx : MonoBehaviour,
     {
         sel = GetComponent<Selectable>();
         scaleGoc = transform.localScale;
+        namTrongLayout = GetComponentInParent<LayoutGroup>() != null;
 
         Graphic nen = GetComponent<Graphic>();
         if (nen != null)
         {
-            vien = GetComponent<Outline>();
-            if (vien == null) vien = gameObject.AddComponent<Outline>();
+            // Use a dedicated effect so authored outline/material settings remain intact.
+            vien = gameObject.AddComponent<Outline>();
             vien.effectDistance = new Vector2(2f, -2f);
             vien.effectColor = new Color(1f, 1f, 1f, 0.35f);
         }
@@ -49,7 +51,12 @@ public class ButtonFx : MonoBehaviour,
         bam = false;
         tHover = 0f;
         scaleHienTai = 1f;
-        transform.localScale = scaleGoc;
+        if (!namTrongLayout) transform.localScale = scaleGoc;
+    }
+
+    private void OnDestroy()
+    {
+        if (vien != null) Destroy(vien);
     }
 
     private void Update()
@@ -62,7 +69,7 @@ public class ButtonFx : MonoBehaviour,
         if (ok && bam) s *= nenBam;
 
         scaleHienTai = Mathf.Lerp(scaleHienTai, s, 1f - Mathf.Exp(-20f * dt));
-        transform.localScale = scaleGoc * scaleHienTai;
+        if (!namTrongLayout) transform.localScale = scaleGoc * scaleHienTai;
 
         if (vien != null)
         {
@@ -182,6 +189,21 @@ public class SelectManager : MonoBehaviour
         PhotonNetwork.AutomaticallySyncScene = false;
         XoaSceneDongBoCuTrongPhong(); // FIX
         DamBaoEventSystemHoatDong();
+
+        if (VehicleCatalog.Count <= 0)
+        {
+            if (PhotonNetwork.InRoom && PhotonNetwork.LocalPlayer != null)
+                PhotonNetwork.LocalPlayer.SetCustomProperties(new Hashtable { { "DangChonXe", false } });
+            if (warningText != null)
+            {
+                warningText.gameObject.SetActive(true);
+                warningText.text = "NO VEHICLES ARE AVAILABLE. PLEASE RETURN TO THE LOBBY.";
+            }
+            if (confirmButton != null) confirmButton.interactable = false;
+            Debug.LogError("[SelectManager] VehicleCatalog is empty; selection controls are disabled.");
+            return;
+        }
+
         cam = Camera.main;
         cachedCanvas = FindFirstObjectByType<Canvas>();
 
@@ -449,7 +471,12 @@ public class SelectManager : MonoBehaviour
 
         if (!MultiplayerAllInOne.DangGoChat)
         {
-            if (Nhan(Phim.Esc)) { BackToMenu(); return; }
+            if (InputEscapeUtility.TryConsume())
+            {
+                if (HelpSystem.DongNeuDangMo() || MenuLeaderboard.DongNeuDangMo()) return;
+                BackToMenu();
+                return;
+            }
             if (Nhan(Phim.Trai)) PreviousItem();
             else if (Nhan(Phim.Phai)) NextItem();
             else if (Nhan(Phim.Enter)) ConfirmSelection();
@@ -843,6 +870,17 @@ public class SelectManager : MonoBehaviour
 
     private void CapNhatGiaoDien()
     {
+        if (VehicleCatalog.Count <= 0)
+        {
+            if (confirmButton != null) confirmButton.interactable = false;
+            if (warningText != null)
+            {
+                warningText.gameObject.SetActive(true);
+                warningText.text = "NO VEHICLES ARE AVAILABLE.";
+            }
+            return;
+        }
+
         LayHoacTaoXe(scooterIndex);
 
         VehicleCatalog.VehicleData data = VehicleCatalog.Get(scooterIndex);
@@ -884,6 +922,15 @@ public class SelectManager : MonoBehaviour
 
     public void ConfirmSelection()
     {
+        if (VehicleCatalog.Count <= 0)
+        {
+            if (warningText != null)
+            {
+                warningText.gameObject.SetActive(true);
+                warningText.text = "NO VEHICLES ARE AVAILABLE. PLEASE RETURN TO THE LOBBY.";
+            }
+            return;
+        }
         Debug.Log($"[SelectManager] CLICK CONFIRM! index={scooterIndex}, owned={VehicleCatalog.IsOwned(scooterIndex)}, inRoom={PhotonNetwork.InRoom}, lobby={tenSceneLobby}");
         if (dangChuyenScene) return;
 
@@ -906,14 +953,29 @@ public class SelectManager : MonoBehaviour
             }
         }
 
+        if (!VehicleCatalog.SelectVehicle(scooterIndex))
+        {
+            if (warningText != null)
+            {
+                warningText.gameObject.SetActive(true);
+                warningText.text = "COULD NOT SAVE THIS SCOOTER. PLEASE TRY AGAIN.";
+            }
+            return;
+        }
         dangChuyenScene = true;
-        VehicleCatalog.SelectVehicle(scooterIndex);
 
         bool laChuPhongHienTai = PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient;
 
         if (laChuPhongHienTai && maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
         {
-            PlayerInventory.SetSelectedMap(maps[mapIndex].sceneName);
+            string selectedMap = maps[mapIndex].sceneName;
+            if (!string.IsNullOrWhiteSpace(selectedMap) && Application.CanStreamedLevelBeLoaded(selectedMap))
+                PlayerInventory.SetSelectedMap(selectedMap);
+            else if (warningText != null)
+            {
+                warningText.gameObject.SetActive(true);
+                warningText.text = $"MAP '{selectedMap}' IS NOT INCLUDED IN THIS BUILD.";
+            }
         }
 
         if (PhotonNetwork.InRoom)
@@ -955,6 +1017,17 @@ public class SelectManager : MonoBehaviour
             string mapToLoad = (maps != null && maps.Length > 0 && mapIndex < maps.Length && maps[mapIndex] != null)
                 ? maps[mapIndex].sceneName
                 : tenSceneMenu;
+            if (string.IsNullOrWhiteSpace(mapToLoad) || !Application.CanStreamedLevelBeLoaded(mapToLoad))
+            {
+                Debug.LogError($"[SelectManager] Cannot load selected scene '{mapToLoad}'.");
+                if (warningText != null)
+                {
+                    warningText.gameObject.SetActive(true);
+                    warningText.text = "THE SELECTED MAP IS NOT AVAILABLE IN THIS BUILD.";
+                }
+                dangChuyenScene = false;
+                return;
+            }
             SceneManager.LoadScene(mapToLoad);
         }
     }
@@ -996,4 +1069,4 @@ public class SelectManager : MonoBehaviour
         DieuHuong.VeMenu(tenSceneMenu);
     }
 }
-        
+

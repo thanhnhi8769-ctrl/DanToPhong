@@ -31,6 +31,8 @@ public static class ServerClient
     private static bool closed;      // Close() đã được gọi: không tự nối lại nữa
     private static bool resyncing;
     private static int connId;       // tăng mỗi lần mở kết nối mới
+    private static int lifecycleVersion;
+    private static readonly SemaphoreSlim connectGate = new SemaphoreSlim(1, 1);
 
     // Các lệnh trong danh sách có thể retry sau reconnect. CAPNHATXU/MUAHANG
     // chỉ an toàn vì giữ nguyên requestId và server khử trùng lặp theo user + command + id.
@@ -75,17 +77,23 @@ public static class ServerClient
     // ---------------------------------------------------------------------
     public static async Task<bool> ConnectAsync()
     {
+        await connectGate.WaitAsync();
         try
         {
+            if (!closed && ns != null && tcp != null && tcp.Connected && Cache != null) return true;
             if (string.IsNullOrWhiteSpace(LauncherArgs.Host) || LauncherArgs.Port < 1 || LauncherArgs.Port > 65535 || string.IsNullOrWhiteSpace(LauncherArgs.Token))
                 throw new InvalidOperationException("Launcher connection arguments are missing or invalid.");
             closed = false;
-            await OpenAsync();
+            int version = Interlocked.Increment(ref lifecycleVersion);
+            await OpenAsync(version);
+            if (closed || version != Volatile.Read(ref lifecycleVersion)) return false;
 
             Resp r = await SendOnce(new Req { command = "XACTHUCTOKEN", token = LauncherArgs.Token });
+            if (closed || version != Volatile.Read(ref lifecycleVersion)) return false;
             if (r == null || !r.success) { Close(); return false; }
 
             r = await SendOnce(new Req { command = "LAYKHO" });
+            if (closed || version != Volatile.Read(ref lifecycleVersion)) return false;
             if (r != null && r.success && Cache != null) return true;
             Close();
             return false;
@@ -96,28 +104,43 @@ public static class ServerClient
             Close();
             return false;
         }
+        finally { connectGate.Release(); }
     }
 
-    private static async Task OpenAsync()
+    private static async Task OpenAsync(int expectedVersion)
     {
-        try { ns?.Dispose(); } catch { }
-        try { tcp?.Close(); } catch { }
+        if (closed || expectedVersion != Volatile.Read(ref lifecycleVersion))
+            throw new OperationCanceledException("Connection attempt was canceled.");
 
-        tcp = new TcpClient();
-        Task connect = tcp.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
+        NetworkStream oldStream = ns;
+        TcpClient oldClient = tcp;
+        ns = null;
+        tcp = null;
+        try { oldStream?.Dispose(); } catch { }
+        try { oldClient?.Close(); } catch { }
+
+        TcpClient client = new TcpClient();
+        tcp = client;
+        Task connect = client.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
         using (var timeout = new CancellationTokenSource())
         {
             Task delay = Task.Delay(TIMEOUT_MS, timeout.Token);
             if (await Task.WhenAny(connect, delay) != connect)
             {
-                try { tcp.Close(); } catch { }
-                tcp = null;
+                try { client.Close(); } catch { }
+                if (ReferenceEquals(tcp, client)) tcp = null;
                 throw new TimeoutException("Connection timeout");
             }
             timeout.Cancel();
         }
         await connect;
-        ns = tcp.GetStream();
+        if (closed || expectedVersion != Volatile.Read(ref lifecycleVersion))
+        {
+            try { client.Close(); } catch { }
+            if (ReferenceEquals(tcp, client)) tcp = null;
+            throw new OperationCanceledException("Connection attempt was canceled.");
+        }
+        ns = client.GetStream();
         connId++;
     }
 
@@ -125,13 +148,15 @@ public static class ServerClient
     private static async Task<bool> ReconnectAsync()
     {
         if (closed) return false;
+        int version = Volatile.Read(ref lifecycleVersion);
 
         await gate.WaitAsync();
         try
         {
-            await OpenAsync();
+            if (closed || version != Volatile.Read(ref lifecycleVersion)) return false;
+            await OpenAsync(version);
             var (a, _) = await ExchangeVoiTimeout(new Req { command = "XACTHUCTOKEN", token = LauncherArgs.Token });
-            return a != null && a.success;
+            return !closed && version == Volatile.Read(ref lifecycleVersion) && a != null && a.success;
         }
         catch (Exception e)
         {
@@ -216,7 +241,7 @@ public static class ServerClient
         Resp resp = JsonUtility.FromJson<Resp>(Encoding.UTF8.GetString(rb));
 
         bool doi = false;
-        if (CoKho(resp))
+        if (!closed && CoKho(resp))
         {
             doi = Cache == null || Sig(Cache) != Sig(resp.inventory);
             Cache = resp.inventory;
@@ -295,6 +320,7 @@ public static class ServerClient
     public static void Close()
     {
         closed = true;
+        Interlocked.Increment(ref lifecycleVersion);
         try { ns?.Dispose(); } catch { }
         try { tcp?.Close(); } catch { }
         ns = null; tcp = null; Cache = null;

@@ -94,7 +94,9 @@ public class LobbyCountdownUI : MonoBehaviour
     // Gọi từ nút vào game: lobby.DemNguocRoiVao(() => PhotonNetwork.LoadLevel(GameNetworkManager.LayTenSceneVaoGame()));
     public void DemNguocRoiVao(System.Action vaoGame)
     {
-        if (dangDem || VaoGameCooldown.DangCho) return;
+        // LobbyManager owns the Photon synchronized countdown for a room.
+        // This local UI countdown must not race it or load a scene independently.
+        if (PhotonNetwork.InRoom || dangDem || VaoGameCooldown.DangCho) return;
         StartCoroutine(ChayDemNguoc(vaoGame));
     }
 
@@ -118,8 +120,25 @@ public class LobbyCountdownUI : MonoBehaviour
             yield return null;
         }
 
+        if (PhotonNetwork.InRoom)
+        {
+            dangDem = false;
+            VaoGameCooldown.DangDemNguoc = false;
+            CapNhat(true);
+            yield break;
+        }
+
         // Giữ nút khóa tới khi scene đổi (DangDemNguoc chỉ được reset khi lobby mở lại)
-        if (vaoGame != null) vaoGame();
+        try { vaoGame?.Invoke(); }
+        catch (System.Exception ex)
+        {
+            Debug.LogError("[LobbyCountdownUI] Could not enter the selected scene: " + ex.Message);
+            dangDem = false;
+            VaoGameCooldown.DangDemNguoc = false;
+            if (chuDemNguoc != null) chuDemNguoc.text = "Could not load the scene. Please try again.";
+            CapNhat(true);
+            yield break;
+        }
 
         // Phòng khi nạp scene thất bại: sau 8 giây mở khóa lại để không kẹt nút
         yield return new WaitForSecondsRealtime(8f);

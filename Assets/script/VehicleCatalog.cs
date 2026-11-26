@@ -177,8 +177,7 @@ public static class VehicleCatalog
         return null;
     }
 
-    // Tô màu thân xe, bỏ qua bánh/lốp. Mỗi renderer chỉ tạo bản sao Material 1 lần
-    // (renderer.materials trả lại đúng bản sao đó ở các lần sau), gọi lại nhiều lần không rò bộ nhớ.
+    // Tô màu theo từng renderer bằng MaterialPropertyBlock, bỏ qua bánh/lốp và không sửa Material gốc.
     public static void ApplyPaint(GameObject model, Color color)
     {
         if (model == null) return;
@@ -214,21 +213,17 @@ public static class VehicleCatalog
             }
             if (!coMatCanTo) continue;
 
-            Material[] mats = renderer.materials;   // bản sao riêng của renderer này
-            int n = Mathf.Min(mats.Length, canTo.Length);
+            int n = canTo.Length;
 
             for (int i = 0; i < n; i++)
             {
-                if (!canTo[i] || mats[i] == null) continue;
+                Material mat = shared[i];
+                if (!canTo[i] || mat == null || (!mat.HasProperty("_BaseColor") && !mat.HasProperty("_Color"))) continue;
 
-                Material mat = mats[i];
-                if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", mauApDung);
-                if (mat.HasProperty("_Color")) mat.SetColor("_Color", mauApDung);
-                mat.color = mauApDung;
-
+                propBlock.Clear();
                 renderer.GetPropertyBlock(propBlock, i);
-                propBlock.SetColor("_BaseColor", mauApDung);
-                propBlock.SetColor("_Color", mauApDung);
+                if (mat.HasProperty("_BaseColor")) propBlock.SetColor("_BaseColor", mauApDung);
+                if (mat.HasProperty("_Color")) propBlock.SetColor("_Color", mauApDung);
                 renderer.SetPropertyBlock(propBlock, i);
 
                 soDaTo++;

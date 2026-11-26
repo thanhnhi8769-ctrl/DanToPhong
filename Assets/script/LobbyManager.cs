@@ -57,13 +57,13 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     private const int SO_LAN_THU_TAO_PHONG_TOI_DA = 5;
     private Coroutine coroutineThongBao;
     private Coroutine coChoLenh;
+    private Coroutine coDemMayKhach;
     private Button startBtnCache;
     private readonly StringBuilder sb = new StringBuilder(128);
 
     // Launcher: tự tạo phòng / tự vào phòng theo mã (dùng 1 lần)
     private bool daTuDongTheoLauncher;
 
-    private static bool dangQuaSceneChonXe = false;
     private static bool coSanPhongTuVanTruoc = false;
 
     public static void DanhDauCoSanPhongTuVanTruoc()
@@ -105,7 +105,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         PhotonNetwork.PhotonServerSettings.AppSettings.FixedRegion = string.IsNullOrWhiteSpace(region) ? null : region.Trim();
 
         if (string.IsNullOrEmpty(PhotonNetwork.NickName))
-            PhotonNetwork.NickName = "Player" + Random.Range(1000, 10000);
+        PhotonNetwork.NickName = "Player" + UnityEngine.Random.Range(1000, 10000);
 
         if (startButton != null)
         {
@@ -142,7 +142,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         }
 
         coSanPhongTuVanTruoc = false;
-        dangQuaSceneChonXe = false;
 
         if (PhotonNetwork.InRoom)
         {
@@ -361,7 +360,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             return;
         }
 
-        dangQuaSceneChonXe = true;
         StopAllCoroutines();
         PhotonNetwork.AutomaticallySyncScene = false;
         SceneManager.LoadScene(tenSceneSelect);
@@ -373,7 +371,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         dangDem = false;
         daGoiNapScene = false;
         giayDemCuoi = -1;
-        dangQuaSceneChonXe = false;
 
         if (PhotonNetwork.InRoom)
         {
@@ -441,13 +438,14 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     public override void OnLeftRoom()
     {
         coSanPhongTuVanTruoc = false;
+        StopAllCoroutines();
         dangXuLy = false;
         dangDem = false;
         daGoiNapScene = false;
         giayDemCuoi = -1;
-        StopAllCoroutines();
         coroutineThongBao = null;
         coChoLenh = null;
+        coDemMayKhach = null;
 
         HienGiaoDienChuaVaoPhong();
         statusText.text = "Left the room. Click CREATE ROOM or enter a code to JOIN ROOM.";
@@ -464,6 +462,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     {
         if (dangThoat) return;
 
+        StopAllCoroutines();
         coSanPhongTuVanTruoc = false;
         dangXuLy = false;
         dangDem = false;
@@ -471,6 +470,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         giayDemCuoi = -1;
         HuyChoLenh();
         coroutineThongBao = null;
+        coDemMayKhach = null;
 
         HienGiaoDienChuaVaoPhong();
 
@@ -508,7 +508,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         char[] ma = new char[doDai];
         for (int i = 0; i < doDai; i++)
         {
-            ma[i] = KY_TU_MA_PHONG[Random.Range(0, KY_TU_MA_PHONG.Length)];
+            ma[i] = KY_TU_MA_PHONG[UnityEngine.Random.Range(0, KY_TU_MA_PHONG.Length)];
         }
         return new string(ma);
     }
@@ -742,6 +742,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             Debug.LogError($"[Lobby] No map or vehicle selected. Press SELECT MAP & VEHICLE to choose.");
             dangDem = false;
             dangXuLy = false;
+            daGoiNapScene = false;
             giayDemCuoi = -1;
             if (PhotonNetwork.InRoom)
             {
@@ -767,6 +768,21 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         // Còn chạy tới đây nghĩa là scene chưa nạp được -> báo lỗi thay vì treo mãi.
         yield return new WaitForSecondsRealtime(Mathf.Max(5f, thoiGianToiDaNapMap));
         Debug.LogError($"[Lobby] Track '{map}' did not load within {thoiGianToiDaNapMap}s. Check the Console / Player.log for Photon errors.");
+        dangDem = false;
+        dangXuLy = false;
+        daGoiNapScene = false;
+        giayDemCuoi = -1;
+        if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient)
+        {
+            PhotonNetwork.CurrentRoom.IsOpen = true;
+            PhotonNetwork.CurrentRoom.SetCustomProperties(new ExitGames.Client.Photon.Hashtable
+            {
+                { KEY_DEM_BAT_DAU, null },
+                { KEY_DEM_GIAY, null },
+                { KEY_DA_NAP, null }
+            });
+        }
+        if (PhotonNetwork.InRoom) HienGiaoDienTrongPhong();
         if (statusText != null)
             statusText.text = "<color=#FF6B6B>Track failed to load.</color>\nPress ESC to leave the room and try again.";
     }
@@ -776,8 +792,10 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         StopAllCoroutines();
         coroutineThongBao = null;
         coChoLenh = null;
+        coDemMayKhach = null;
         dangDem = false;
         dangXuLy = false;
+        daGoiNapScene = false;
         giayDemCuoi = -1;
 
         if (PhotonNetwork.InRoom)
@@ -823,6 +841,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         StopAllCoroutines();
         coroutineThongBao = null;
         coChoLenh = null;
+        coDemMayKhach = null;
 
         dangXuLy = true;
         PhotonNetwork.AutomaticallySyncScene = true;
@@ -847,11 +866,27 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     public override void OnRoomPropertiesUpdate(ExitGames.Client.Photon.Hashtable propertiesThatChanged)
     {
-        if (propertiesThatChanged == null || dangDem) return;
+        if (propertiesThatChanged == null) return;
         if (PhotonNetwork.IsMasterClient) return;
         if (!propertiesThatChanged.ContainsKey(KEY_DEM_BAT_DAU)) return;
 
         object vBatDau = propertiesThatChanged[KEY_DEM_BAT_DAU];
+        if (vBatDau == null)
+        {
+            if (dangDem && !daGoiNapScene)
+            {
+                if (coDemMayKhach != null) StopCoroutine(coDemMayKhach);
+                coDemMayKhach = null;
+                dangDem = false;
+                dangXuLy = false;
+                giayDemCuoi = -1;
+                HienGiaoDienTrongPhong();
+                statusText.text = "<color=#FFFF00>Room start was canceled. Everyone can ready up again.</color>";
+            }
+            return;
+        }
+        if (dangDem) return;
+
         object vGiay = PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey(KEY_DEM_GIAY)
             ? PhotonNetwork.CurrentRoom.CustomProperties[KEY_DEM_GIAY]
             : null;
@@ -859,7 +894,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         PhotonNetwork.AutomaticallySyncScene = true; // FIX: chủ phòng đã START, bật sync để theo chủ phòng vào game
         BatGiaoDienDemNguoc();
-        StartCoroutine(HienDemNguocMayKhach(System.Convert.ToDouble(vBatDau), System.Convert.ToSingle(vGiay)));
+        coDemMayKhach = StartCoroutine(HienDemNguocMayKhach(System.Convert.ToDouble(vBatDau), System.Convert.ToSingle(vGiay)));
     }
 
     // =========================================================================
@@ -886,7 +921,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     {
         if (dangDem && !daGoiNapScene && KhongDuNguoiDeVaoGame())
         {
-            HuyDemNguoc($"<color=#FFFF00>{LayTen(otherPlayer)} left. Not enough players (at least 2 required), countdown canceled!</color>");
+            if (PhotonNetwork.IsMasterClient)
+                HuyDemNguoc($"<color=#FFFF00>{LayTen(otherPlayer)} left. Not enough players (at least 2 required), countdown canceled!</color>");
             return;
         }
 
@@ -895,7 +931,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     public override void OnMasterClientSwitched(Player newMasterClient)
     {
-        if (newMasterClient != null && newMasterClient.IsLocal && TiepQuanDemNguoc()) return;
+        if (newMasterClient == null) return;
+        if (newMasterClient.IsLocal && TiepQuanDemNguoc()) return;
 
         HienThongBaoTamThoi(newMasterClient.IsLocal
             ? "<color=#00FFFF>You are the new Room Host!</color>"
