@@ -30,7 +30,9 @@ public class MenuController : MonoBehaviour
 
     private void Update()
     {
-        if (!NhanEsc()) return;
+        if (!InputEscapeUtility.TryConsume()) return;
+
+        if (HelpSystem.DongNeuDangMo() || MenuLeaderboard.DongNeuDangMo()) return;
 
         if (panelXacNhanThoat != null)
         {
@@ -41,16 +43,6 @@ public class MenuController : MonoBehaviour
         {
             ThoatGame();
         }
-    }
-
-    private static bool NhanEsc()
-    {
-#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
-        var kb = UnityEngine.InputSystem.Keyboard.current;
-        return kb != null && kb.escapeKey.wasPressedThisFrame;
-#else
-        return Input.GetKeyDown(KeyCode.Escape);
-#endif
     }
 
     private void GanHieuUngChoMoiNut()

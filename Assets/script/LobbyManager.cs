@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Text;
 using UnityEngine;
@@ -52,6 +53,8 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     private bool daGoiNapScene = false;
     private int giayDemCuoi = -1;
     private int soLanThuLai = 0;
+    private int soLanThuTaoLaiMaPhong;
+    private const int SO_LAN_THU_TAO_PHONG_TOI_DA = 5;
     private Coroutine coroutineThongBao;
     private Coroutine coChoLenh;
     private Button startBtnCache;
@@ -97,8 +100,9 @@ public class LobbyManager : MonoBehaviourPunCallbacks
         // FIX: khi quay về từ Select thì tắt sync, chỉ bật lại khi chủ phòng bấm START
         PhotonNetwork.AutomaticallySyncScene = !(coSanPhongTuVanTruoc && PhotonNetwork.InRoom);
 
-        PhotonNetwork.GameVersion = "1.0";
-        PhotonNetwork.PhotonServerSettings.AppSettings.FixedRegion = "asia";
+        PhotonNetwork.GameVersion = Environment.GetEnvironmentVariable("DANTOPHONG_PHOTON_VERSION") ?? Application.version;
+        string region = Environment.GetEnvironmentVariable("DANTOPHONG_PHOTON_REGION");
+        PhotonNetwork.PhotonServerSettings.AppSettings.FixedRegion = string.IsNullOrWhiteSpace(region) ? null : region.Trim();
 
         if (string.IsNullOrEmpty(PhotonNetwork.NickName))
             PhotonNetwork.NickName = "Player" + Random.Range(1000, 10000);
@@ -154,8 +158,9 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (InputEscapeUtility.TryConsume())
         {
+            if (HelpSystem.DongNeuDangMo() || MenuLeaderboard.DongNeuDangMo()) return;
             BamNutExit();
         }
     }
@@ -543,6 +548,12 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
     public void CreateRoom()
     {
+        soLanThuTaoLaiMaPhong = 0;
+        TaoPhong();
+    }
+
+    private void TaoPhong()
+    {
         if (dangXuLy || PhotonNetwork.InRoom) return;
 
         if (VaoGameCooldown.ConLai > 0f)
@@ -687,8 +698,6 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     {
         dangDem = true;
         giayDemCuoi = -1;
-
-        FindFirstObjectByType<LobbyInviteUI>()?.HideForStart();
 
         HuyChoLenh();
         if (coroutineThongBao != null) { StopCoroutine(coroutineThongBao); coroutineThongBao = null; }
@@ -858,6 +867,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
     // =========================================================================
     public override void OnJoinedRoom()
     {
+        soLanThuTaoLaiMaPhong = 0;
         ChuanBiLaiPhongChoVangMoi();
         HienGiaoDienTrongPhong();
 
@@ -905,9 +915,18 @@ public class LobbyManager : MonoBehaviourPunCallbacks
 
         if (returnCode == ErrorCode.GameIdAlreadyExists)
         {
-            CreateRoom();
+            if (soLanThuTaoLaiMaPhong < SO_LAN_THU_TAO_PHONG_TOI_DA)
+            {
+                soLanThuTaoLaiMaPhong++;
+                statusText.text = $"Room code collision. Retrying ({soLanThuTaoLaiMaPhong}/{SO_LAN_THU_TAO_PHONG_TOI_DA})...";
+                TaoPhong();
+                return;
+            }
+            soLanThuTaoLaiMaPhong = 0;
+            statusText.text = "Could not create a unique room code after several attempts. Please try again.";
             return;
         }
+        soLanThuTaoLaiMaPhong = 0;
         statusText.text = $"Room creation error ({message}). Please try creating again!";
     }
 

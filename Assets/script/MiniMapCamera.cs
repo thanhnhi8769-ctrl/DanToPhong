@@ -7,6 +7,8 @@ public class MiniMapFollow : MonoBehaviour
 
     void LateUpdate()
     {
+        // MinimapController owns follow behavior when both legacy scripts are on this camera.
+        if (GetComponent<MinimapController>() != null) return;
         if (player != null)
         {
             Vector3 newPosition = player.position;

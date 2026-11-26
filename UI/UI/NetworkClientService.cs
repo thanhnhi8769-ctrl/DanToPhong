@@ -2,6 +2,8 @@
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO;
+using System.Text.Json;
 using DanToPhong.Protocol;
 
 namespace UI.Services
@@ -23,13 +25,38 @@ namespace UI.Services
 
         public event Action<bool, string>? ConnectionStatusChanged;
 
-        public bool IsConnected => _client?.Connected == true && _stream != null;
-
-        public NetworkClientService(string host = "127.0.0.1", int port = 9000)
+        public bool IsConnected
         {
-            _host = host;
-            _port = port;
+            get
+            {
+                try
+                {
+                    return _client?.Connected == true && _stream != null &&
+                           (!_client.Client.Poll(1, SelectMode.SelectRead) || _client.Client.Available > 0);
+                }
+                catch { return false; }
+            }
         }
+
+        public NetworkClientService(string? host = null, int? port = null)
+        {
+            string? fileHost = null;
+            int? filePort = null;
+            string configPath = Path.Combine(AppContext.BaseDirectory, "server.json");
+            if (File.Exists(configPath))
+            {
+                using JsonDocument config = JsonDocument.Parse(File.ReadAllText(configPath));
+                if (config.RootElement.TryGetProperty("host", out JsonElement h)) fileHost = h.GetString();
+                if (config.RootElement.TryGetProperty("port", out JsonElement p) && p.TryGetInt32(out int parsed)) filePort = parsed;
+            }
+            _host = host ?? Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST") ?? fileHost ?? string.Empty;
+            string? envPort = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT");
+            _port = port ?? (int.TryParse(envPort, out int parsedPort) ? parsedPort : filePort ?? 9000);
+            if (string.IsNullOrWhiteSpace(_host) || _port is < 1 or > 65535)
+                throw new InvalidOperationException("Thiếu cấu hình DANTOPHONG_SERVER_HOST/PORT hoặc file server.json.");
+        }
+
+        private static readonly TimeSpan NetworkTimeout = TimeSpan.FromSeconds(12);
 
         public async Task<bool> ConnectAsync(CancellationToken token = default)
         {
@@ -40,9 +67,11 @@ namespace UI.Services
                 DisconnectInternal(raiseEvent: false);
 
                 var client = new TcpClient();
-                await client.ConnectAsync(_host, _port, token);
-
                 _client = client;
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(NetworkTimeout);
+                await client.ConnectAsync(_host, _port, timeout.Token);
+
                 _stream = client.GetStream();
 
                 ConnectionStatusChanged?.Invoke(true, "Connected");
@@ -58,12 +87,14 @@ namespace UI.Services
 
         private async Task<ResponsePacket> SendAndReceiveAsync(RequestPacket request, CancellationToken token = default)
         {
-            await _ioLock.WaitAsync(token);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(NetworkTimeout);
+            await _ioLock.WaitAsync(timeout.Token);
             try
             {
                 if (!IsConnected)
                 {
-                    bool connected = await ConnectAsync(token);
+                    bool connected = await ConnectAsync(timeout.Token);
                     if (!connected || _stream == null)
                     {
                         return new ResponsePacket
@@ -75,8 +106,8 @@ namespace UI.Services
                     }
                 }
 
-                await MessageFramer.SendAsync(_stream!, request, token);
-                ResponsePacket? response = await MessageFramer.ReceiveAsync<ResponsePacket>(_stream!, token);
+                await MessageFramer.SendAsync(_stream!, request, timeout.Token);
+                ResponsePacket? response = await MessageFramer.ReceiveAsync<ResponsePacket>(_stream!, timeout.Token);
 
                 if (response == null)
                 {
@@ -109,6 +140,7 @@ namespace UI.Services
 
         public async Task<ResponsePacket> LoginAsync(string username, string password, CancellationToken token = default)
         {
+            Token = string.Empty;
             ResponsePacket resp = await SendAndReceiveAsync(new RequestPacket
             {
                 Command = Commands.Login,
@@ -130,6 +162,7 @@ namespace UI.Services
             DateTime? birthday,
             string? gender = null,
             string? racerId = null,
+            string verificationCode = "",
             CancellationToken token = default)
         {
             return SendAndReceiveAsync(new RequestPacket
@@ -141,7 +174,8 @@ namespace UI.Services
                 Email = string.IsNullOrWhiteSpace(email) ? null : email,
                 Birthday = birthday,
                 Gender = string.IsNullOrWhiteSpace(gender) ? null : gender,
-                RacerId = string.IsNullOrWhiteSpace(racerId) ? null : racerId
+                RacerId = string.IsNullOrWhiteSpace(racerId) ? null : racerId,
+                VerificationCode = verificationCode
             }, token);
         }
 
@@ -158,7 +192,8 @@ namespace UI.Services
             return SendAndReceiveAsync(new RequestPacket
             {
                 Command = Commands.UpdateCoins,
-                CoinsDelta = delta
+                CoinsDelta = delta,
+                RequestId = Guid.NewGuid().ToString("N")
             }, token);
         }
 
@@ -225,6 +260,7 @@ namespace UI.Services
             string username,
             string email,
             string newPassword,
+            string verificationCode,
             CancellationToken token = default)
         {
             return SendAndReceiveAsync(new RequestPacket
@@ -232,7 +268,28 @@ namespace UI.Services
                 Command = Commands.ResetPassword,
                 Username = username,
                 Email = email,
-                Password = newPassword
+                Password = newPassword,
+                VerificationCode = verificationCode
+            }, token);
+        }
+
+        public Task<ResponsePacket> RequestResetCodeAsync(string username, string email, CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.RequestResetCode,
+                Username = username,
+                Email = email
+            }, token);
+        }
+
+        public Task<ResponsePacket> RequestRegistrationCodeAsync(string username, string email, CancellationToken token = default)
+        {
+            return SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.RequestRegistrationCode,
+                Username = username,
+                Email = email
             }, token);
         }
 

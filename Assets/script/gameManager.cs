@@ -112,9 +112,9 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
 
     [Header("Mạng (chỉ nhiều người) - càng cao xe người khác càng mượt, nhưng tốn băng thông hơn")]
     [Tooltip("PhotonNetwork.SendRate: số gói gửi mỗi giây")]
-    public int tanSoGuiMang = 30;
+    public int tanSoGuiMang = 20;
     [Tooltip("PhotonNetwork.SerializationRate: số lần đồng bộ vị trí mỗi giây (không vượt SendRate)")]
-    public int tanSoDongBo = 30;
+    public int tanSoDongBo = 10;
 
     [Header("Hiệu ứng nút (Màu trắng)")]
     public bool hieuUngNut = true;
@@ -1946,7 +1946,7 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
             }
         }
 
-        if (!khoaBanPhim && Input.GetKeyDown(KeyCode.Escape))
+        if (!khoaBanPhim && InputEscapeUtility.TryConsume())
             XuLyEscNgoaiTranDua();
 
         if (dangQuanhXe && camQuanh != null)
@@ -2878,10 +2878,11 @@ public class GameManager : MonoBehaviourPunCallbacks, IOnEventCallback
     // ESC, PAUSE, RESTART & QUIT
     // =========================================================================
     // ESC dùng được ở mọi trạng thái: trước trận, đang đua, bị loại / xem trận, màn kết quả
-    // Thứ tự ưu tiên: đóng bảng F1 -> đóng menu tạm dừng -> ẩn bảng "bị loại" -> mở menu
+    // Thứ tự ưu tiên: thoát focus chat -> đóng bảng trợ giúp/xếp hạng -> đóng menu tạm dừng -> ẩn bảng bị loại -> mở menu
     private void XuLyEscNgoaiTranDua()
     {
-        if (HelpSystem.DongNeuDangMo()) return;
+        if (MultiplayerAllInOne.DongChatNeuDangGo()) return;
+        if (HelpSystem.DongNeuDangMo() || MenuLeaderboard.DongNeuDangMo()) return;
 
         if (isPaused || DangMo(pausePanelObject))
         {

@@ -4,15 +4,21 @@ using Photon.Pun;
 public class XuLyVaChamChoXe : MonoBehaviourPun
 {
     private Rigidbody rb;
+    private PhotonView viewXe;
 
     private bool LaXeCuaMinh
     {
-        get { return !PhotonNetwork.IsConnected || photonView == null || photonView.IsMine; }
+        get
+        {
+            if (!PhotonNetwork.InRoom) return true;
+            return viewXe != null && viewXe.IsMine;
+        }
     }
 
     private void Awake()
     {
         rb = GetComponentInParent<Rigidbody>();
+        viewXe = GetComponentInParent<PhotonView>();
 
         if (rb != null)
         {
@@ -26,11 +32,13 @@ public class XuLyVaChamChoXe : MonoBehaviourPun
         // 1. CheckPoint: ăn đồng xu cộng thời gian
         if (other.CompareTag("CheckPoint"))
         {
+            // Each client has its own scene checkpoint; remote cars must not consume it locally.
+            if (!LaXeCuaMinh) return;
             if (!other.gameObject.activeSelf) return;
 
             other.gameObject.SetActive(false);
 
-            if (LaXeCuaMinh && GameManager.Instance != null)
+            if (GameManager.Instance != null)
                 GameManager.Instance.QuaCheckPoint();
 
             return;

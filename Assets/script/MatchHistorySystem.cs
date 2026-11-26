@@ -52,6 +52,8 @@ public class MatchHistorySystem : MonoBehaviour
 
         if (scene.name.ToLowerInvariant().Contains("menu"))
         {
+            MatchHistorySystem existing = FindFirstObjectByType<MatchHistorySystem>();
+            if (existing != null) return;
             GameObject go = new GameObject("MatchHistorySystem");
             SceneManager.MoveGameObjectToScene(go, scene);
             go.AddComponent<MatchHistorySystem>().TaoNutVaBangMenu();

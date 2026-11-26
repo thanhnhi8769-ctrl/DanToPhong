@@ -7,6 +7,8 @@
         public const string GetInfo = "LAYTHONGTIN";
         public const string Logout = "DANGXUAT";
         public const string ResetPassword = "DOIMATKHAU";
+        public const string RequestResetCode = "YEUCAUMADATLAI";
+        public const string RequestRegistrationCode = "YEUCAUMADANGKY";
         public const string UpdateCoins = "CAPNHATXU";
         public const string JoinRoom = "VAOPHONG";
         public const string ChangeAvatar = "DOIAVATAR";

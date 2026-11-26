@@ -11,6 +11,7 @@ namespace DanToPhong.Server
         public TcpClient Client { get; init; } = null!;
         public int? AuthenticatedUserId { get; set; }
         public string? AuthenticatedUsername { get; set; }
+        public string? AuthToken { get; set; }
         public DateTime ConnectedAt { get; } = DateTime.Now;
         public SemaphoreSlim SendLock { get; } = new(1, 1);
     }

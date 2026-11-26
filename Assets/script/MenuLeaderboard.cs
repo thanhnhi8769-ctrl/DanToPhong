@@ -37,7 +37,18 @@ public class MenuLeaderboard : MonoBehaviour
 
     private void Update()
     {
-        if (overlay != null && Input.GetKeyDown(KeyCode.Escape)) Dong();
+        if (overlay != null && InputEscapeUtility.TryConsume()) Dong();
+    }
+
+    public static bool DongNeuDangMo()
+    {
+        foreach (MenuLeaderboard leaderboard in FindObjectsByType<MenuLeaderboard>(FindObjectsSortMode.None))
+        {
+            if (leaderboard == null || leaderboard.overlay == null) continue;
+            leaderboard.Dong();
+            return true;
+        }
+        return false;
     }
 
     private void Dong()

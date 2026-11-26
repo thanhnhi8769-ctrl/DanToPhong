@@ -1,27 +1,31 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 
 namespace UI.Services
 {
     public sealed class GameLauncherService
     {
-        private const string Build36Folder = @"D:\DanToPhong\BuildGame36";
+        private const string GameExeName = "DanToPhong.exe";
 
         public string ResolveGameExePath()
         {
             string baseDir = AppContext.BaseDirectory;
-            string[] candidates =
+            // Prefer the game packaged beside the launcher. Walking parent folders also
+            // supports the current workspace layout where BuildGame36 is a sibling folder.
+            var candidates = new System.Collections.Generic.List<string>
             {
-                Path.Combine(Build36Folder, "DanToPhong.exe"),
-                Path.Combine(Build36Folder, "ScooterRacing.exe"),
-                Path.Combine(baseDir, "Game", "DanToPhong.exe"),
-                Path.Combine(baseDir, "Game", "ScooterRacing.exe"),
-                Path.Combine(baseDir, "DanToPhong.exe"),
-                Path.Combine(baseDir, "ScooterRacing.exe")
+                Path.Combine(baseDir, "Game", GameExeName),
+                Path.Combine(baseDir, GameExeName)
             };
+            DirectoryInfo? folder = new DirectoryInfo(baseDir);
+            while (folder != null)
+            {
+                candidates.Add(Path.Combine(folder.FullName, "Game", GameExeName));
+                candidates.Add(Path.Combine(folder.FullName, "BuildGame36", GameExeName));
+                folder = folder.Parent;
+            }
 
             foreach (string path in candidates)
             {
@@ -29,18 +33,7 @@ namespace UI.Services
                 if (File.Exists(fullPath))
                     return fullPath;
             }
-
-            if (Directory.Exists(Build36Folder))
-            {
-                string? anyExe = Directory
-                    .GetFiles(Build36Folder, "*.exe", SearchOption.TopDirectoryOnly)
-                    .FirstOrDefault();
-
-                if (!string.IsNullOrWhiteSpace(anyExe))
-                    return anyExe;
-            }
-
-            return candidates[0];
+            return Path.Combine(baseDir, "Game", GameExeName);
         }
 
         // MỚI: không truyền coins nữa, game tự lấy dữ liệu từ server bằng token.
@@ -57,7 +50,7 @@ namespace UI.Services
             if (!File.Exists(exePath))
             {
                 MessageBox.Show(
-                    $"Không tìm thấy file game tại:\n{exePath}\n\nHãy kiểm tra thư mục {Build36Folder} có file .exe của game chưa.",
+                    $"Không tìm thấy {GameExeName} trong thư mục Game cạnh launcher hoặc BuildGame36 gần launcher:\n{exePath}",
                     "Launcher - Thiếu file game",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -66,18 +59,29 @@ namespace UI.Services
 
             string safeUser = string.IsNullOrWhiteSpace(username) ? "player1" : username.Trim();
             string safeMode = string.IsNullOrWhiteSpace(mode) ? "single" : mode.Trim();
-            string args = $"--user \"{safeUser}\" --token {token} --host {host} --port {port} --mode {safeMode}";
-            if (!string.IsNullOrWhiteSpace(roomId))
-                args += $" --room \"{roomId.Trim()}\"";
+            if (string.IsNullOrWhiteSpace(host) || port is < 1 or > 65535 || string.IsNullOrWhiteSpace(token))
+            {
+                MessageBox.Show("Thiếu host, port hoặc token hợp lệ từ phiên đăng nhập.", "Lỗi cấu hình kết nối",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
 
-            string workingDir = Path.GetDirectoryName(exePath) ?? Build36Folder;
+            string workingDir = Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory;
             var psi = new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = args,
                 WorkingDirectory = workingDir,
                 UseShellExecute = false
             };
+            psi.ArgumentList.Add("--user"); psi.ArgumentList.Add(safeUser);
+            psi.ArgumentList.Add("--token"); psi.ArgumentList.Add(token);
+            psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host);
+            psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
+            psi.ArgumentList.Add("--mode"); psi.ArgumentList.Add(safeMode);
+            if (!string.IsNullOrWhiteSpace(roomId))
+            {
+                psi.ArgumentList.Add("--room"); psi.ArgumentList.Add(roomId.Trim());
+            }
 
             try
             {
@@ -92,9 +96,17 @@ namespace UI.Services
                     int notified = 0;
                     process.Exited += (_, _) =>
                     {
-                        if (System.Threading.Interlocked.Exchange(ref notified, 1) == 0)
-                            onGameExited();
+                        try
+                        {
+                            if (System.Threading.Interlocked.Exchange(ref notified, 1) == 0)
+                                onGameExited();
+                        }
+                        finally { process.Dispose(); }
                     };
+                }
+                else
+                {
+                    process.Exited += (_, _) => process.Dispose();
                 }
 
                 process.Start();

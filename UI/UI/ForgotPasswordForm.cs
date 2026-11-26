@@ -15,12 +15,13 @@ namespace UI
         private static readonly Regex HasLetterRegex = new(@"[A-Za-z]", RegexOptions.Compiled);
         private static readonly Regex HasDigitRegex = new(@"[0-9]", RegexOptions.Compiled);
         private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
-        private static readonly Regex CodeRegex = new(@"^[A-Za-z0-9]{4,8}$", RegexOptions.Compiled);
+        private static readonly Regex CodeRegex = new(@"^[0-9]{6}$", RegexOptions.Compiled);
 
         private readonly NetworkClientService _netClient;
         private readonly System.Windows.Forms.Timer _resendTimer = new();
         private int _resendCooldown;
-        private string? _localIssuedCode;
+        private string? _otpUsername;
+        private string? _otpEmail;
         private DateTime? _codeExpiresAt;
         private bool isNewPasswordVisible;
         private bool isConfirmPasswordVisible;
@@ -34,6 +35,7 @@ namespace UI
             AcceptButton = btnResetPassword;
 
             txtNewPassword.PlaceholderText = "Min 8 chars, letters and numbers";
+            txtVerificationCode.MaxLength = 6;
 
             CauHinhNutIconVaCode();
             CauHinhNutDoExit();
@@ -57,6 +59,7 @@ namespace UI
             CapNhatAvatarMacDinh();
             CanGiuaBoCuc();
         }
+
         private void CauHinhNutDoExit()
         {
             if (btnExit == null) return;
@@ -133,7 +136,9 @@ namespace UI
             VeDuongVien(e.Graphics, txtEmail, null, lblErrEmail.Text.Length > 0);
             VeDuongVien(e.Graphics, txtNewPassword, btnToggleNewPassword, lblErrNewPassword.Text.Length > 0);
             VeDuongVien(e.Graphics, txtConfirmPassword, btnToggleConfirmPassword, lblErrConfirmPassword.Text.Length > 0);
-            VeDuongVien(e.Graphics, txtVerificationCode, null, lblErrVerificationCode.Text.Length > 0);
+            // Thông báo gửi mã thành công (màu xanh) không được tính là lỗi
+            VeDuongVien(e.Graphics, txtVerificationCode, null,
+                lblErrVerificationCode.Text.Length > 0 && lblErrVerificationCode.ForeColor == Color.Crimson);
         }
 
         private static void VeDuongVien(Graphics g, TextBox txt, Control? rightControl, bool hasError)
@@ -341,7 +346,6 @@ namespace UI
                 int sendGap = 12;
                 int codeInputW = Math.Max(160, colW - sendBtnW - sendGap);
 
-
                 lblVerificationCode.Location = new Point(leftMargin, curY);
                 lblVerificationCode.Size = new Size(colW, labelH);
 
@@ -500,9 +504,7 @@ namespace UI
         private string? ValidateVerificationCode(string code)
         {
             if (string.IsNullOrEmpty(code)) return "Please enter the verification code.";
-            if (!CodeRegex.IsMatch(code)) return "Invalid verification code format.";
-            if (_localIssuedCode != null && !string.Equals(code, _localIssuedCode, StringComparison.OrdinalIgnoreCase))
-                return "Verification code does not match.";
+            if (!CodeRegex.IsMatch(code)) return "Verification code must be 6 digits.";
             return null;
         }
 
@@ -540,6 +542,7 @@ namespace UI
         private void txtVerificationCode_TextChanged(object? sender, EventArgs e)
         {
             string c = txtVerificationCode.Text.Trim();
+            lblErrVerificationCode.ForeColor = Color.Crimson;
             lblErrVerificationCode.Text = string.IsNullOrEmpty(c) ? "" : (ValidateVerificationCode(c) ?? "");
             nightPanel1.Invalidate();
         }
@@ -582,14 +585,17 @@ namespace UI
 
             try
             {
-                string code = EmailVerificationService.GenerateCode6Digits();
-                await EmailVerificationService.SendVerificationCodeAsync(email, code);
+                ResponsePacket response = await _netClient.RequestResetCodeAsync(username, email);
+                if (!response.Success)
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(response.Message)
+                        ? "Could not request a verification code." : response.Message);
 
-                _localIssuedCode = code;
-                _codeExpiresAt = DateTime.UtcNow.AddSeconds(60);
+                _otpUsername = username;
+                _otpEmail = email;
+                _codeExpiresAt = DateTime.UtcNow.AddMinutes(10);
 
                 lblErrVerificationCode.ForeColor = Color.FromArgb(22, 101, 52);
-                lblErrVerificationCode.Text = $"Verification code sent to {email}.";
+                lblErrVerificationCode.Text = response.Message;
                 nightPanel1.Invalidate();
                 txtVerificationCode.Focus();
 
@@ -665,6 +671,13 @@ namespace UI
 
             lblErrVerificationCode.ForeColor = Color.Crimson;
             string? eCode = ValidateVerificationCode(code);
+
+            // UI-only guard; the server performs authoritative OTP validation.
+            if (eCode == null &&
+                (!string.Equals(username, _otpUsername, StringComparison.Ordinal) ||
+                 !string.Equals(email, _otpEmail, StringComparison.OrdinalIgnoreCase)))
+                eCode = "Username or email changed after the code was sent. Please request a new code.";
+
             if (eCode == null && (!_codeExpiresAt.HasValue || DateTime.UtcNow > _codeExpiresAt.Value))
                 eCode = "Verification code has expired. Please request a new code.";
 
@@ -686,7 +699,7 @@ namespace UI
             btnCancel.Enabled = false;
             try
             {
-                ResponsePacket resp = await _netClient.ResetPasswordAsync(username, email, newPassword);
+                ResponsePacket resp = await _netClient.ResetPasswordAsync(username, email, newPassword, code);
                 if (!resp.Success)
                 {
                     PopupNoticeForm.ShowNotice(
@@ -696,6 +709,9 @@ namespace UI
                         PopupNoticeForm.NoticeKind.Warning);
                     return;
                 }
+
+                // Mã dùng một lần
+                _codeExpiresAt = null;
 
                 PopupNoticeForm.ShowNotice(
                     this,

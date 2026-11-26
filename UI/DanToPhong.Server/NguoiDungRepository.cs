@@ -204,6 +204,15 @@ namespace DanToPhong.Server
             return MapUserInfo(reader);
         }
 
+        public async Task<bool> UsernameExistsAsync(string username, CancellationToken token = default)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var cmd = new SqlCommand("SELECT COUNT(1) FROM dbo.NguoiDung WHERE Username=@Username;", conn);
+            cmd.Parameters.Add("@Username", SqlDbType.NVarChar, 20).Value = username.Trim();
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(token).ConfigureAwait(false)) > 0;
+        }
+
         private static UserInfoDto MapUserInfo(SqlDataReader reader)
         {
             return new UserInfoDto

@@ -412,14 +412,15 @@ public class ShopManager : MonoBehaviour
     {
         if (dangThoat) return;
 
+        if (InputEscapeUtility.TryConsume())
+        {
+            if (HelpSystem.DongNeuDangMo() || MenuLeaderboard.DongNeuDangMo()) return;
+            BackToMenu();
+            return;
+        }
+
         if (!MultiplayerAllInOne.DangGoChat)
         {
-            if (Nhan(Phim.Esc))
-            {
-                BackToMenu();
-                return;
-            }
-
             if (Nhan(Phim.Trai))
                 DoiXe(-1);
             else if (Nhan(Phim.Phai))

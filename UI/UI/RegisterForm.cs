@@ -29,12 +29,12 @@ namespace UI
         private bool hasSentCode;
         private string? otpTargetEmail;
         private int otpCountdownSeconds;
-        private string? _currentOtpCode;
 
         public RegisterForm(NetworkClientService netClient)
         {
             _netClient = netClient;
             InitializeComponent();
+            picAvatar.Size = new Size(68, 68);   // vuông để avatar tròn không bị méo
             CauHinhNutDoExit();
             DoubleBuffered = true;
             AcceptButton = btnRegister;
@@ -447,7 +447,6 @@ namespace UI
             if (!string.Equals(em, otpTargetEmail, StringComparison.OrdinalIgnoreCase))
             {
                 hasSentCode = false;
-                _currentOtpCode = null;
                 lblCodeStatus.Text = "";
             }
             nightPanel1.Invalidate();
@@ -481,25 +480,27 @@ namespace UI
 
             try
             {
-                _currentOtpCode = EmailVerificationService.GenerateCode6Digits();
-                await EmailVerificationService.SendVerificationCodeAsync(email, _currentOtpCode);
+                string username = txtUsername.Text.Trim();
+                string? usernameErr = ValidateUsername(username);
+                if (usernameErr != null) throw new InvalidOperationException(usernameErr);
+                ResponsePacket response = await _netClient.RequestRegistrationCodeAsync(username, email);
+                if (!response.Success) throw new InvalidOperationException(response.Message);
 
                 hasSentCode = true;
                 otpTargetEmail = email;
 
                 lblCodeStatus.ForeColor = Color.FromArgb(15, 115, 50);
-                lblCodeStatus.Text = "Verification code has been sent.";
+                lblCodeStatus.Text = response.Message;
 
-                otpCountdownSeconds = 60;
+                otpCountdownSeconds = 600;
                 btnSendCode.Text = $"{otpCountdownSeconds}s";
                 _otpTimer.Start();
             }
             catch (Exception ex)
             {
                 hasSentCode = false;
-                _currentOtpCode = null;
                 lblCodeStatus.ForeColor = Color.FromArgb(170, 25, 25);
-                lblCodeStatus.Text = "Send failed. Check SMTP/App Password.";
+                lblCodeStatus.Text = "Could not send the verification email. Please try again later.";
                 btnSendCode.Enabled = true;
                 btnSendCode.ForeColor = Color.White;
                 btnSendCode.Text = "Get Code";
@@ -517,16 +518,23 @@ namespace UI
         private void OtpTimer_Tick(object? sender, EventArgs e)
         {
             otpCountdownSeconds--;
+            btnSendCode.ForeColor = Color.White;
+
             if (otpCountdownSeconds <= 0)
             {
                 _otpTimer.Stop();
+
+                // Mã hết hạn sau 60 giây đúng như nội dung email
+                hasSentCode = false;
+                lblCodeStatus.ForeColor = Color.Crimson;
+                lblCodeStatus.Text = "Code expired. Please request a new one.";
+
                 btnSendCode.Enabled = true;
-                btnSendCode.ForeColor = Color.White;
                 btnSendCode.Text = "Get Code";
+                nightPanel1.Invalidate();
             }
             else
             {
-                btnSendCode.ForeColor = Color.White;
                 btnSendCode.Text = $"{otpCountdownSeconds}s";
             }
         }
@@ -555,7 +563,7 @@ namespace UI
                 "• Confirm Password (Required): Must match the Password field exactly.\n" +
                 "• Full Name (Required): 2–100 characters.\n" +
                 "• Email (Required): Must be a valid email format (e.g., name@domain.com).\n" +
-                "• Verification Code (Required): Click 'Get Code' to send a 6-digit code to your email (60s cooldown). If you edit the email afterward, you must request a new code.\n" +
+                "• Verification Code (Required): Click 'Get Code' to send a 6-digit code to your email. The code expires in 10 minutes. If you edit the email afterward, request a new code.\n" +
                 "• Birthday & Gender (Required): Select a valid birth date (01/01/1920 – today, dd/MM/yyyy) and choose Male, Female, or Other.\n" +
                 "• New Account Bonus: Every new account starts with 100 coins.\n" +
                 "• Submit: Click 'Register' (or press Enter) once all fields are valid to create your account and return to Login.";
@@ -611,13 +619,6 @@ namespace UI
                 lblCodeStatus.Text = "Please enter the 6-digit verification code.";
                 hasError = true;
             }
-            else if (!string.IsNullOrEmpty(_currentOtpCode) &&
-                     !string.Equals(code, _currentOtpCode, StringComparison.Ordinal))
-            {
-                lblCodeStatus.ForeColor = Color.Crimson;
-                lblCodeStatus.Text = "Verification code does not match.";
-                hasError = true;
-            }
 
             if (birthday > DateTime.Today || birthday < dtpBirthday.MinDate)
             {
@@ -639,7 +640,8 @@ namespace UI
                 ResponsePacket resp = await _netClient.RegisterAsync(
                     username, password, fullName, email, birthday,
                     cmbGender.SelectedItem?.ToString(),
-                    txtRacerId.Text.Trim());
+                    txtRacerId.Text.Trim(),
+                    code);
 
                 if (!resp.Success)
                 {

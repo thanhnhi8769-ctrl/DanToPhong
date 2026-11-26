@@ -148,10 +148,9 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
         DangGoChat = dangGo;
 
         // ESC khi đang gõ chat: thoát ô nhập để các phím game / menu dùng lại được
-        if (dangGo && Input.GetKeyDown(KeyCode.Escape))
+        if (dangGo && InputEscapeUtility.TryConsume())
         {
-            inputField.DeactivateInputField();
-            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+            ThoatKhoiFocusChat();
             return;
         }
 
@@ -166,6 +165,26 @@ public class MultiplayerAllInOne : MonoBehaviourPunCallbacks, IOnEventCallback
                 FocusOChat();
             }
         }
+    }
+
+    public static bool DongChatNeuDangGo()
+    {
+        MultiplayerAllInOne chat = FindFirstObjectByType<MultiplayerAllInOne>();
+        if (chat == null || chat.chatPanel == null || !chat.chatPanel.activeSelf ||
+            chat.inputField == null || !chat.inputField.isFocused)
+        {
+            DangGoChat = false;
+            return false;
+        }
+        chat.ThoatKhoiFocusChat();
+        return true;
+    }
+
+    private void ThoatKhoiFocusChat()
+    {
+        if (inputField != null) inputField.DeactivateInputField();
+        if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+        DangGoChat = false;
     }
 
     // Gom mọi yêu cầu cuộn/đo layout trong frame thành 1 lần duy nhất

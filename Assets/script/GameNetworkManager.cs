@@ -20,9 +20,9 @@ public class GameNetworkManager : MonoBehaviour
 
     [Header("Mạng (tăng để xe người khác chạy êm hơn)")]
     [Tooltip("Số gói gửi lên server mỗi giây (mặc định Photon = 30)")]
-    public int tanSoGui = 30;
+    public int tanSoGui = 20;
     [Tooltip("Số lần đồng bộ vị trí xe mỗi giây (mặc định Photon = 10 nên xe người khác bị giật)")]
-    public int tanSoDongBo = 30;
+    public int tanSoDongBo = 10;
 
     [Header("Chẩn đoán")]
     public bool hienThongTinDebugXe = false;
@@ -113,7 +113,7 @@ public class GameNetworkManager : MonoBehaviour
 
         PhotonNetwork.IsMessageQueueRunning = true;
         PhotonNetwork.SendRate = Mathf.Clamp(tanSoGui, 10, 60);
-        PhotonNetwork.SerializationRate = Mathf.Clamp(tanSoDongBo, 10, 60);
+        PhotonNetwork.SerializationRate = Mathf.Clamp(tanSoDongBo, 10, PhotonNetwork.SendRate);
         TuDongTimSpawnPointsNeuThieu();
         xeDaApSkin.Clear();
         daTaoXe = false;

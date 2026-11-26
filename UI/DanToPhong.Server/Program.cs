@@ -15,10 +15,9 @@ namespace DanToPhong.Server
 {
     internal static class Program
     {
-        private const int Port = 9000;
+        private static readonly int Port = ReadPort();
         private const int MaxCoinsDeltaPerRequest = 5000;
-        private const string ConnectionString =
-            "Server=localhost,1433;Database=DanToPhongDB;User Id=sa;Password=Tn123456;TrustServerCertificate=True;";
+        private static readonly string ConnectionString = Environment.GetEnvironmentVariable("DANTOPHONG_DB_CONNECTION") ?? string.Empty;
 
         private static readonly Regex UsernameRegex = new(@"^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
         private static readonly Regex HasLetterRegex = new(@"[A-Za-z]", RegexOptions.Compiled);
@@ -31,6 +30,19 @@ namespace DanToPhong.Server
 
         // Token do launcher giữ, truyền cho game Unity. Chỉ nằm trong RAM server.
         private static readonly ConcurrentDictionary<string, (int UserId, string Username, DateTime Exp)> Tokens = new();
+        private static readonly ConcurrentDictionary<string, ClientSession> ActiveSessions = new();
+        private sealed record ResetCode(byte[] Hash, DateTime ExpiresAt, int Attempts);
+        private static readonly ConcurrentDictionary<string, ResetCode> ResetCodes = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, DateTime> ResetCodeCooldowns = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly SemaphoreSlim ResetPasswordGate = new(1, 1);
+        private sealed record CachedRequest(DateTime CreatedAt, Lazy<Task<ResponsePacket>> Result);
+        private static readonly ConcurrentDictionary<string, CachedRequest> RequestResults = new();
+
+        private static int ReadPort()
+        {
+            string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_PORT");
+            return int.TryParse(raw, out int port) && port is > 0 and <= 65535 ? port : 9000;
+        }
 
         // Bảng giá phía server. Nếu có key ở đây thì dùng giá này; chưa có thì tạm dùng giá client gửi (đã kẹp 0..5000).
         // Điền theo VehicleCatalog, ví dụ: { ("Scooter", 1), 300 }, { ("Scooter", 2), 500 }
@@ -44,6 +56,9 @@ namespace DanToPhong.Server
         private static async Task Main()
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+            if (string.IsNullOrWhiteSpace(ConnectionString))
+                throw new InvalidOperationException("Set DANTOPHONG_DB_CONNECTION before starting the server.");
 
             var repo = new NguoiDungRepository(ConnectionString);
             using var cts = new CancellationTokenSource();
@@ -82,6 +97,7 @@ namespace DanToPhong.Server
                         Client = client,
                         RemoteEndPoint = remote
                     };
+                    ActiveSessions[session.SessionId] = session;
 
                     Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
                     _ = Task.Run(() => HandleClientAsync(session, repo, cts.Token), cts.Token);
@@ -108,7 +124,9 @@ namespace DanToPhong.Server
             {
                 while (!token.IsCancellationRequested && session.Client.Connected)
                 {
-                    RequestPacket? request = await MessageFramer.ReceiveAsync<RequestPacket>(stream, token).ConfigureAwait(false);
+                    using var idleTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    idleTimeout.CancelAfter(TimeSpan.FromMinutes(2));
+                    RequestPacket? request = await MessageFramer.ReceiveAsync<RequestPacket>(stream, idleTimeout.Token).ConfigureAwait(false);
                     if (request == null)
                         break;
 
@@ -135,7 +153,9 @@ namespace DanToPhong.Server
             finally
             {
                 Console.WriteLine($"[{session.SessionId}] Disconnected ({session.AuthenticatedUsername ?? "guest"})");
-                if (session.AuthenticatedUserId.HasValue)
+                ActiveSessions.TryRemove(session.SessionId, out _);
+                if (session.AuthenticatedUserId.HasValue &&
+                    !ActiveSessions.Values.Any(s => s.AuthenticatedUserId == session.AuthenticatedUserId))
                     RoomRegistry.RemoveByOwner(session.AuthenticatedUserId.Value);
                 try { stream.Dispose(); } catch { }
                 try { session.Client.Close(); } catch { }
@@ -144,7 +164,29 @@ namespace DanToPhong.Server
             }
         }
 
-        private static async Task<ResponsePacket> DispatchAsync(
+        private static Task<ResponsePacket> DispatchAsync(
+            ClientSession session,
+            RequestPacket req,
+            NguoiDungRepository repo,
+            CancellationToken token)
+        {
+            string command = (req.Command ?? string.Empty).Trim().ToUpperInvariant();
+            bool mustDeduplicate = command is Commands.UpdateCoins or Commands.BuyItem;
+            if (!mustDeduplicate && (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out _)))
+                return DispatchCoreAsync(session, req, repo, token);
+            if (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out _))
+                return Task.FromResult(new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "A valid request id is required." });
+
+            DateTime now = DateTime.UtcNow;
+            foreach (var pair in RequestResults)
+                if (now - pair.Value.CreatedAt > TimeSpan.FromMinutes(2)) RequestResults.TryRemove(pair.Key, out _);
+            string key = $"{session.AuthenticatedUserId.Value}:{command}:{req.RequestId}";
+            CachedRequest cached = RequestResults.GetOrAdd(key, _ => new CachedRequest(now,
+                new Lazy<Task<ResponsePacket>>(() => DispatchCoreAsync(session, req, repo, token))));
+            return cached.Result.Value;
+        }
+
+        private static async Task<ResponsePacket> DispatchCoreAsync(
             ClientSession session,
             RequestPacket req,
             NguoiDungRepository repo,
@@ -161,6 +203,8 @@ namespace DanToPhong.Server
                     Commands.GetInfo => await HandleGetInfoAsync(session, repo, token).ConfigureAwait(false),
                     Commands.Logout => HandleLogout(session),
                     Commands.ResetPassword => await HandleResetPasswordAsync(req, repo, token).ConfigureAwait(false),
+                    Commands.RequestResetCode => await HandleRequestResetCodeAsync(req, repo, token).ConfigureAwait(false),
+                    Commands.RequestRegistrationCode => await HandleRequestRegistrationCodeAsync(req, repo, token).ConfigureAwait(false),
                     Commands.UpdateCoins => await HandleUpdateCoinsAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.JoinRoom => await HandleJoinRoomAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.ChangeAvatar => await HandleChangeAvatarAsync(session, req, repo, token).ConfigureAwait(false),
@@ -221,8 +265,23 @@ namespace DanToPhong.Server
 
         private static ResponsePacket HandleLogout(ClientSession session)
         {
+            int? userId = session.AuthenticatedUserId;
+            if (userId.HasValue)
+            {
+                foreach (var pair in Tokens)
+                    if (pair.Value.UserId == userId.Value) Tokens.TryRemove(pair.Key, out _);
+                foreach (ClientSession active in ActiveSessions.Values.Where(s => s.AuthenticatedUserId == userId.Value && s != session))
+                {
+                    active.AuthenticatedUserId = null;
+                    active.AuthenticatedUsername = null;
+                    active.AuthToken = null;
+                    try { active.Client.Close(); } catch { }
+                }
+                RoomRegistry.RemoveByOwner(userId.Value);
+            }
             session.AuthenticatedUserId = null;
             session.AuthenticatedUsername = null;
+            session.AuthToken = null;
             return new ResponsePacket
             {
                 Success = true,
@@ -247,7 +306,7 @@ namespace DanToPhong.Server
             if (!UsernameRegex.IsMatch(username) ||
                 !IsValidPassword(password) ||
                 fullName.Length < 2 || fullName.Length > 100 ||
-                (email.Length > 0 && !EmailRegex.IsMatch(email)) ||
+                !EmailRegex.IsMatch(email) ||
                 (racerId != null && racerId.Length > 30) ||
                 (gender != null && gender.Length > 20) ||
                 (avatarPath != null && avatarPath.Length > 260))
@@ -259,6 +318,8 @@ namespace DanToPhong.Server
                     Message = "Invalid registration details."
                 };
             }
+
+            string verificationKey = $"register|{username}|{email.ToLowerInvariant()}";
 
             if (req.Birthday.HasValue)
             {
@@ -274,7 +335,16 @@ namespace DanToPhong.Server
                 }
             }
 
-            var result = await repo.DangKyAsync(req, token).ConfigureAwait(false);
+            await ResetPasswordGate.WaitAsync(token).ConfigureAwait(false);
+            (bool Success, string Code, string Message, string? RacerId) result;
+            try
+            {
+                if (!ValidateVerificationCode(verificationKey, req.VerificationCode))
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
+                result = await repo.DangKyAsync(req, token).ConfigureAwait(false);
+                if (result.Success) ResetCodes.TryRemove(verificationKey, out _);
+            }
+            finally { ResetPasswordGate.Release(); }
             return new ResponsePacket
             {
                 Success = result.Success,
@@ -331,6 +401,7 @@ namespace DanToPhong.Server
 
             string authToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
             Tokens[authToken] = (user.UserId, user.Username, DateTime.UtcNow.AddHours(6));
+            session.AuthToken = authToken;
 
             return new ResponsePacket
             {
@@ -350,6 +421,7 @@ namespace DanToPhong.Server
             {
                 session.AuthenticatedUserId = t.UserId;
                 session.AuthenticatedUsername = t.Username;
+                session.AuthToken = req.Token;
                 return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "OK" };
             }
 
@@ -359,6 +431,83 @@ namespace DanToPhong.Server
                 Code = ErrorCodes.Unauthorized,
                 Message = "Invalid token."
             };
+        }
+
+        private static async Task<ResponsePacket> HandleRequestResetCodeAsync(
+            RequestPacket req, NguoiDungRepository repo, CancellationToken token)
+        {
+            string username = (req.Username ?? string.Empty).Trim();
+            string email = (req.Email ?? string.Empty).Trim();
+            if (!UsernameRegex.IsMatch(username) || !EmailRegex.IsMatch(email))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
+
+            string key = $"reset|{username}|{email.ToLowerInvariant()}";
+            DateTime now = DateTime.UtcNow;
+            if (ResetCodeCooldowns.TryGetValue(key, out DateTime nextAllowed) && nextAllowed > now)
+                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "If the account matches, a code has been sent to the registered email." };
+
+            UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
+            if (user != null && !string.IsNullOrWhiteSpace(user.Email) &&
+                string.Equals(user.Email.Trim(), email, StringComparison.OrdinalIgnoreCase))
+            {
+                string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+                try
+                {
+                    await EmailVerificationService.SendCodeAsync(email, code, passwordReset: true).ConfigureAwait(false);
+                    ResetCodes[key] = new ResetCode(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(code)), now.AddMinutes(10), 0);
+                    ResetCodeCooldowns[key] = now.AddSeconds(60);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[SMTP] Reset code send failed: " + ex.Message);
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not send the verification email. Please try again later." };
+                }
+            }
+
+            // Same response for unknown usernames/emails to avoid exposing account membership.
+            return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "If the account matches, a code has been sent to the registered email." };
+        }
+
+        private static async Task<ResponsePacket> HandleRequestRegistrationCodeAsync(
+            RequestPacket req, NguoiDungRepository repo, CancellationToken token)
+        {
+            string username = (req.Username ?? string.Empty).Trim();
+            string email = (req.Email ?? string.Empty).Trim();
+            if (!UsernameRegex.IsMatch(username) || !EmailRegex.IsMatch(email))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
+
+            string key = $"register|{username}|{email.ToLowerInvariant()}";
+            string responseMessage = "If the username is available, a code has been sent to the email.";
+            DateTime now = DateTime.UtcNow;
+            if (ResetCodeCooldowns.TryGetValue(key, out DateTime nextAllowed) && nextAllowed > now)
+                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+
+            if (!await repo.UsernameExistsAsync(username, token).ConfigureAwait(false))
+            {
+                string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+                try
+                {
+                    await EmailVerificationService.SendCodeAsync(email, code, passwordReset: false).ConfigureAwait(false);
+                    ResetCodes[key] = new ResetCode(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(code)), now.AddMinutes(10), 0);
+                    ResetCodeCooldowns[key] = now.AddSeconds(60);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[SMTP] Registration code send failed: " + ex.Message);
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not send the verification email. Please try again later." };
+                }
+            }
+            return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+        }
+
+        private static bool ValidateVerificationCode(string key, string? code)
+        {
+            if (!ResetCodes.TryGetValue(key, out ResetCode? pending) || pending.ExpiresAt <= DateTime.UtcNow || pending.Attempts >= 5)
+                return false;
+            byte[] suppliedHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(code ?? string.Empty));
+            if (CryptographicOperations.FixedTimeEquals(suppliedHash, pending.Hash)) return true;
+            ResetCodes[key] = pending with { Attempts = pending.Attempts + 1 };
+            return false;
         }
 
         private static async Task<ResponsePacket> HandleGetInfoAsync(
@@ -565,7 +714,8 @@ namespace DanToPhong.Server
                 host = u == null ? "?" : string.IsNullOrEmpty(u.RacerId) ? u.Username : $"{u.Username} #{u.RacerId}";
             }
 
-            RoomRegistry.Upsert(code, uid, host, cur, max, req.IsRacing ?? false);
+            if (!RoomRegistry.Upsert(code, uid, host, cur, max, req.IsRacing ?? false))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Room code is already registered by another host." };
             return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "OK" };
         }
 
@@ -786,13 +936,42 @@ namespace DanToPhong.Server
                 };
             }
 
-            var result = await repo.DoiMatKhauAsync(username, email, newPassword, token).ConfigureAwait(false);
-            return new ResponsePacket
+            string key = $"reset|{username}|{email.ToLowerInvariant()}";
+            await ResetPasswordGate.WaitAsync(token).ConfigureAwait(false);
+            try
             {
-                Success = result.Success,
-                Code = result.Code,
-                Message = result.Message
-            };
+                if (!ResetCodes.TryGetValue(key, out ResetCode? pending) || pending.ExpiresAt <= DateTime.UtcNow || pending.Attempts >= 5)
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
+
+                byte[] suppliedHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(req.VerificationCode ?? string.Empty));
+                if (!CryptographicOperations.FixedTimeEquals(suppliedHash, pending.Hash))
+                {
+                    ResetCodes[key] = pending with { Attempts = pending.Attempts + 1 };
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.AuthFailed, Message = "Verification code is invalid or expired." };
+                }
+
+                var result = await repo.DoiMatKhauAsync(username, email, newPassword, token).ConfigureAwait(false);
+                if (result.Success)
+                {
+                    ResetCodes.TryRemove(key, out _);
+                    ResetCodeCooldowns.TryRemove(key, out _);
+                    UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
+                    if (user != null)
+                    {
+                        RoomRegistry.RemoveByOwner(user.UserId);
+                        foreach (var pair in Tokens)
+                            if (pair.Value.UserId == user.UserId) Tokens.TryRemove(pair.Key, out _);
+                        foreach (ClientSession active in ActiveSessions.Values.Where(s => s.AuthenticatedUserId == user.UserId))
+                        {
+                            active.AuthenticatedUserId = null;
+                            active.AuthenticatedUsername = null;
+                            try { active.Client.Close(); } catch { }
+                        }
+                    }
+                }
+                return new ResponsePacket { Success = result.Success, Code = result.Code, Message = result.Message };
+            }
+            finally { ResetPasswordGate.Release(); }
         }
 
         private static bool IsValidPassword(string password)

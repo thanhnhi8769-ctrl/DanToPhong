@@ -47,11 +47,13 @@ namespace DanToPhong.Server
                 return Rooms.TryGetValue(code, out var r) && r.OwnerUserId == owner ? r.HostName : null;
         }
 
-        public static void Upsert(string code, int owner, string hostName, int current, int max, bool racing)
+        public static bool Upsert(string code, int owner, string hostName, int current, int max, bool racing)
         {
             lock (Gate)
             {
                 Purge();
+                if (Rooms.TryGetValue(code, out Room? existing) && existing.OwnerUserId != owner)
+                    return false;
                 Rooms[code] = new Room
                 {
                     Code = code.ToUpperInvariant(),
@@ -62,6 +64,7 @@ namespace DanToPhong.Server
                     IsRacing = racing,
                     Updated = DateTime.UtcNow
                 };
+                return true;
             }
         }
 

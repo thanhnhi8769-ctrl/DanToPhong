@@ -11,7 +11,7 @@ using UnityEngine;
 [Serializable]
 public class Req
 {
-    public string command, token, category, mapName, targetId, roomId, mode;
+    public string command, token, category, mapName, targetId, roomId, mode, requestId;
     public int itemIndex, coinsDelta, price, playerCount, maxPlayers;
     public bool isRacing;
 }
@@ -32,13 +32,13 @@ public static class ServerClient
     private static bool resyncing;
     private static int connId;       // tăng mỗi lần mở kết nối mới
 
-    // Lệnh gửi lại an toàn khi rớt mạng (gửi 2 lần cũng không sai).
-    // CAPNHATXU / MUAHANG / MOIBAN / LAYTRANGTHAI KHÔNG nằm ở đây:
-    // đổi xu gửi lại có thể cộng/trừ 2 lần, LAYTRANGTHAI lấy lời mời đi nên gửi lại sẽ mất lời mời.
+    // Các lệnh trong danh sách có thể retry sau reconnect. CAPNHATXU/MUAHANG
+    // chỉ an toàn vì giữ nguyên requestId và server khử trùng lặp theo user + command + id.
+    // LAYTRANGTHAI không retry vì việc đọc có thể đồng thời lấy lời mời khỏi hàng đợi.
     private static readonly HashSet<string> Idempotent = new HashSet<string>
     {
         "XACTHUCTOKEN", "LAYKHO", "LAYTHONGTIN", "LAYAVATAR", 
-        "CAPNHATPHONG", "XOAPHONG", "CHONMAP", "TRANGBI"
+        "CAPNHATPHONG", "XOAPHONG", "CHONMAP", "TRANGBI", "CAPNHATXU", "MUAHANG"
     };
 
     public static InvDto Cache;
@@ -51,7 +51,7 @@ public static class ServerClient
     // một InvDto rỗng (coins = 0). Server luôn gửi selectedMap khi có kho, nên dùng nó làm dấu hiệu.
     private static bool CoKho(Resp r)
     {
-        return r != null && r.inventory != null && !string.IsNullOrEmpty(r.inventory.selectedMap);
+        return r != null && r.inventory != null && !string.IsNullOrWhiteSpace(r.inventory.selectedMap);
     }
 
     private static int Sig(InvDto inv)
@@ -62,7 +62,10 @@ public static class ServerClient
             h = h * 31 + (inv.selectedMap?.GetHashCode() ?? 0);
             if (inv.items != null)
                 foreach (ItemDto it in inv.items)
+                {
+                    if (it == null) continue;
                     h = h * 31 + ((it.category?.GetHashCode() ?? 0) ^ (it.itemIndex * 397) ^ (it.isEquipped ? 1 : 0));
+                }
             return h;
         }
     }
@@ -74,18 +77,23 @@ public static class ServerClient
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(LauncherArgs.Host) || LauncherArgs.Port < 1 || LauncherArgs.Port > 65535 || string.IsNullOrWhiteSpace(LauncherArgs.Token))
+                throw new InvalidOperationException("Launcher connection arguments are missing or invalid.");
             closed = false;
             await OpenAsync();
 
             Resp r = await SendOnce(new Req { command = "XACTHUCTOKEN", token = LauncherArgs.Token });
-            if (r == null || !r.success) return false;
+            if (r == null || !r.success) { Close(); return false; }
 
             r = await SendOnce(new Req { command = "LAYKHO" });
-            return r != null && r.success && Cache != null;
+            if (r != null && r.success && Cache != null) return true;
+            Close();
+            return false;
         }
         catch (Exception e)
         {
             Debug.LogWarning("[ServerClient] " + e.Message);
+            Close();
             return false;
         }
     }
@@ -96,7 +104,19 @@ public static class ServerClient
         try { tcp?.Close(); } catch { }
 
         tcp = new TcpClient();
-        await tcp.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
+        Task connect = tcp.ConnectAsync(LauncherArgs.Host, LauncherArgs.Port);
+        using (var timeout = new CancellationTokenSource())
+        {
+            Task delay = Task.Delay(TIMEOUT_MS, timeout.Token);
+            if (await Task.WhenAny(connect, delay) != connect)
+            {
+                try { tcp.Close(); } catch { }
+                tcp = null;
+                throw new TimeoutException("Connection timeout");
+            }
+            timeout.Cancel();
+        }
+        await connect;
         ns = tcp.GetStream();
         connId++;
     }
@@ -127,6 +147,8 @@ public static class ServerClient
     public static async Task<Resp> CallAsync(Req req)
     {
         if (closed || ns == null) return null;
+        if (req.command == "CAPNHATXU" || req.command == "MUAHANG")
+            req.requestId = string.IsNullOrWhiteSpace(req.requestId) ? Guid.NewGuid().ToString("N") : req.requestId;
 
         int id = connId;
         Resp r = await SendOnce(req);
@@ -151,6 +173,7 @@ public static class ServerClient
             if (r != null) return r;
             id = connId;
         }
+        if (req.command == "CAPNHATXU" || req.command == "MUAHANG") Resync();
         return null;
     }
 
@@ -238,8 +261,16 @@ public static class ServerClient
     private static async Task<(Resp Resp, bool KhoDoi)> ExchangeVoiTimeout(Req req)
     {
         Task<(Resp Resp, bool KhoDoi)> t = Exchange(req);
-        Task xong = await Task.WhenAny(t, Task.Delay(TIMEOUT_MS));
-        if (xong == t) return await t;
+        using (var timeout = new CancellationTokenSource())
+        {
+            Task delay = Task.Delay(TIMEOUT_MS, timeout.Token);
+            Task xong = await Task.WhenAny(t, delay);
+            if (xong == t)
+            {
+                timeout.Cancel();
+                return await t;
+            }
+        }
 
         // Quá hạn: đóng socket để Exchange kết thúc bằng lỗi và NHẢ gate (nếu không mọi lệnh sau sẽ treo mãi)
         try { ns?.Dispose(); } catch { }

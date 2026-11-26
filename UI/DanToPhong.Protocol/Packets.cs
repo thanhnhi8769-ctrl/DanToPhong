@@ -10,6 +10,8 @@ namespace DanToPhong.Protocol
         public string? RacerId { get; set; }
         public string? Username { get; set; }
         public string? Password { get; set; }
+        public string? VerificationCode { get; set; }
+        public string? RequestId { get; set; }
         public string? FullName { get; set; }
         public string? Email { get; set; }
         public DateTime? Birthday { get; set; }

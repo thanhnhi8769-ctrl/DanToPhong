@@ -61,7 +61,7 @@ public static class PlayerInventory
             if (delta == 0) return;
             ServerClient.Cache.coins = amount;
             NotifyChanged();
-            ServerClient.Fire(new Req { command = "CAPNHATXU", coinsDelta = delta });
+            ServerClient.Fire(new Req { command = "CAPNHATXU", coinsDelta = delta, requestId = Guid.NewGuid().ToString("N") });
             return;
         }
 
@@ -78,7 +78,7 @@ public static class PlayerInventory
         {
             ServerClient.Cache.coins = Mathf.Max(0, ServerClient.Cache.coins + amount);
             NotifyChanged();
-            ServerClient.Fire(new Req { command = "CAPNHATXU", coinsDelta = amount });
+            ServerClient.Fire(new Req { command = "CAPNHATXU", coinsDelta = amount, requestId = Guid.NewGuid().ToString("N") });
             return;
         }
 
@@ -106,7 +106,7 @@ public static class PlayerInventory
             ServerClient.Cache.coins -= price;
             ServerClient.Cache.items.Add(new ItemDto { category = category, itemIndex = index, isEquipped = false });
             NotifyChanged();
-            ServerClient.Fire(new Req { command = "MUAHANG", category = category, itemIndex = index, price = price });
+            ServerClient.Fire(new Req { command = "MUAHANG", category = category, itemIndex = index, price = price, requestId = Guid.NewGuid().ToString("N") });
             return true;
         }
 
@@ -145,7 +145,7 @@ public static class PlayerInventory
             foreach (ItemDto it in ServerClient.Cache.items)
                 if (it.category == category) it.isEquipped = it.itemIndex == index;
             NotifyChanged();
-            ServerClient.Fire(new Req { command = "TRANGBI", category = category, itemIndex = index });
+            ServerClient.Fire(new Req { command = "TRANGBI", category = category, itemIndex = index, requestId = Guid.NewGuid().ToString("N") });
             return;
         }
 
@@ -171,7 +171,7 @@ public static class PlayerInventory
         {
             ServerClient.Cache.selectedMap = sceneName;
             NotifyChanged();
-            ServerClient.Fire(new Req { command = "CHONMAP", mapName = sceneName });
+            ServerClient.Fire(new Req { command = "CHONMAP", mapName = sceneName, requestId = Guid.NewGuid().ToString("N") });
             return;
         }
 

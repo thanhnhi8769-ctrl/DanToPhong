@@ -10,8 +10,15 @@ namespace UI
         private static void Main()
         {
             ApplicationConfiguration.Initialize();
-            var netClient = new NetworkClientService();
-            Application.Run(new LoginForm(netClient));
+            try
+            {
+                using var netClient = new NetworkClientService();
+                Application.Run(new LoginForm(netClient));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Thiếu cấu hình máy chủ", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
     }
 }
