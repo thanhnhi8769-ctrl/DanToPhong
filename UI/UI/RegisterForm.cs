@@ -27,7 +27,9 @@ namespace UI
 
         private string? selectedAvatarPath;
         private bool hasSentCode;
+        private string? otpTargetUsername;
         private string? otpTargetEmail;
+        private DateTime? otpExpiresAt;
         private int otpCountdownSeconds;
 
         public RegisterForm(NetworkClientService netClient)
@@ -425,6 +427,12 @@ namespace UI
         {
             string u = txtUsername.Text.Trim();
             lblErrUsername.Text = string.IsNullOrEmpty(u) ? "" : (ValidateUsername(u) ?? "");
+            if (!string.Equals(u, otpTargetUsername, StringComparison.Ordinal))
+            {
+                hasSentCode = false;
+                otpExpiresAt = null;
+                lblCodeStatus.Text = "";
+            }
             picAvatar.Invalidate();
             nightPanel1.Invalidate();
         }
@@ -461,6 +469,7 @@ namespace UI
             if (!string.Equals(em, otpTargetEmail, StringComparison.OrdinalIgnoreCase))
             {
                 hasSentCode = false;
+                otpExpiresAt = null;
                 lblCodeStatus.Text = "";
             }
             nightPanel1.Invalidate();
@@ -498,21 +507,26 @@ namespace UI
                 string? usernameErr = ValidateUsername(username);
                 if (usernameErr != null) throw new InvalidOperationException(usernameErr);
                 ResponsePacket response = await _netClient.RequestRegistrationCodeAsync(username, email);
+                if (IsDisposed) return;
                 if (!response.Success) throw new InvalidOperationException(response.Message);
 
                 hasSentCode = true;
+                otpTargetUsername = username;
                 otpTargetEmail = email;
+                otpExpiresAt = DateTime.UtcNow.AddMinutes(10);
 
                 lblCodeStatus.ForeColor = Color.FromArgb(15, 115, 50);
                 lblCodeStatus.Text = response.Message;
 
-                otpCountdownSeconds = 600;
+                otpCountdownSeconds = 60;
                 btnSendCode.Text = $"{otpCountdownSeconds}s";
                 _otpTimer.Start();
             }
             catch (Exception ex)
             {
+                if (IsDisposed) return;
                 hasSentCode = false;
+                otpExpiresAt = null;
                 lblCodeStatus.ForeColor = Color.FromArgb(170, 25, 25);
                 lblCodeStatus.Text = "Could not send the verification email. Please try again later.";
                 btnSendCode.Enabled = true;
@@ -537,12 +551,6 @@ namespace UI
             if (otpCountdownSeconds <= 0)
             {
                 _otpTimer.Stop();
-
-                // Mã hết hạn sau 60 giây đúng như nội dung email
-                hasSentCode = false;
-                lblCodeStatus.ForeColor = Color.Crimson;
-                lblCodeStatus.Text = "Code expired. Please request a new one.";
-
                 btnSendCode.Enabled = true;
                 btnSendCode.Text = "Get Code";
                 nightPanel1.Invalidate();
@@ -621,10 +629,19 @@ namespace UI
             lblErrEmail.Text = e5 ?? "";
             if (e5 != null) hasError = true;
 
-            if (!hasSentCode || !string.Equals(email, otpTargetEmail, StringComparison.OrdinalIgnoreCase))
+            if (!hasSentCode ||
+                !string.Equals(username, otpTargetUsername, StringComparison.Ordinal) ||
+                !string.Equals(email, otpTargetEmail, StringComparison.OrdinalIgnoreCase))
             {
                 lblCodeStatus.ForeColor = Color.Crimson;
                 lblCodeStatus.Text = "Please click 'Get Code' to verify your email.";
+                hasError = true;
+            }
+            else if (!otpExpiresAt.HasValue || DateTime.UtcNow >= otpExpiresAt.Value)
+            {
+                hasSentCode = false;
+                lblCodeStatus.ForeColor = Color.Crimson;
+                lblCodeStatus.Text = "Code expired. Please request a new one.";
                 hasError = true;
             }
             else if (code.Length != 6 || !code.All(char.IsDigit))
@@ -656,6 +673,7 @@ namespace UI
                     cmbGender.SelectedItem?.ToString(),
                     txtRacerId.Text.Trim(),
                     code);
+                if (IsDisposed) return;
 
                 if (!resp.Success)
                 {
@@ -676,6 +694,7 @@ namespace UI
 
                 LuuAvatarLocal(username);
                 await DayAvatarLenServerSauDangKyAsync(username, password);
+                if (IsDisposed) return;
 
                 PopupNoticeForm.ShowNotice(
                     this,

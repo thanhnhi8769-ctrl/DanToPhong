@@ -592,6 +592,9 @@ namespace UI
 
             if (e1 != null || e2 != null) return;
 
+            _otpUsername = null;
+            _otpEmail = null;
+            _codeExpiresAt = null;
             btnSendCode.Enabled = false;
             string previousText = btnSendCode.Text;
             btnSendCode.Text = "Sending...";
@@ -599,6 +602,7 @@ namespace UI
             try
             {
                 ResponsePacket response = await _netClient.RequestResetCodeAsync(username, email);
+                if (IsDisposed) return;
                 if (!response.Success)
                     throw new InvalidOperationException(string.IsNullOrWhiteSpace(response.Message)
                         ? "Could not request a verification code." : response.Message);
@@ -618,6 +622,7 @@ namespace UI
             }
             catch (Exception ex)
             {
+                if (IsDisposed) return;
                 btnSendCode.Enabled = true;
                 btnSendCode.Text = string.IsNullOrWhiteSpace(previousText) ? "Get Code" : previousText;
 
@@ -713,6 +718,7 @@ namespace UI
             try
             {
                 ResponsePacket resp = await _netClient.ResetPasswordAsync(username, email, newPassword, code);
+                if (IsDisposed) return;
                 if (!resp.Success)
                 {
                     PopupNoticeForm.ShowNotice(

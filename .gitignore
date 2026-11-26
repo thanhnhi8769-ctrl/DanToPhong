@@ -1,25 +1,45 @@
-/Library/
-/Temp/
-/Obj/
-/Build/
-/Builds/
-/Logs/
-/UserSettings/
-/MemoryCaptures/
-.vs/
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emory[Cc]aptures/
+**/.vs/
+
+# Unity-generated IDE files, but keep the hand-maintained launcher projects.
 *.csproj
+!UI/**/*.csproj
 *.sln
-*.user
-*.userprefs
+*.slnx
+*.unityproj
 *.pidb
 *.booproj
 *.suo
-*.unityproj
+*.user
+*.userprefs
 *.DS_Store
 *.psd
 *.unitypackage
 *.unity
+!Assets/scene/*.unity
 
-# Build artifacts
-[Oo]bj/
-[Bb]in/
+# Local builds and release output
+/BuildGame*/
+/LauncherRelease/
+**/bin/
+**/obj/
+*.zip
+
+# Local secrets and certificates
+.env
+.env.*
+!.env.example
+**/server.env
+**/*.pem
+**/*.pfx
+**/*.p12
+**/secrets/
+
+# Only project-owned scenes are versioned; imported demos stay out of this project.

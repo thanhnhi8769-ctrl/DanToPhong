@@ -139,6 +139,18 @@ namespace DanToPhong.Server
                 throw new InvalidOperationException("Verification reservation expired before the code was stored.");
         }
 
+        internal async Task ReleaseVerificationReservationAsync(string key, CancellationToken token)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var cmd = new SqlCommand(@"
+                UPDATE dbo.VerificationCodes
+                SET CooldownUntil=SYSUTCDATETIME()
+                WHERE KeyHash=@keyHash AND CodeHash IS NULL AND ExpiresAt IS NULL;", conn);
+            cmd.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = HashKey(key);
+            await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }
+
         // Validate and consume under a SQL row lock so an OTP is single-use across restarts/instances.
         internal async Task<bool> VerifyAndConsumeCodeAsync(string key, string? code, CancellationToken token)
         {

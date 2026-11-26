@@ -1,0 +1,23 @@
+[Unit]
+Description=DanToPhong TCP game service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/dantophong
+ExecStart=/usr/bin/dotnet /opt/dantophong/DanToPhong.Server.dll
+EnvironmentFile=/etc/dantophong/server.env
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

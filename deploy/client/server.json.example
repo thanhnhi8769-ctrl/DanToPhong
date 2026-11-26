@@ -1,0 +1,5 @@
+{
+  "host": "YOUR_EC2_ELASTIC_IP_OR_DNS",
+  "port": 9000,
+  "useTls": true
+}

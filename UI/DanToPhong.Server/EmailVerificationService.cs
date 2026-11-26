@@ -1,5 +1,6 @@
-using System.Net;
-using System.Net.Mail;
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using MimeKit;
 
 namespace DanToPhong.Server;
 
@@ -12,23 +13,34 @@ internal static class EmailVerificationService
         if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(password))
             throw new InvalidOperationException("SMTP credentials are not configured.");
 
-        using var client = new SmtpClient("smtp.gmail.com", 587)
+        string host = Environment.GetEnvironmentVariable("DANTOPHONG_SMTP_HOST") ?? "smtp.gmail.com";
+        string rawPort = Environment.GetEnvironmentVariable("DANTOPHONG_SMTP_PORT") ?? "465";
+        if (!int.TryParse(rawPort, out int port) || port is not (465 or 587))
+            throw new InvalidOperationException("DANTOPHONG_SMTP_PORT must be 465 (implicit TLS) or 587 (STARTTLS).");
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Scooter Racing", user.Trim()));
+        message.To.Add(MailboxAddress.Parse(email.Trim()));
+        message.Subject = passwordReset ? "Scooter Racing - Password Reset Code" : "Scooter Racing - Registration Code";
+        message.Body = new TextPart("plain")
         {
-            EnableSsl = true,
-            UseDefaultCredentials = false,
-            Credentials = new NetworkCredential(user.Trim(), password.Replace(" ", "").Trim())
-        };
-        using var mail = new MailMessage
-        {
-            From = new MailAddress(user.Trim(), "Scooter Racing"),
-            Subject = passwordReset ? "Scooter Racing - Password Reset Code" : "Scooter Racing - Registration Code",
-            Body = passwordReset
+            Text = passwordReset
                 ? $"Your password reset code is {code}. It expires in 10 minutes."
-                : $"Your registration code is {code}. It expires in 10 minutes.",
-            IsBodyHtml = false
+                : $"Your registration code is {code}. It expires in 10 minutes."
         };
-        mail.To.Add(email.Trim());
-        try { await client.SendMailAsync(mail).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false); }
-        catch (TimeoutException) { client.SendAsyncCancel(); throw; }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var client = new SmtpClient
+        {
+            Timeout = 15000
+        };
+        SecureSocketOptions socketOptions = port == 465
+            ? SecureSocketOptions.SslOnConnect
+            : SecureSocketOptions.StartTls;
+
+        await client.ConnectAsync(host, port, socketOptions, timeout.Token).ConfigureAwait(false);
+        await client.AuthenticateAsync(user.Trim(), password.Replace(" ", "").Trim(), timeout.Token).ConfigureAwait(false);
+        await client.SendAsync(FormatOptions.Default, new SmtpSendRequest(message), timeout.Token).ConfigureAwait(false);
+        await client.DisconnectAsync(true, timeout.Token).ConfigureAwait(false);
     }
 }

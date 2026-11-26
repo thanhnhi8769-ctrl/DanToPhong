@@ -19,7 +19,7 @@ namespace DanToPhong.Server
     internal static class Program
     {
         private static readonly int Port = ReadPort();
-        private static readonly bool UseTls = string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase);
+        private static readonly bool UseTls = ReadUseTls();
         private const int MaxCoinsDeltaPerRequest = 5000;
         private static readonly string ConnectionString = Environment.GetEnvironmentVariable("DANTOPHONG_DB_CONNECTION") ?? string.Empty;
 
@@ -52,7 +52,21 @@ namespace DanToPhong.Server
         private static int ReadPort()
         {
             string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_PORT");
-            return int.TryParse(raw, out int port) && port is > 0 and <= 65535 ? port : 9000;
+            if (string.IsNullOrWhiteSpace(raw))
+                return 9000;
+            if (!int.TryParse(raw, out int port) || port is < 1 or > 65535)
+                throw new InvalidOperationException("DANTOPHONG_PORT must be an integer between 1 and 65535.");
+            return port;
+        }
+
+        private static bool ReadUseTls()
+        {
+            string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS");
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+            if (bool.TryParse(raw.Trim(), out bool enabled))
+                return enabled;
+            throw new InvalidOperationException("DANTOPHONG_USE_TLS must be 'true' or 'false'.");
         }
 
         // Giá phía server là nguồn duy nhất; không nhận loại vật phẩm/giá do client tự đặt.
@@ -502,6 +516,7 @@ namespace DanToPhong.Server
                 catch (Exception ex)
                 {
                     Console.WriteLine("[SMTP] Reset code send failed: " + ex.Message);
+                    await ReleaseVerificationReservationAsync(state, key).ConfigureAwait(false);
                     return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not send the verification email. Please try again later." };
                 }
             }
@@ -534,10 +549,23 @@ namespace DanToPhong.Server
                 catch (Exception ex)
                 {
                     Console.WriteLine("[SMTP] Registration code send failed: " + ex.Message);
+                    await ReleaseVerificationReservationAsync(state, key).ConfigureAwait(false);
                     return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not send the verification email. Please try again later." };
                 }
             }
             return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+        }
+
+        private static async Task ReleaseVerificationReservationAsync(ServerStateRepository state, string key)
+        {
+            try
+            {
+                await state.ReleaseVerificationReservationAsync(key, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[OTP] Failed to release verification reservation: " + ex.Message);
+            }
         }
 
         private static async Task<ResponsePacket> HandleGetInfoAsync(

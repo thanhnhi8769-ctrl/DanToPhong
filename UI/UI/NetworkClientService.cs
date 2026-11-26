@@ -24,6 +24,7 @@ namespace UI.Services
         // MỚI: launcher truyền cho game Unity
         public string Host => _host;
         public int Port => _port;
+        public bool UseTls => _useTls;
         public string Token { get; private set; } = string.Empty;
 
         public event Action<bool, string>? ConnectionStatusChanged;
@@ -45,19 +46,51 @@ namespace UI.Services
         {
             string? fileHost = null;
             int? filePort = null;
+            bool? fileUseTls = null;
             string configPath = Path.Combine(AppContext.BaseDirectory, "server.json");
             if (File.Exists(configPath))
             {
-                using JsonDocument config = JsonDocument.Parse(File.ReadAllText(configPath));
-                if (config.RootElement.TryGetProperty("host", out JsonElement h)) fileHost = h.GetString();
-                if (config.RootElement.TryGetProperty("port", out JsonElement p) && p.TryGetInt32(out int parsed)) filePort = parsed;
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                ServerConfig? config = JsonSerializer.Deserialize<ServerConfig>(File.ReadAllText(configPath), options);
+                fileHost = config?.Host;
+                filePort = config?.Port;
+                fileUseTls = config?.UseTls;
             }
-            _host = host ?? Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST") ?? fileHost ?? string.Empty;
+
+            string? envHost = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST");
+            _host = (host ?? (string.IsNullOrWhiteSpace(envHost) ? fileHost : envHost) ?? string.Empty).Trim();
             string? envPort = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT");
-            _port = port ?? (int.TryParse(envPort, out int parsedPort) ? parsedPort : filePort ?? 9000);
-            _useTls = string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase);
+            if (port.HasValue)
+            {
+                _port = port.Value;
+            }
+            else if (!string.IsNullOrWhiteSpace(envPort))
+            {
+                if (!int.TryParse(envPort, out int parsedPort) || parsedPort is < 1 or > 65535)
+                    throw new InvalidOperationException("DANTOPHONG_SERVER_PORT must be an integer between 1 and 65535.");
+                _port = parsedPort;
+            }
+            else
+            {
+                _port = filePort ?? 9000;
+            }
+            string? envTls = Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS");
+            if (string.IsNullOrWhiteSpace(envTls))
+                _useTls = fileUseTls ?? false;
+            else if (bool.TryParse(envTls, out bool parsedTls))
+                _useTls = parsedTls;
+            else
+                throw new InvalidOperationException("DANTOPHONG_USE_TLS must be 'true' or 'false'.");
+
             if (string.IsNullOrWhiteSpace(_host) || _port is < 1 or > 65535)
                 throw new InvalidOperationException("Thiếu cấu hình DANTOPHONG_SERVER_HOST/PORT hoặc file server.json.");
+        }
+
+        private sealed class ServerConfig
+        {
+            public string? Host { get; set; }
+            public int? Port { get; set; }
+            public bool? UseTls { get; set; }
         }
 
         private static readonly TimeSpan NetworkTimeout = TimeSpan.FromSeconds(12);

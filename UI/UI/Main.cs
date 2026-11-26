@@ -314,6 +314,7 @@ namespace UI
                 token: _netClient.Token,
                 host: _netClient.Host,
                 port: _netClient.Port,
+                useTls: _netClient.UseTls,
                 mode: mode,
                 roomId: roomId,
                 onGameExited: () =>

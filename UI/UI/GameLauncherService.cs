@@ -42,6 +42,7 @@ namespace UI.Services
             string token,
             string host,
             int port,
+            bool useTls,
             string mode,
             string roomId = "",
             Action? onGameExited = null)
@@ -78,7 +79,7 @@ namespace UI.Services
             psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host);
             psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
             psi.ArgumentList.Add("--tls");
-            psi.ArgumentList.Add(string.Equals(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), "true", StringComparison.OrdinalIgnoreCase) ? "true" : "false");
+            psi.ArgumentList.Add(useTls ? "true" : "false");
             psi.ArgumentList.Add("--mode"); psi.ArgumentList.Add(safeMode);
             if (!string.IsNullOrWhiteSpace(roomId))
             {

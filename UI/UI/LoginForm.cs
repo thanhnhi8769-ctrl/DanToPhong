@@ -434,6 +434,7 @@ namespace UI
             try
             {
                 ResponsePacket resp = await _netClient.LoginAsync(username, password);
+                if (IsDisposed) return;
                 if (!resp.Success)
                 {
                     string errMsg = resp.Code == ErrorCodes.AuthFailed
