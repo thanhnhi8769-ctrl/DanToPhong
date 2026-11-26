@@ -19,3 +19,7 @@
 *.psd
 *.unitypackage
 *.unity
+
+# Build artifacts
+[Oo]bj/
+[Bb]in/
