@@ -237,7 +237,7 @@ Khi chạy không qua Launcher, `Boot` chuyển về menu/offline; khi qua Launc
 | Build/Publish Launcher | `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o D:\DanToPhong\LauncherRelease`: thành công; output có `UI.exe`; 7 warning (6 nullable annotations trong Designer, 1 trường avatar chưa gán). `server.json` vẫn placeholder TLS; chưa có EIP gắn EC2. |
 | Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp; lệnh AWS chỉ được parse, không chạy. |
 | Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; bổ sung `game` fallback bị thiếu. |
-| Git hygiene | `.gitignore` bỏ qua output; đã bỏ 268 file `bin/obj` và hai file `.slnx` khỏi index; chưa commit/push. |
+| Git hygiene | `.gitignore` bỏ qua output; 268 file `bin/obj` và hai `.slnx` đã được gỡ khỏi index. Các thay đổi đã commit cục bộ; chưa push. |
 | Secret scan | Quét signature AWS key/private key và mẫu password cụ thể trong source/config/doc không có kết quả; không thay thế quét Git history/rotation. |
 
 ### Kịch bản cần chạy và chỗ chèn ảnh minh chứng
