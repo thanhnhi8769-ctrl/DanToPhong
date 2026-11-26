@@ -1,0 +1,10 @@
+Test ID: TC05
+Date: 2026-11-27
+Objective: Verify TLS handshake and that plaintext application frames are rejected.
+Expected: Valid TLS handshake succeeds; plaintext client is not accepted.
+Actual TLS: Handshake did not complete (IOException); no application credentials were sent.
+Actual plaintext: A framed, unknown-command probe received ERR_INVALID_INPUT / Unsupported command.
+Result: FAIL — the listener accepts plaintext application protocol.
+Root cause: Runtime listener is operating without required TLS enforcement, or is an older plaintext deployment. Remote runtime configuration could not be inspected (SSM unavailable).
+Cleanup: EC2 stopped before RDS; both subsequently verified stopped. Existing RDS ENI Elastic IP association was unchanged. No Security Group rule was added.
+Redaction: Host/IP, certificate details, account data, and all credentials omitted.

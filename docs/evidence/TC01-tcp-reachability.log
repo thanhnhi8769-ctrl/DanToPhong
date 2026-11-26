@@ -1,0 +1,8 @@
+Test ID: TC01
+Date: 2026-11-27
+Objective: Verify TCP reachability to the public service port from the current test workstation.
+Command: Test-NetConnection <redacted-public-endpoint> -Port 9000 -InformationLevel Quiet
+Expected: TCP connection succeeds when the service is reachable and the source is permitted.
+Actual: TCP 9000 reachable from this workstation: True.
+Result: PASS (single workstation only; not a two-client or application-login test).
+Redaction: Host/IP omitted; no credentials or user data sent.
