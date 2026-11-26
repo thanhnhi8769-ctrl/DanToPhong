@@ -17,7 +17,6 @@ namespace UI
     public partial class Main : Form
     {
         private PictureBox? _picSettingAvatar;
-        private Button? _btnChooseAvatar;
         private string? _pendingAvatarPath;
         private Panel? _roomsPanel;
         private string _roomsSig = "";
@@ -223,9 +222,6 @@ namespace UI
             int avatarSize = 76;
             _picSettingAvatar.Size = new Size(avatarSize, avatarSize);
             _picSettingAvatar.Location = new Point((cardWidth - avatarSize) / 2, avatarTopY);
-
-            if (_btnChooseAvatar != null)
-                _btnChooseAvatar.Visible = false;
 
             _picSettingAvatar.BringToFront();
             _picSettingAvatar.Invalidate();
