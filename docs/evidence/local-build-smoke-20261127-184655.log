@@ -1,0 +1,53 @@
+﻿Local build and SMTP smoke validation — 2026-11-27 18:46:55 +07:00
+
+COMMAND: dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore
+  DanToPhong.Protocol -> D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.dll
+  DanToPhong.Server -> D:\DanToPhong\DanToPhong\UI\DanToPhong.Server\bin\Release\net10.0\DanToPhong.Server.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.15
+EXIT_CODE: 0
+
+COMMAND: dotnet build .\UI\UI\UI.csproj -c Release --no-restore
+  DanToPhong.Protocol -> D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.dll
+  UI -> D:\DanToPhong\DanToPhong\UI\UI\bin\Release\net10.0-windows\UI.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.23
+EXIT_CODE: 0
+
+COMMAND: dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore
+[SMTP] Email job 1 received status 451; retrying (1/3).
+[SMTP] Email job 1 received status 550; retrying (2/3).
+[SMTP] Email job 1 delivered.
+PASS: fragmented reads and coalesced frames preserve order.
+PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.
+PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.
+PASS: forged UserId/TargetId with ELIMINATE affects only the caller; opponent state and winner remain unchanged.
+PASS: per-client mailbox waits for important events and drops stale snapshots.
+PASS: shared account validation accepts the email limit and rejects overlong email/password values.
+PASS: SHA-256 certificate pinning accepts the exact self-signed certificate and rejects a wrong pin, hostname mismatch, and malformed pin.
+PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.
+EXIT_CODE: 0
+
+COMMAND: dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore -- --smtp4dev-sample
+[SMTP] Email job 1 received status 451; retrying (1/3).
+[SMTP] Email job 1 received status 550; retrying (2/3).
+[SMTP] Email job 1 delivered.
+PASS: fragmented reads and coalesced frames preserve order.
+PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.
+PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.
+PASS: forged UserId/TargetId with ELIMINATE affects only the caller; opponent state and winner remain unchanged.
+PASS: per-client mailbox waits for important events and drops stale snapshots.
+PASS: shared account validation accepts the email limit and rejects overlong email/password values.
+PASS: SHA-256 certificate pinning accepts the exact self-signed certificate and rejects a wrong pin, hostname mismatch, and malformed pin.
+PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.
+PASS: synthetic Vietnamese email with attachment was accepted by local smtp4dev.
+PASS: ProtocolLogger.RedactSecrets was enabled; trace stayed in memory and no SMTP credentials were used.
+EXIT_CODE: 0

@@ -6,6 +6,9 @@ protocol are written by this team. MailKit is used only by the Server for
 outbound email to SMTP and by the SMTP smoke-test sample; it is not used for
 client-to-server networking.
 
+The canonical submission report is
+[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
+
 ## Contents
 
 1. [Architecture and current limits](#architecture-and-current-limits)
@@ -238,11 +241,16 @@ TCP 9000 to a verified source `/32`; never use `0.0.0.0/0`.
 
 The systemd unit template is `deploy/aws/dantophong.service`. Configure its
 environment file outside Git with restricted permissions and install/enable
-the service only on an approved EC2 deployment.
+the service only on an approved EC2 deployment. The one-time EC2 setup script
+is [deploy/aws/setup-ec2.sh](deploy/aws/setup-ec2.sh); it creates a self-signed
+certificate for the requested SAN host when needed and enables/restarts the
+unit. The local [scripts/aws-test-helper.ps1](scripts/aws-test-helper.ps1)
+provides read-only status, explicitly confirmed RDS-then-EC2 start and
+EC2-then-RDS stop flows, plus live TLS pin verification.
 
-The manual startup, verification, cost-safety, and shutdown checklist is in
-[docs/demo-runbook.md](docs/demo-runbook.md). It documents steps only; this
-repository's local test evidence does not establish an Internet deployment.
+The [demo runbook](docs/demo-runbook.md) documents setup, test and shutdown
+steps; it is not evidence that AWS was accessed or deployed. This repository's
+local test evidence does not establish an Internet deployment.
 
 ## SMTP and OTP
 
@@ -282,10 +290,12 @@ must remain outside this repository.
 | TC10 | PARTIAL | Anonymous loopback framing/load probes; no authenticated gameplay or Clumsy run. |
 | TC11–TC12 | PASS | Prior sanitized Npcap loopback capture; not proof of Internet behavior. |
 | T1 | PASS | Loopback listener observed; does not show public reachability. |
-| T2–T8 | PARTIAL | Console protocol harness passed; Launcher/Unity GUI still requires manual verification. |
+| T2–T8 | PARTIAL | Console protocol harness passed; Launcher/Unity GUI still requires manual verification. [Latest log](docs/evidence/T2-T8-protocol-console-20261127-184734.log). |
 
 Current evidence and test scope are indexed in
 [docs/evidence/README.md](docs/evidence/README.md); the detailed requirement
 mapping is in [docs/requirements-traceability.md](docs/requirements-traceability.md).
-The implementation and test report is
-[BAO_CAO_TRIEN_KHAI_VA_KIEM_THU.md](BAO_CAO_TRIEN_KHAI_VA_KIEM_THU.md).
+The manual capture plan is in
+[docs/evidence/screenshot-checklist.md](docs/evidence/screenshot-checklist.md).
+The canonical implementation, operations and test report is
+[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).

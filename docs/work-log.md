@@ -245,3 +245,28 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 |---|---|---|
 | Clarify transport and SMTP dependencies | README now states the team-written client/server TCP protocol and limits MailKit/ProtocolLogger to SMTP. | Source search for `MailKit` and `ProtocolLogger`; `git diff --check` |
 | Document pinned TLS and local GUI setup | Added self-signed certificate pinning guidance, `run-local.ps1` usage, test-only loopback plaintext steps, two-client instructions, SMTP4dev OTP viewing, and evidence/report links with the TC/T status table. | Parsed `deploy/client/server.json.example`; checked linked files and local port/config descriptions |
+
+## 2026-11-27 - DevOps consistency and local QA rerun
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Align deployment TLS and local DB instructions | Demo runbook now matches self-signed SAN + SHA-256 pin policy; report local setup uses only `dtp-sql`/`dtp-smtp` and `DanToPhongDB_Test`. Added service-account PFX permission guidance and removed a duplicate environment-name entry in the local runner. | Config/docs review; PowerShell AST parse passed |
+| Run builds and protocol/SMTP smoke | Server and Launcher Release builds passed (0 warnings/errors each); protocol smoke and synthetic smtp4dev sample passed. SMTP sample was accepted locally; no real recipient or credentials used. | Commands and output in `docs/evidence/local-build-smoke-20261127-184655.log` |
+| Rerun TC05 and T2–T8 | TC05 passed all transport cases on loopback; T2–T8 console harness passed, including 1.8/1.4 ms PONG, 7.2 ms chat, 20 messages, Vietnamese text, disconnect and server-stop behavior. Temporary harness accounts were removed. TC05 created a self-signed PFX in system temp outside Git; it was not imported and remains for owner-reviewed cleanup per `docs/blocked.md`. | `dotnet run ... -- --tc05-pinned`; `.\tools\run-t2t8-protocol-test.ps1`; timestamped logs in `docs/evidence/` |
+| Prepare manual screenshot evidence | Added a per-test filename/action/frame/redaction checklist for PARTIAL/BLOCKED GUI and load cases. No screenshots were fabricated; GUI and cross-network cases remain manual. No AWS commands or mutations were run. | Review `docs/evidence/screenshot-checklist.md`; no AWS CLI |
+| Audit config, exposure, links and cleanup | No all-IPv4 ingress rule in deployment config, no tracked private-key/certificate files, no legacy networking library matches; new logs passed secret-pattern scan. Runner AST, client JSON, documentation links and `git diff --check` pass. Ports 9000/19000/19001 are clear; both designated test containers remain running and were not started/stopped by this run. | `rg`; `git grep`; `git ls-files`; PowerShell AST/JSON/link checks; `Get-NetTCPConnection` |
+
+## 2026-11-27 - Preparing AWS test deployment
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Inspect AWS identity and deployment templates | Existing systemd unit already enables boot startup, restarts on failure, loads `/etc/dantophong/server.env`, and runs `/opt/dantophong/DanToPhong.Server.dll`. AWS inspection was blocked: current `default` profile in `us-east-1` returned `InvalidClientTokenId`/`AuthFailure` on read-only identity and describe calls; EC2/RDS/EIP/Security Group states remain unknown. No AWS resource action was issued. | Read deployment templates and runtime config; read-only `aws sts get-caller-identity`, `ec2 describe-instances`, `rds describe-db-instances`, `ec2 describe-addresses`, `ec2 describe-security-groups` |
+| Prepare EC2 setup and local start/stop helpers | Added a bounded, explicit-confirmation RDS-before-EC2/EC2-before-RDS helper and a one-time EC2 setup script for TLS certificate/SAN, systemd enable/start, and port checks. Updated runbook, env example, README, and blocked items. No script was executed against AWS or EC2. | PowerShell AST; `bash -n deploy/aws/setup-ec2.sh`; `git diff --check`; changed-document link checks |
+
+## 2026-11-27 — Consolidated final report and refreshed AWS snapshot
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify refreshed AWS credentials read-only | Credentials worked in `default` / `us-east-1`; EC2 and RDS were stopped, RDS reported `PubliclyAccessible=True`, and observed ingress remained restricted to specific `/32` and a security-group reference. No AWS resource was changed. | `.\scripts\aws-test-helper.ps1 -Action Status`; read-only `describe-*` |
+| Consolidate submission documents | Created `BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md` with architecture, requirements/stories, operational steps, current AWS state, test matrix, evidence and manual screenshot checklist. Replaced the previous report body with a compatibility pointer and linked supporting docs to the canonical report. Updated the obsolete AWS credential blocker. | Targeted source/document review; supporting-file and evidence link review |
+| Run final workspace checks | `git diff --check` and cached diff check pass; ports 9000 and 19000 have no listeners. Changes remain local and uncommitted; no push or AWS mutation. | `git status --short --branch`; `git diff --stat`; `git diff --check`; `Get-NetTCPConnection -State Listen -LocalPort 9000,19000` |

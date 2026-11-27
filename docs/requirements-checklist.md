@@ -3,17 +3,19 @@
 Status distinguishes source-level implementation from observed runtime
 verification. A successful build or framing smoke test is not a multiplayer
 runtime pass.
+The canonical consolidated report is
+[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](../BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
 
 | Requirement | Status | Evidence / remaining work |
 |---|---|---|
 | C# client with GUI | PARTIAL | WinForms UI under `UI/UI/`; Unity C# game has its own GUI. Needs current-build interactive verification. |
 | At least two GUI clients at once | PARTIAL | Two Unity instances opened to the main menu simultaneously; a live login/match between them remains unverified. |
 | Server implemented in an allowed language with database | SOURCE IMPLEMENTED; LOCAL TEST DB USED | C# server and SQL repositories in `UI/DanToPhong.Server/`; TC05 used the isolated `DanToPhongDB_Test`. Authenticated application workflows remain unverified. |
-| Team-developed client/server network stack | PARTIAL | TCP framing and protocol are in `DanToPhong.Protocol`; no third-party networking library is used. Gameplay now uses input requests plus a dedicated authenticated push stream. |
+| Team-developed client/server network stack | PARTIAL | TCP framing and protocol are in `DanToPhong.Protocol`; the 2026-11-27 console run verifies T2–T8 only at protocol level ([log](evidence/T2-T8-protocol-console-20261127-184734.log)). Gameplay GUI remains unverified. |
 | Client/server ports and message structures specified | DOCUMENTED | `docs/protocol.md`: TCP 9000, 4-byte big-endian length prefix, UTF-8 JSON, command names, DTO fields and limits. |
 | Multiple concurrent connections | PARTIAL | Async accept/session handling and a concurrent session limit are implemented; TC10 verified 50 anonymous loopback PING clients plus framing edge cases, but authenticated/gameplay sustained load and impairment remain untested. |
-| Internet operation | NOT VERIFIED | Runtime TLS certificate, endpoint, security-group ingress, database and two independent client networks require manual validation. |
-| Account registration/login/OTP over custom protocol | PARTIAL; E2E NOT VERIFIED | smtp4dev has evidence of registration-mail delivery; valid/invalid/expired OTP entry, attempt lockout, and login limiter still need runtime evidence. |
+| Internet operation | NOT VERIFIED | Pinned self-signed TLS passed only on loopback ([TC05](evidence/TC05-pinned-local-20261127-184719.log)); public endpoint/SAN, ingress, database connectivity and two independent client networks require approved manual validation. |
+| Account registration/login/OTP over custom protocol | PARTIAL; E2E NOT VERIFIED | smtp4dev accepted a synthetic SMTP sample in the latest local smoke run ([log](evidence/local-build-smoke-20261127-184655.log)); registration-mail receipt exists, but OTP entry/expiry/attempt lockout and login limiter still need runtime evidence. |
 | Lobby/room membership over custom protocol | PARTIAL | `ROOM_CREATE`, `ROOM_JOIN`, `ROOM_LEAVE`, `ROOM_STATE`, `ROOM_START` use in-memory server registry. Subscribed clients receive ordered event/snapshot frames; spectate/reconnect paths retain state for a 120-second grace period, but no state survives server restart. |
 | Gameplay state over custom protocol | PARTIAL / NOT READY | `GAME_INPUT` requests and `GAME_STREAM` push ordered events/snapshots over TCP; server uses simplified kinematics and configured checkpoint/finish gates; Unity bounds its snapshot queue at eight and interpolates remote state. Full physics, server-owned timer/elimination, and live two-client evidence are still absent. |
 | Solo mode | SOURCE PRESENT; RUNTIME NOT VERIFIED | Local Unity vehicle flow exists; build/scene and real playthrough must be rechecked after current edits. |

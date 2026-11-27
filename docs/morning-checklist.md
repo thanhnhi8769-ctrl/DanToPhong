@@ -64,17 +64,19 @@ silence them as part of this verification.
    Get-NetTCPConnection -State Listen -LocalPort 19000,19001 -ErrorAction SilentlyContinue
    ```
 
-   Port 9000 had a pre-existing listener (PID 13472); do not stop it unless you
-   identify it and decide independently.
+   Also inspect port 9000 before using it. Do not stop a listener or process
+   unless you identify it and decide independently.
 
 ## 3. Complete evidence and report fields
 
 - Save sanitized screenshots/logs under `docs/evidence/`; include local time,
   test ID, build, and the observed result. Never include a password, OTP,
   session token, connection string, private key, or real personal data.
+- Follow [the screenshot capture checklist](evidence/screenshot-checklist.md);
+  it distinguishes GUI evidence from existing protocol-console evidence.
 - Update [docs/evidence/README.md](evidence/README.md),
   [docs/requirements-traceability.md](requirements-traceability.md), and
-  [BAO_CAO_TRIEN_KHAI_VA_KIEM_THU.md](../BAO_CAO_TRIEN_KHAI_VA_KIEM_THU.md)
+  [BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](../BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md)
   to match the evidence.
 - Review every `.drawio` source and PNG against the actual UI and flow. Complete
   the owner-only group/contact/tool fields using `[ĐIỀN: ...]`; do not invent
@@ -93,3 +95,7 @@ silence them as part of this verification.
   [docs/demo-runbook.md](demo-runbook.md). Do not open 1433 publicly; restrict
   temporary TCP 9000 ingress to a verified `/32`, and shut down in the order
   EC2 then RDS.
+
+The latest read-only snapshot found EC2 and RDS stopped, and RDS flagged
+`PubliclyAccessible=True`; see the canonical report. Do not start resources
+until cost/Free Tier and explicit owner approval are confirmed.
