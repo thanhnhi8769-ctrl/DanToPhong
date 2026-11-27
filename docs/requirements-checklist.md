@@ -4,7 +4,7 @@ Status distinguishes source-level implementation from observed runtime
 verification. A successful build or framing smoke test is not a multiplayer
 runtime pass.
 The canonical consolidated report is
-[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](../BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
+[BAO_CAO_DO_AN_NHAP_MON_MANG.md](../BAO_CAO_DO_AN_NHAP_MON_MANG.md).
 
 | Requirement | Status | Evidence / remaining work |
 |---|---|---|
@@ -15,11 +15,11 @@ The canonical consolidated report is
 | Client/server ports and message structures specified | DOCUMENTED | `docs/protocol.md`: TCP 9000, 4-byte big-endian length prefix, UTF-8 JSON, command names, DTO fields and limits. |
 | Multiple concurrent connections | PARTIAL | Async accept/session handling and a concurrent session limit are implemented; TC10 verified 50 anonymous loopback PING clients plus framing edge cases, but authenticated/gameplay sustained load and impairment remain untested. |
 | Internet operation | NOT VERIFIED | Pinned self-signed TLS passed only on loopback ([TC05](evidence/TC05-pinned-local-20261127-184719.log)); public endpoint/SAN, ingress, database connectivity and two independent client networks require approved manual validation. |
-| Account registration/login/OTP over custom protocol | PARTIAL; E2E NOT VERIFIED | smtp4dev accepted a synthetic SMTP sample in the latest local smoke run ([log](evidence/local-build-smoke-20261127-184655.log)); registration-mail receipt exists, but OTP entry/expiry/attempt lockout and login limiter still need runtime evidence. |
+| Account registration/login/OTP over custom protocol | PARTIAL; E2E NOT VERIFIED | Latest local smoke accepted synthetic SMTP sample and queued OTP delivery ([log](evidence/local-final-validation-20261127-194616.log)); registration-mail receipt exists, but OTP entry/expiry/attempt lockout and login limiter still need runtime evidence. |
 | Lobby/room membership over custom protocol | PARTIAL | `ROOM_CREATE`, `ROOM_JOIN`, `ROOM_LEAVE`, `ROOM_STATE`, `ROOM_START` use in-memory server registry. Subscribed clients receive ordered event/snapshot frames; spectate/reconnect paths retain state for a 120-second grace period, but no state survives server restart. |
 | Gameplay state over custom protocol | PARTIAL / NOT READY | `GAME_INPUT` requests and `GAME_STREAM` push ordered events/snapshots over TCP; server uses simplified kinematics and configured checkpoint/finish gates; Unity bounds its snapshot queue at eight and interpolates remote state. Full physics, server-owned timer/elimination, and live two-client evidence are still absent. |
 | Solo mode | SOURCE PRESENT; RUNTIME NOT VERIFIED | Local Unity vehicle flow exists; build/scene and real playthrough must be rechecked after current edits. |
-| Git-managed source and reproducible build | PARTIAL | Server/Launcher/Unity and clean-clone builds passed at an earlier commit; the current documentation-only changes still need final clean-clone verification and source scan. |
+| Git-managed source and reproducible build | PARTIAL | Current Server Release build passed with 0 warnings/errors and Launcher Release passed with 0 errors/6 generated-Designer warnings ([latest log](evidence/local-final-validation-20261127-194616.log)). Unity/clean-clone builds passed earlier; a final clean-clone check remains. |
 | Architecture, GUI, application flow, three user stories | DOCUMENTED; PNG EXPORTED | Four Draw.io PNGs were exported and visually reviewed; conceptual GUI wireframe is not a screenshot of the running app. |
 | Assignment roles/contact information | NEEDS OWNER INPUT | Report placeholders must be completed from actual group records; no personal details should be invented. |
 

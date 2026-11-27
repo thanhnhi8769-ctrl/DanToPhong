@@ -1,7 +1,7 @@
 # Internet demo runbook
 
 The canonical consolidated report is
-[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](../BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
+[BAO_CAO_DO_AN_NHAP_MON_MANG.md](../BAO_CAO_DO_AN_NHAP_MON_MANG.md).
 
 This runbook prepares the deployment workflow; it is not evidence that AWS
 resources were deployed. A read-only AWS snapshot is included in the canonical

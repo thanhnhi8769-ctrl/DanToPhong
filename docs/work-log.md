@@ -270,3 +270,19 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Verify refreshed AWS credentials read-only | Credentials worked in `default` / `us-east-1`; EC2 and RDS were stopped, RDS reported `PubliclyAccessible=True`, and observed ingress remained restricted to specific `/32` and a security-group reference. No AWS resource was changed. | `.\scripts\aws-test-helper.ps1 -Action Status`; read-only `describe-*` |
 | Consolidate submission documents | Created `BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md` with architecture, requirements/stories, operational steps, current AWS state, test matrix, evidence and manual screenshot checklist. Replaced the previous report body with a compatibility pointer and linked supporting docs to the canonical report. Updated the obsolete AWS credential blocker. | Targeted source/document review; supporting-file and evidence link review |
 | Run final workspace checks | `git diff --check` and cached diff check pass; ports 9000 and 19000 have no listeners. Changes remain local and uncommitted; no push or AWS mutation. | `git status --short --branch`; `git diff --stat`; `git diff --check`; `Get-NetTCPConnection -State Listen -LocalPort 9000,19000` |
+
+## 2026-11-27 - Final local build and report consolidation
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify Release builds | Server Release passed with 0 warnings/errors. Launcher Release passed with 0 errors and 6 generated-Designer `CS8669` warnings. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore`; `dotnet build .\UI\UI\UI.csproj -c Release --no-restore` |
+| Run protocol and SMTP smoke | In-memory protocol/mailbox/input/pinning/queue smoke passed; synthetic SMTP sample and queued synthetic OTP were accepted by local smtp4dev. Log contains no credentials or code. | `dotnet run ... DanToPhong.Protocol.Smoke ...`; [local-final-validation-20261127-194616.log](evidence/local-final-validation-20261127-194616.log) |
+| Reuse bounded load evidence and clean duplicates | Kept the referenced TC10 log (50 anonymous loopback clients; TC10 remains PARTIAL). Removed only two unreferenced duplicate local logs; retained the older remote TLS/plaintext failure as historical evidence. | `docs/evidence/TC10-loopback-framing-test.log`; repo-wide filename reference search |
+| Consolidate handoff report and check cleanup | Created `BAO_CAO_DO_AN_NHAP_MON_MANG.md`, updated README/supporting pointers, and recorded the old remote TLS failure as non-current. No AWS or GUI action. Ports 9000/19000 have no listeners after tests. | Markdown link check; secret/key-pattern scan; `git diff --check`; `Get-NetTCPConnection -State Listen -LocalPort 9000,19000` |
+
+## 2026-11-27 — Final handoff checks
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify report links and repository hygiene | Local Markdown paths/anchors pass across 17 documents; high-confidence scan of 250 text files found no credentials or private-key/certificate files; no tracked Photon references. | PowerShell Markdown path/anchor check; credential/key scan; `git grep -in photon` |
+| Verify test cleanup and patch formatting | No Server/test harness is running; ports 9000 and 19000 are clear; `git diff --check` passes. | `Get-CimInstance Win32_Process`; `Get-NetTCPConnection -State Listen -LocalPort 9000,19000`; `git diff --check` |

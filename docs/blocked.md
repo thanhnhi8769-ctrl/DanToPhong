@@ -3,7 +3,7 @@
 Only items not demonstrated in this work session are listed here. Reclassify
 them only after observing the result and saving sanitized evidence.
 Current aggregate status and the read-only AWS snapshot are in
-[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](../BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
+[BAO_CAO_DO_AN_NHAP_MON_MANG.md](../BAO_CAO_DO_AN_NHAP_MON_MANG.md).
 
 | Item | Why blocked or partial | Manual action |
 |---|---|---|

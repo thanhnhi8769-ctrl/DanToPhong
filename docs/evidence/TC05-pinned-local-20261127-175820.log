@@ -1,8 +1,0 @@
-2026-11-27 17:58:20.134 +07:00 [INFO] TC05 transport checks on dedicated loopback ports; no GUI or remote-network claim.
-2026-11-27 17:58:20.566 +07:00 [INFO] Ephemeral localhost SAN certificate generated outside the repository; thumbprint omitted.
-2026-11-27 17:58:21.322 +07:00 [PASS] TLS client with exact SHA-256 pin completed TLS 1.2/1.3 and received the expected unauthenticated PING response on port 19000.
-2026-11-27 17:58:21.335 +07:00 [PASS] The optional secondary TLS listener accepted the same pinned certificate and framed protocol on port 19001.
-2026-11-27 17:58:21.351 +07:00 [PASS] A TLS client with a mismatched certificate pin was rejected during handshake.
-2026-11-27 17:58:21.357 +07:00 [PASS] Plaintext framed PING received no application response from the TLS listener.
-2026-11-27 17:58:21.986 +07:00 [PASS] Explicitly enabled plaintext mode on loopback port 19000 returned the expected framed PING response.
-2026-11-27 17:58:21.990 +07:00 [RESULT] PASS — all four TC05 transport cases observed; TLS pinning is required in Launcher and Unity clients.

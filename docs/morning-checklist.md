@@ -76,7 +76,7 @@ silence them as part of this verification.
   it distinguishes GUI evidence from existing protocol-console evidence.
 - Update [docs/evidence/README.md](evidence/README.md),
   [docs/requirements-traceability.md](requirements-traceability.md), and
-  [BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](../BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md)
+  [BAO_CAO_DO_AN_NHAP_MON_MANG.md](../BAO_CAO_DO_AN_NHAP_MON_MANG.md)
   to match the evidence.
 - Review every `.drawio` source and PNG against the actual UI and flow. Complete
   the owner-only group/contact/tool fields using `[ĐIỀN: ...]`; do not invent

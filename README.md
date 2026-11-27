@@ -7,7 +7,7 @@ outbound email to SMTP and by the SMTP smoke-test sample; it is not used for
 client-to-server networking.
 
 The canonical submission report is
-[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
+[BAO_CAO_DO_AN_NHAP_MON_MANG.md](BAO_CAO_DO_AN_NHAP_MON_MANG.md).
 
 ## Contents
 
@@ -298,4 +298,4 @@ mapping is in [docs/requirements-traceability.md](docs/requirements-traceability
 The manual capture plan is in
 [docs/evidence/screenshot-checklist.md](docs/evidence/screenshot-checklist.md).
 The canonical implementation, operations and test report is
-[BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md](BAO_CAO_HOAN_CHINH_DAN_TO_PHONG.md).
+[BAO_CAO_DO_AN_NHAP_MON_MANG.md](BAO_CAO_DO_AN_NHAP_MON_MANG.md).
