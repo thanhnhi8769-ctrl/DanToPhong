@@ -68,3 +68,10 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Work | Result | Commands / checks |
 |---|---|---|
 | Verify committed .NET deliverables from a clean worktree | At commit `6916ac9`, Server Release build passed with 0 warnings/errors; protocol smoke passed fragmentation/coalescing, EOF, invalid/oversized frames, malformed JSON, truncated frames, oversized output, and ordered game-event/snapshot framing. Launcher win-x64 publish passed with 6 existing generated-Designer `CS8669` warnings. The temporary worktree was removed after verification. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release`; `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release`; `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o .\LauncherRelease` |
+
+## 2026-11-27 — Per-client gameplay backpressure
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Add bounded outbound mailboxes for game streams | Each client now has a bounded important-event channel (`Wait`) and a one-slot snapshot channel (`DropOldest`); one sender serializes frames per stream. Queue waits occur outside room locks, so a slow stream does not block another client's stream. Socket I/O errors are logged by session. | Server Release build; protocol smoke including full-event-queue wait and stale-snapshot drop |
+| Record the focused smoke result and update protocol notes | Updated TC09 evidence, protocol limits and checklist. The tests are in-memory only; no live match, latency or multi-client socket result is claimed. Existing server process PID 13472 held the normal build output, so builds used ignored `obj` output paths without stopping it. | `dotnet build` Server and smoke with isolated `OutDir`; `dotnet <smoke DLL>`; `git diff --check` |

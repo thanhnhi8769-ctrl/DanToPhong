@@ -220,6 +220,10 @@ namespace DanToPhong.Server
             catch (OperationCanceledException)
             {
             }
+            catch (IOException ex) when (!token.IsCancellationRequested)
+            {
+                Console.WriteLine($"[{session.SessionId}] Connection I/O error: {ex.Message}");
+            }
             catch (Exception) when (token.IsCancellationRequested)
             {
             }
@@ -259,16 +263,30 @@ namespace DanToPhong.Server
                 return;
 
             int userId = session.AuthenticatedUserId.Value;
+            using var mailbox = new GameClientMailbox();
+            using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            Task producer = ProduceGameStateAsync(mailbox, userId, streamCts.Token);
+            Task sender = SendGameStateAsync(session, stream, mailbox, streamCts.Token);
+            Task firstCompleted = await Task.WhenAny(producer, sender).ConfigureAwait(false);
+            if (firstCompleted.IsFaulted || firstCompleted.IsCanceled)
+                streamCts.Cancel();
+            await Task.WhenAll(producer, sender).ConfigureAwait(false);
+        }
+
+        private static async Task ProduceGameStateAsync(
+            GameClientMailbox mailbox,
+            int userId,
+            CancellationToken token)
+        {
             long lastEventId = 0;
-            while (!token.IsCancellationRequested)
+            try
             {
-                List<GameEventDto> events = TcpGameRoomRegistry.ReadEventsAfter(userId, ref lastEventId);
-                foreach (GameEventDto gameEvent in events)
+                while (!token.IsCancellationRequested)
                 {
-                    await session.SendLock.WaitAsync(token).ConfigureAwait(false);
-                    try
+                    List<GameEventDto> events = TcpGameRoomRegistry.ReadEventsAfter(userId, ref lastEventId);
+                    foreach (GameEventDto gameEvent in events)
                     {
-                        await MessageFramer.SendAsync(stream, new ResponsePacket
+                        await mailbox.QueueImportantEventAsync(new ResponsePacket
                         {
                             Success = true,
                             Code = ErrorCodes.Ok,
@@ -276,27 +294,50 @@ namespace DanToPhong.Server
                             GameEvent = gameEvent
                         }, token).ConfigureAwait(false);
                     }
+
+                    ResponsePacket snapshot = TcpGameRoomRegistry.State(userId);
+                    if (!snapshot.Success || !snapshot.IsRacing)
+                        return;
+
+                    if (!mailbox.TryQueueSnapshot(snapshot))
+                        throw new InvalidOperationException("The game snapshot mailbox is closed.");
+
+                    await Task.Delay(TimeSpan.FromMilliseconds(50), token).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                mailbox.Complete();
+            }
+        }
+
+        private static async Task SendGameStateAsync(
+            ClientSession session,
+            Stream stream,
+            GameClientMailbox mailbox,
+            CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                if (mailbox.TryReadImportantEvent(out ResponsePacket message) ||
+                    mailbox.TryReadSnapshot(out message))
+                {
+                    await session.SendLock.WaitAsync(token).ConfigureAwait(false);
+                    try
+                    {
+                        await MessageFramer.SendAsync(stream, message, token).ConfigureAwait(false);
+                    }
                     finally
                     {
                         session.SendLock.Release();
                     }
+                    continue;
                 }
 
-                ResponsePacket snapshot = TcpGameRoomRegistry.State(userId);
-                if (!snapshot.Success || !snapshot.IsRacing)
+                if (mailbox.IsCompleted)
                     return;
 
-                await session.SendLock.WaitAsync(token).ConfigureAwait(false);
-                try
-                {
-                    await MessageFramer.SendAsync(stream, snapshot, token).ConfigureAwait(false);
-                }
-                finally
-                {
-                    session.SendLock.Release();
-                }
-
-                await Task.Delay(TimeSpan.FromMilliseconds(50), token).ConfigureAwait(false);
+                await mailbox.WaitForDataAsync(token).ConfigureAwait(false);
             }
         }
 

@@ -1,10 +1,13 @@
 using System.Buffers.Binary;
 using DanToPhong.Protocol;
+using DanToPhong.Server;
 
 await RunAsync();
 
 static async Task RunAsync()
 {
+    await VerifyGameClientMailboxAsync();
+
     using var frames = new MemoryStream();
     await MessageFramer.SendAsync(frames, new SmokePacket { Command = "FIRST" });
     await MessageFramer.SendAsync(frames, new SmokePacket { Command = "SECOND" });
@@ -88,6 +91,29 @@ static async Task RunAsync()
     Console.WriteLine("PASS: fragmented reads and coalesced frames preserve order.");
     Console.WriteLine("PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.");
     Console.WriteLine("PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.");
+    Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
+}
+
+static async Task VerifyGameClientMailboxAsync()
+{
+    using var mailbox = new GameClientMailbox(eventCapacity: 1);
+    var firstEvent = new ResponsePacket { Command = Commands.GameEvent, ServerTick = 1 };
+    var secondEvent = new ResponsePacket { Command = Commands.GameEvent, ServerTick = 2 };
+
+    await mailbox.QueueImportantEventAsync(firstEvent, CancellationToken.None);
+    ValueTask pendingEvent = mailbox.QueueImportantEventAsync(secondEvent, CancellationToken.None);
+    if (pendingEvent.IsCompleted)
+        throw new InvalidOperationException("A full important-event mailbox must wait for capacity.");
+    if (!mailbox.TryReadImportantEvent(out ResponsePacket queuedEvent) || queuedEvent.ServerTick != 1)
+        throw new InvalidOperationException("The first important event was not retained.");
+    await pendingEvent;
+    if (!mailbox.TryReadImportantEvent(out queuedEvent) || queuedEvent.ServerTick != 2)
+        throw new InvalidOperationException("The waiting important event was not retained.");
+
+    mailbox.TryQueueSnapshot(new ResponsePacket { Command = Commands.GameSnapshot, ServerTick = 10 });
+    mailbox.TryQueueSnapshot(new ResponsePacket { Command = Commands.GameSnapshot, ServerTick = 11 });
+    if (!mailbox.TryReadSnapshot(out ResponsePacket snapshot) || snapshot.ServerTick != 11)
+        throw new InvalidOperationException("The snapshot mailbox did not discard the stale state.");
 }
 
 static async Task ExpectAsync<TException>(Func<Task> action, string testName)

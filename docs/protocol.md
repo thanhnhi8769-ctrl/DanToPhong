@@ -114,9 +114,12 @@ Important limits:
 
 - Snapshot delivery is server-pushed over a dedicated per-client TCP stream;
   server room and match state are still process-local.
-- The client drops the oldest buffered snapshot when its eight-sample queue is
-  full. TCP stream backpressure can still delay delivery; there is no server
-  broadcast fan-out queue or measured latency/load bound.
+- The server uses a bounded mailbox per game-stream client: important events
+  wait for queue capacity, while the one-slot snapshot queue drops stale state.
+  The client also drops the oldest buffered snapshot when its eight-sample
+  queue is full. A slow stream can delay its own event producer, but does not
+  hold the room lock or share a queue with other clients. TCP backpressure can
+  still delay delivery; latency/load bounds have not been measured.
 - The server simulation is simplified kinematics, not the Unity track
   collision/vehicle physics. Spawn positions come from the server track
   catalog, and checkpoint/finish crossings are checked against configured

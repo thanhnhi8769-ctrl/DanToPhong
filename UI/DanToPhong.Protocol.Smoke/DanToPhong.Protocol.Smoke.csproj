@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DanToPhong.Protocol\DanToPhong.Protocol.csproj" />
+    <ProjectReference Include="..\DanToPhong.Server\DanToPhong.Server.csproj" />
   </ItemGroup>
 </Project>

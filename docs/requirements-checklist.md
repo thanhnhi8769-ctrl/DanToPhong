@@ -36,8 +36,9 @@ runtime pass.
 
 1. Preserve the existing framed TCP/TLS transport and request/response account
    protocol.
-2. Harden room fan-out/backpressure and add live integration tests for the
-   serialized per-client event/snapshot stream.
+2. Bounded per-client event/snapshot mailboxes are implemented: important
+   events wait for capacity and stale snapshots are dropped. Add live
+   integration tests for the serialized per-client stream.
 3. Close the remaining authority gap with a server-owned match timer and
    elimination decision; keep the simplified simulation clearly bounded and
    verify configured gates and disconnect/rejoin behavior in a live match.

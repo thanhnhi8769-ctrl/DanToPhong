@@ -1,12 +1,13 @@
 Test ID: TC09
 Date: 2026-11-27
-Scope: DanToPhong.Protocol.MessageFramer in an in-memory stream harness; no external endpoint used.
+Scope: DanToPhong.Protocol.MessageFramer and the per-client game mailbox in in-memory harnesses; no external endpoint used.
 Result: PASS
-Checks: fragmented reads capped at one byte; two coalesced length-prefixed frames preserve order; EOF before a header returns null; zero/oversized incoming lengths rejected; malformed JSON throws JsonException; truncated body throws EndOfStreamException; oversized outgoing JSON rejected; separate GAME_EVENT and GAME_SNAPSHOT frames preserve order, event ID, sequence, and timestamps.
-Command: dotnet run --project UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore
+Checks: fragmented reads capped at one byte; two coalesced length-prefixed frames preserve order; EOF before a header returns null; zero/oversized incoming lengths rejected; malformed JSON throws JsonException; truncated body throws EndOfStreamException; oversized outgoing JSON rejected; separate GAME_EVENT and GAME_SNAPSHOT frames preserve order, event ID, sequence, and timestamps; a full important-event queue waits for capacity; the snapshot queue retains the newest state.
+Command: dotnet build UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore -p:OutDir=<ignored obj verify output>; dotnet build UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore -p:OutDir=<ignored obj verify output>; dotnet <smoke DLL from ignored obj verify output>
 Observed output:
 PASS: fragmented reads and coalesced frames preserve order.
 PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.
 PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.
-Limit: This does not test the live server push loop, TLS, database, 10–50 client load, socket FIN capture, or multiplayer gameplay.
+PASS: per-client mailbox waits for important events and drops stale snapshots.
+Limit: This does not test the live server push loop, TLS, database, mailbox behavior over real sockets, 10–50 client load, socket FIN capture, or multiplayer gameplay.
 Redaction: No host/IP, account data, or credentials used.
