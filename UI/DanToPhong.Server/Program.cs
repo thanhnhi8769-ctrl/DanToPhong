@@ -115,6 +115,9 @@ namespace DanToPhong.Server
             var listener = new TcpListener(listenAddress, Port);
             listener.Start();
             Console.WriteLine($"[TCP] Server listening on {listenAddress}:{Port}; TLS={(UseTls ? "enabled" : "disabled")}.");
+            var emailQueue = new EmailVerificationQueue();
+            using var emailWorkerCts = new CancellationTokenSource();
+            Task emailWorker = emailQueue.RunAsync(emailWorkerCts.Token);
 
             try
             {
@@ -139,7 +142,7 @@ namespace DanToPhong.Server
                     ActiveSessions[session.SessionId] = session;
 
                     Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
-                    _ = Task.Run(() => HandleClientAsync(session, repo, state, serverCertificate, cts.Token));
+                    _ = Task.Run(() => HandleClientAsync(session, repo, state, serverCertificate, emailQueue, cts.Token));
                 }
             }
             catch (OperationCanceledException)
@@ -154,6 +157,24 @@ namespace DanToPhong.Server
                     try { active.Client.Dispose(); } catch { }
                 }
                 await Task.WhenAll(sessions.Select(session => session.Completion.Task)).ConfigureAwait(false);
+                emailQueue.Complete();
+                using var drainTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                try
+                {
+                    await emailWorker.WaitAsync(drainTimeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (drainTimeout.IsCancellationRequested)
+                {
+                    emailWorkerCts.Cancel();
+                    try
+                    {
+                        await emailWorker.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (emailWorkerCts.IsCancellationRequested)
+                    {
+                    }
+                    Console.Error.WriteLine("[SMTP] Shutdown drain deadline reached; queued emails may not have been delivered.");
+                }
                 Console.WriteLine("[TCP] Server stopped.");
             }
         }
@@ -163,6 +184,7 @@ namespace DanToPhong.Server
             NguoiDungRepository repo,
             ServerStateRepository state,
             X509Certificate2? serverCertificate,
+            EmailVerificationQueue emailQueue,
             CancellationToken token)
         {
             Stream? stream = null;
@@ -193,7 +215,7 @@ namespace DanToPhong.Server
                     if (request == null)
                         break;
 
-                    ResponsePacket response = await DispatchAsync(session, request, repo, state, token).ConfigureAwait(false);
+                    ResponsePacket response = await DispatchAsync(session, request, repo, state, emailQueue, token).ConfigureAwait(false);
 
                     await session.SendLock.WaitAsync(token).ConfigureAwait(false);
                     try
@@ -343,11 +365,12 @@ namespace DanToPhong.Server
             RequestPacket req,
             NguoiDungRepository repo,
             ServerStateRepository state,
+            EmailVerificationQueue emailQueue,
             CancellationToken token)
         {
             string command = (req.Command ?? string.Empty).Trim().ToUpperInvariant();
             bool mustDeduplicate = command is Commands.UpdateCoins or Commands.BuyItem;
-            if (!mustDeduplicate) return await DispatchCoreAsync(session, req, repo, state, token).ConfigureAwait(false);
+            if (!mustDeduplicate) return await DispatchCoreAsync(session, req, repo, state, emailQueue, token).ConfigureAwait(false);
 
             if (!session.AuthenticatedUserId.HasValue || !Guid.TryParse(req.RequestId, out Guid requestGuid))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "A valid request id is required." };
@@ -387,6 +410,7 @@ namespace DanToPhong.Server
             RequestPacket req,
             NguoiDungRepository repo,
             ServerStateRepository state,
+            EmailVerificationQueue emailQueue,
             CancellationToken token)
         {
             string cmd = (req.Command ?? string.Empty).Trim().ToUpperInvariant();
@@ -403,8 +427,8 @@ namespace DanToPhong.Server
                     Commands.GetInfo => await HandleGetInfoAsync(session, repo, token).ConfigureAwait(false),
                     Commands.Logout => await HandleLogoutAsync(session, state, token).ConfigureAwait(false),
                     Commands.ResetPassword => await HandleResetPasswordAsync(req, repo, state, token).ConfigureAwait(false),
-                    Commands.RequestResetCode => await HandleRequestResetCodeAsync(req, repo, state, token).ConfigureAwait(false),
-                    Commands.RequestRegistrationCode => await HandleRequestRegistrationCodeAsync(req, repo, state, token).ConfigureAwait(false),
+                    Commands.RequestResetCode => await HandleRequestResetCodeAsync(req, repo, state, emailQueue, token).ConfigureAwait(false),
+                    Commands.RequestRegistrationCode => await HandleRequestRegistrationCodeAsync(req, repo, state, emailQueue, token).ConfigureAwait(false),
                     Commands.JoinRoom => await HandleJoinRoomAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.ChangeAvatar => await HandleChangeAvatarAsync(session, req, repo, token).ConfigureAwait(false),
 
@@ -828,75 +852,90 @@ namespace DanToPhong.Server
         }
 
         private static async Task<ResponsePacket> HandleRequestResetCodeAsync(
-            RequestPacket req, NguoiDungRepository repo, ServerStateRepository state, CancellationToken token)
+            RequestPacket req, NguoiDungRepository repo, ServerStateRepository state,
+            EmailVerificationQueue emailQueue, CancellationToken token)
         {
             string username = (req.Username ?? string.Empty).Trim();
             string email = (req.Email ?? string.Empty).Trim();
             if (!UsernameRegex.IsMatch(username) || !AccountInputValidation.IsValidEmail(email))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
 
-            string key = $"reset|{username}|{email.ToLowerInvariant()}";
-            if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
-                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "If the account matches, a code has been sent to the registered email." };
+            const string responseMessage = "If the account matches, a code will be sent shortly.";
+            if (!emailQueue.TryReserve(out EmailVerificationQueue.Reservation? reservation) || reservation is null)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Verification service is busy. Please try again shortly." };
 
-            UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
-            if (user != null && !string.IsNullOrWhiteSpace(user.Email) &&
-                string.Equals(user.Email.Trim(), email, StringComparison.OrdinalIgnoreCase))
+            using (reservation)
             {
-                string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
-                try
-                {
-                    await EmailVerificationService.SendCodeAsync(email, code, passwordReset: true).ConfigureAwait(false);
-                    await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("[SMTP] Reset code send failed: " + ex.Message);
-                    await ReleaseVerificationReservationAsync(state, key).ConfigureAwait(false);
-                    return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not send the verification email. Please try again later." };
-                }
-            }
+                string key = $"reset|{username}|{email.ToLowerInvariant()}";
+                if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
+                    return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
 
-            // Same response for unknown usernames/emails to avoid exposing account membership.
-            return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "If the account matches, a code has been sent to the registered email." };
+                UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
+                if (user != null && !string.IsNullOrWhiteSpace(user.Email) &&
+                    string.Equals(user.Email.Trim(), email, StringComparison.OrdinalIgnoreCase))
+                {
+                    string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+                    try
+                    {
+                        await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
+                        reservation.Enqueue(email, code, passwordReset: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("[OTP] Reset code queue failed: " + ex.Message);
+                        await CancelVerificationAsync(state, key).ConfigureAwait(false);
+                        return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not prepare the verification email. Please try again later." };
+                    }
+                }
+
+                // Same response for unknown usernames/emails to avoid exposing account membership.
+                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+            }
         }
 
         private static async Task<ResponsePacket> HandleRequestRegistrationCodeAsync(
-            RequestPacket req, NguoiDungRepository repo, ServerStateRepository state, CancellationToken token)
+            RequestPacket req, NguoiDungRepository repo, ServerStateRepository state,
+            EmailVerificationQueue emailQueue, CancellationToken token)
         {
             string username = (req.Username ?? string.Empty).Trim();
             string email = (req.Email ?? string.Empty).Trim();
             if (!UsernameRegex.IsMatch(username) || !AccountInputValidation.IsValidEmail(email))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
 
-            string key = $"register|{username}|{email.ToLowerInvariant()}";
-            string responseMessage = "If the username is available, a code has been sent to the email.";
-            if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
-                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+            const string responseMessage = "If the username is available, a code will be sent shortly.";
+            if (!emailQueue.TryReserve(out EmailVerificationQueue.Reservation? reservation) || reservation is null)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Verification service is busy. Please try again shortly." };
 
-            if (!await repo.UsernameExistsAsync(username, token).ConfigureAwait(false))
+            using (reservation)
             {
-                string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
-                try
+                string key = $"register|{username}|{email.ToLowerInvariant()}";
+                if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
+                    return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+
+                if (!await repo.UsernameExistsAsync(username, token).ConfigureAwait(false))
                 {
-                    await EmailVerificationService.SendCodeAsync(email, code, passwordReset: false).ConfigureAwait(false);
-                    await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
+                    string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+                    try
+                    {
+                        await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
+                        reservation.Enqueue(email, code, passwordReset: false);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("[OTP] Registration code queue failed: " + ex.Message);
+                        await CancelVerificationAsync(state, key).ConfigureAwait(false);
+                        return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not prepare the verification email. Please try again later." };
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("[SMTP] Registration code send failed: " + ex.Message);
-                    await ReleaseVerificationReservationAsync(state, key).ConfigureAwait(false);
-                    return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not send the verification email. Please try again later." };
-                }
+                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
             }
-            return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
         }
 
-        private static async Task ReleaseVerificationReservationAsync(ServerStateRepository state, string key)
+        private static async Task CancelVerificationAsync(ServerStateRepository state, string key)
         {
             try
             {
-                await state.ReleaseVerificationReservationAsync(key, CancellationToken.None).ConfigureAwait(false);
+                await state.CancelVerificationAsync(key, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

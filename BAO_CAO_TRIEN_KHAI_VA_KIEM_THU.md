@@ -64,14 +64,14 @@ không treo khi mất kết nối và hiển thị tiếng Việt đúng dấu. 
 | Hạng mục | Trạng thái | Kết quả |
 |---|---|---|
 | WinForms đăng ký/đăng nhập/khôi phục | **Đã rà soát** | Có kiểm tra input, gọi Server và giữ trạng thái phiên; cần kiểm thử UI thật. |
-| SMTP/OTP | **Đã sửa** | Hỗ trợ Gmail implicit TLS 465 và STARTTLS 587; lỗi gửi không còn khóa gửi lại bằng cooldown giả. Server build thành công. |
+| SMTP/OTP | **Đã sửa; runtime một phần** | MailKit hỗ trợ implicit TLS 465 và STARTTLS 587; request OTP ghi hash rồi đưa mail vào Channel bounded (64 jobs), worker retry SMTP 4xx/5xx tối đa ba lần. Queue/retry smoke PASS; chưa kiểm tra delivery/failure bằng SMTP thật sau thay đổi. |
 | Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS đọc không phân biệt hoa-thường; TLS được chuyển tiếp từ Launcher sang Unity; env port sai giờ báo lỗi thay vì âm thầm fallback. |
 | Điều khiển/va chạm xe | **Đã rà soát** | Có ga, phanh/lùi, rẽ, nhảy, chống kẹt, bám đường và hồi sinh; chưa test vật lý bằng build chạy. |
 | Multiplayer state | **Prototype; live test BLOCKED** | Server mô phỏng kinematics, kiểm tra checkpoint/finish gate, push snapshot/event; có code spectate/reconnect 120 giây và thưởng winner phía server. Chưa có physics đầy đủ; client còn có thể yêu cầu loại mình; chưa kiểm chứng trận live. |
 | Scene mặc định `game` | **Đã sửa** | Scene có dùng làm fallback nhưng thiếu Build Settings; đã thêm vào danh sách build. |
 | Git hygiene | **Đã sửa** | Cho phép các project .NET và scene thuộc `Assets/scene` được version; tiếp tục loại build/cache/demo scenes. |
 | AWS Internet-ready | **Chưa sẵn sàng** | Lần đọc/truy vấn AWS được ghi trước đây báo EC2 và RDS đã dừng sau smoke test. EIP khi đó gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; lượt hiện tại không đọc lại trạng thái AWS và không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
-| Production readiness | **Chưa xác nhận** | TC05 TLS fail-closed và capture local TC06/11/12 đã PASS; OTP chỉ có bằng chứng email delivery. Chưa xác minh gameplay hai client, reconnect runtime, load, hay hai mạng Internet. |
+| Production readiness | **Chưa xác nhận** | TC05 TLS fail-closed và capture local TC06/11/12 đã PASS; OTP chưa được xác minh end-to-end qua GUI/DB, và worker SMTP mới chưa được kiểm tra delivery thật. Chưa xác minh gameplay hai client, reconnect runtime, load, hay hai mạng Internet. |
 
 ## 2. Network stack tự phát triển và đặc tả giao thức
 
@@ -244,20 +244,15 @@ Server trước đây dùng `System.Net.Mail.SmtpClient` cố định `smtp.gmai
 - Mặc định port 465, timeout 15 giây; `DANTOPHONG_SMTP_HOST` có thể override.
 - Credential chỉ lấy từ `DANTOPHONG_SMTP_USER` và `DANTOPHONG_SMTP_PASSWORD`.
 - MailKit chỉ dùng cho luồng server → SMTP; client ↔ server vẫn là TCP/TLS và framing tự phát triển.
-- SMTP failure được log phía server nhưng phản hồi client không lộ chi tiết SMTP.
-- Khi gửi lỗi, Server giải phóng reservation OTP chưa có hash code; lần thử sau không nhận phản hồi “đã gửi” nhưng thực tế chưa có email.
+- SMTP failure được worker log bằng job ID, status/type, không ghi địa chỉ email, OTP hoặc chi tiết có thể chứa PII.
+- Request chỉ chờ lưu hash OTP và nhận chỗ trong queue; SMTP outage không chờ trong đường request. Queue đầy trả lỗi bận chung trước khi kiểm tra tài khoản.
 - Form đăng ký đặt cooldown hiển thị 60 giây khớp cooldown server (OTP vẫn có hiệu lực 10 phút).
 
 ### Cấu hình gửi Gmail
 
 Đặt địa chỉ sender và App Password trong secret store/service environment. Không ghi giá trị vào `.env.example`, source, `server.json`, Unity, tài liệu hay log. Sau khi cập nhật, restart service và xác nhận mail thực tế đến đúng inbox.
 
-**Trạng thái kiểm thử:** code path đã được build tĩnh; chưa có credential được sử dụng và chưa gửi email thật. Vì vậy không thể đánh dấu Gmail/OTP end-to-end là OK cho tới khi cấu hình secret hợp lệ.
-
-Email hiện vẫn được gửi trong đường xử lý request bằng `await`; chưa có Channel
-background queue hoặc retry 4xx/5xx. Khi SMTP chậm/lỗi, request đăng ký có thể
-chờ SMTP timeout rồi nhận lỗi thân thiện. Chưa bật ProtocolLogger và chưa có
-sample gửi thư tiếng Việt kèm attachment.
+**Trạng thái kiểm thử:** TC09 smoke in-memory xác nhận queue bounded và retry khi giả lập SMTP 451/550, sau đó gửi thành công. Không có SMTP endpoint thật trong test này; bằng chứng mail smtp4dev trước đây chỉ xác nhận lần gửi cũ, chưa xác minh worker mới hoặc tình huống SMTP outage. Queue chỉ tồn tại trong bộ nhớ; crash/restart có thể làm mất job đã nhận. Khi dừng sạch, server drain tối đa 20 giây rồi log nếu còn job chưa giao. Chưa bật ProtocolLogger và chưa có sample gửi thư tiếng Việt kèm attachment.
 
 ## 6. Gameplay và đồng bộ xe
 

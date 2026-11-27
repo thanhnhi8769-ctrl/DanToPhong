@@ -243,8 +243,9 @@ The protocol smoke test can be run locally:
 dotnet run --project UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release
 ```
 
-It exercises framing in memory only; it is not a live-server, TLS, DB, SMTP,
-load, or gameplay test. Record 10–50 client tests, slow/malformed clients,
+It exercises framing, mailbox/account validation, and the bounded email queue
+with an injected sender in memory; it is not a live-server, TLS, DB, SMTP
+delivery, load, or gameplay test. Record 10–50 client tests, slow/malformed clients,
 two-client gameplay, TLS behavior and packet captures only after observing
 them. Keep credentials and personal endpoints out of captures.
 

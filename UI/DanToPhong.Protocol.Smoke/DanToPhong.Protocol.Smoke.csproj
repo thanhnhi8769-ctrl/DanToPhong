@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MailKit" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\DanToPhong.Protocol\DanToPhong.Protocol.csproj" />
     <ProjectReference Include="..\DanToPhong.Server\DanToPhong.Server.csproj" />
   </ItemGroup>

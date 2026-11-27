@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using DanToPhong.Protocol;
 using DanToPhong.Server;
+using MailKit.Net.Smtp;
 
 await RunAsync();
 
@@ -8,6 +9,7 @@ static async Task RunAsync()
 {
     VerifyAccountInputValidation();
     await VerifyGameClientMailboxAsync();
+    await VerifyEmailQueueAsync();
 
     using var frames = new MemoryStream();
     await MessageFramer.SendAsync(frames, new SmokePacket { Command = "FIRST" });
@@ -94,6 +96,7 @@ static async Task RunAsync()
     Console.WriteLine("PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.");
     Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
     Console.WriteLine("PASS: shared account validation accepts the email limit and rejects overlong email/password values.");
+    Console.WriteLine("PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.");
 }
 
 static void VerifyAccountInputValidation()
@@ -130,6 +133,36 @@ static async Task VerifyGameClientMailboxAsync()
     mailbox.TryQueueSnapshot(new ResponsePacket { Command = Commands.GameSnapshot, ServerTick = 11 });
     if (!mailbox.TryReadSnapshot(out ResponsePacket snapshot) || snapshot.ServerTick != 11)
         throw new InvalidOperationException("The snapshot mailbox did not discard the stale state.");
+}
+
+static async Task VerifyEmailQueueAsync()
+{
+    int attempts = 0;
+    var queue = new EmailVerificationQueue(
+        capacity: 1,
+        sendCode: (_, _) =>
+        {
+            int currentAttempt = Interlocked.Increment(ref attempts);
+            if (currentAttempt == 1)
+                throw new SmtpCommandException(SmtpErrorCode.UnexpectedStatusCode, (SmtpStatusCode)451, "temporary failure");
+            if (currentAttempt == 2)
+                throw new SmtpCommandException(SmtpErrorCode.UnexpectedStatusCode, (SmtpStatusCode)550, "temporary failure");
+            return Task.CompletedTask;
+        },
+        retryDelay: TimeSpan.Zero);
+
+    if (!queue.TryReserve(out EmailVerificationQueue.Reservation? reservation) || reservation is null)
+        throw new InvalidOperationException("The email queue did not reserve available capacity.");
+    if (queue.TryReserve(out _))
+        throw new InvalidOperationException("The bounded email queue accepted work beyond its capacity.");
+
+    using (reservation)
+        reservation.Enqueue("racer@example.invalid", "123456", passwordReset: false);
+
+    queue.Complete();
+    await queue.RunAsync(CancellationToken.None);
+    if (attempts != 3)
+        throw new InvalidOperationException($"Expected retries for SMTP 4xx/5xx responses; observed {attempts} send attempts.");
 }
 
 static async Task ExpectAsync<TException>(Func<Task> action, string testName)

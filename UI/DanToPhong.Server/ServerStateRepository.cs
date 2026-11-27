@@ -279,14 +279,15 @@ namespace DanToPhong.Server
                 throw new InvalidOperationException("Verification reservation expired before the code was stored.");
         }
 
-        internal async Task ReleaseVerificationReservationAsync(string key, CancellationToken token)
+        internal async Task CancelVerificationAsync(string key, CancellationToken token)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(token).ConfigureAwait(false);
             await using var cmd = new SqlCommand(@"
                 UPDATE dbo.VerificationCodes
-                SET CooldownUntil=SYSUTCDATETIME()
-                WHERE KeyHash=@keyHash AND CodeHash IS NULL AND ExpiresAt IS NULL;", conn);
+                SET CodeHash=NULL, CodeSalt=NULL, ExpiresAt=NULL, Attempts=0,
+                    CooldownUntil=SYSUTCDATETIME()
+                WHERE KeyHash=@keyHash;", conn);
             cmd.Parameters.Add("@keyHash", SqlDbType.Char, 64).Value = HashKey(key);
             await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }

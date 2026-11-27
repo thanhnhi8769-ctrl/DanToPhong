@@ -17,6 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DanToPhong.Protocol.Smoke" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="RaceTrackCatalog.json" />
   </ItemGroup>
 

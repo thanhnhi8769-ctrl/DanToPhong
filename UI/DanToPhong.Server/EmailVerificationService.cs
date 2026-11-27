@@ -6,7 +6,8 @@ namespace DanToPhong.Server;
 
 internal static class EmailVerificationService
 {
-    public static async Task SendCodeAsync(string email, string code, bool passwordReset)
+    public static async Task SendCodeAsync(
+        string email, string code, bool passwordReset, CancellationToken token)
     {
         string user = Environment.GetEnvironmentVariable("DANTOPHONG_SMTP_USER") ?? "";
         string password = Environment.GetEnvironmentVariable("DANTOPHONG_SMTP_PASSWORD") ?? "";
@@ -40,7 +41,8 @@ internal static class EmailVerificationService
                 : $"Your registration code is {code}. It expires in 10 minutes."
         };
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
         using var client = new SmtpClient
         {
             Timeout = 15000
