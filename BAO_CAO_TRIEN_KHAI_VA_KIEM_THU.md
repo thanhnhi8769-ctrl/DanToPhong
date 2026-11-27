@@ -50,6 +50,15 @@ quản lý tài khoản, OTP, inventory và room/game state in-memory. Simulatio
 server dùng kinematics đơn giản, spawn từ track catalog và kiểm tra checkpoint/
 finish theo gate cấu hình; đây chưa phải physics/va chạm đầy đủ của Unity.
 
+**Phạm vi có làm:** đăng ký/đăng nhập, OTP/đặt lại mật khẩu, hồ sơ/kho hàng,
+phòng và prototype multiplayer qua TCP/TLS. **Chưa làm hoặc loại trừ:** UDP,
+server discovery, đăng nhập mạng xã hội, physics/collision authoritative đầy
+đủ, server-owned multiplayer timer, vai trò quản trị hoàn chỉnh và phục hồi
+trận sau restart. Yêu cầu phi chức năng gồm tối thiểu hai client, phản hồi
+client-server dưới một giây cho bước kiểm thử T4, không lưu mật khẩu rõ,
+không treo khi mất kết nối và hiển thị tiếng Việt đúng dấu. Chỉ tiêu/ca chưa
+đo được ghi là chưa xác minh, không xem là đã đạt.
+
 ### 1.2. Kết quả tổng hợp
 
 | Hạng mục | Trạng thái | Kết quả |
@@ -80,6 +89,7 @@ snapshot/event push; đây vẫn là prototype chưa hoàn chỉnh.
 | TLS | Bật mặc định ở Server/Launcher/Unity; Server từ chối khởi động nếu không có certificate hợp lệ. TLS 1.2/1.3 bọc từng stream TCP; client xác thực chain và hostname theo cấu hình. Plaintext chỉ dành cho thử nghiệm cô lập có chủ đích. |
 | Frame | 4 byte đầu là số nguyên độ dài **big-endian**, theo sau là đúng số byte payload. TCP không giữ ranh giới bản tin nên reader phải đọc đủ header/body. |
 | Payload | UTF-8 JSON, tên thuộc tính camelCase; deserialize không phân biệt hoa/thường. |
+| Phiên bản | Chưa có trường/thoả thuận protocol version trong `RequestPacket`/`ResponsePacket`; đây là thiếu sót cần xử lý trước khi cần tương thích client-server khác phiên bản. |
 | Kích thước | `1..65,536` byte cho mỗi payload; frame rỗng, quá giới hạn hoặc bị cắt giữa chừng bị từ chối/đóng kết nối. |
 | Request/response và gameplay push | Kết nối lệnh xử lý tuần tự một request/response. Gameplay mở thêm kết nối đã xác thực bằng `GAME_STREAM`; server gửi từng `GAME_EVENT` riêng và snapshot timestamped danh nghĩa mỗi 50 ms. |
 | Timeout | Launcher giao dịch tối đa 12 giây; Unity dùng timeout 8 giây cho request/gameplay stream; Server bắt tay TLS tối đa 10 giây và idle-read timeout 75 giây. |
@@ -109,6 +119,12 @@ Các trường `RequestPacket` là tùy chọn trừ `command`; từng lệnh ch
 
 Các lệnh còn lại được định nghĩa trong `DanToPhong.Protocol.Commands`: `CAPNHATXU`, `VAOPHONG`, `DOIAVATAR`, `LAYKHO`, `MUAHANG`, `TRANGBI`, `CHONMAP`, `TAIAVATAR`, `LAYAVATAR`, `GUIDANHGIA`, `LAYDANHGIA`, `BANGXEPHANG`, `CAPNHATPHONG`, `XOAPHONG`, `DSPHONG`, `MOIBAN`, `LAYLOIMOI`, `LAYTRANGTHAI`. Mã phản hồi chính: `OK`, `ERR_INVALID_INPUT`, `ERR_AUTH_FAILED`, `ERR_UNAUTHORIZED`, `ERR_INSUFFICIENT_COINS`, `ERR_SERVER_ERROR`.
 
+Giới hạn tài khoản dùng chung ở client/server: email tối đa 100 ký tự (khớp
+cột `NVARCHAR(100)`), mật khẩu 8–128 ký tự, phải có ít nhất một chữ cái ASCII
+và một chữ số. Mật khẩu không được lưu thô; server lưu PBKDF2 hash và salt.
+Gói JSON tự serialize trực tiếp thành UTF-8 bytes; không tính frame length từ
+`string.Length`.
+
 Lệnh gameplay gồm `ROOM_CREATE`, `ROOM_JOIN`, `ROOM_START`, `GAME_INPUT`,
 `GAME_STREAM`, `GAME_SNAPSHOT` và `GAME_EVENT`. Snapshot có sequence và
 `serverTimestampMs`; event riêng có `eventId` tăng dần trong room, type, user
@@ -123,7 +139,7 @@ Ví dụ minh họa, không chứa thông tin xác thực thật:
 
 ### 2.3. Đa kết nối, timeout và giới hạn
 
-Server accept TCP liên tục; mỗi socket tạo `ClientSession` và tác vụ xử lý độc lập. `ConcurrentDictionary` quản lý session đang hoạt động, mỗi session giữ danh tính/token của phiên, `SemaphoreSlim` bảo vệ thao tác ghi. DB SQL Server/RDS lưu tài khoản, token hash, OTP hash và idempotency; schema được khởi tạo khi Server start. Room/invite registry có phần lưu RAM và instance đơn; không tự đồng bộ giữa nhiều EC2.
+Server accept TCP liên tục; mỗi socket tạo `ClientSession` và tác vụ xử lý độc lập. `ConcurrentDictionary` quản lý session đang hoạt động, mỗi session giữ danh tính/token của phiên, `SemaphoreSlim` bảo vệ thao tác ghi. Luồng gameplay có mailbox bounded riêng cho từng client: queue sự kiện quan trọng chờ capacity, snapshot một slot bỏ trạng thái cũ; một writer gửi tuần tự trên stream đó. DB SQL Server/RDS lưu tài khoản, token hash, OTP hash và idempotency; schema được khởi tạo khi Server start. Room/invite registry có phần lưu RAM và instance đơn; không tự đồng bộ giữa nhiều EC2.
 
 **Giới hạn cần ghi nhận:** có giới hạn session cấu hình ở accept layer nhưng chưa có
 load test 10–50 client. Không tuyên bố chịu tải lớn/production scale trước khi có
@@ -134,6 +150,12 @@ cũng bật TCP keep-alive. Server idle-read timeout là 75 giây. Login limiter
 dùng cặp username/IP, tối đa 5 lần trong cửa sổ 15 phút rồi khóa 15 phút; key
 được hash trước khi lưu SQL. Code đã có nhưng heartbeat/limiter chưa được
 kiểm thử với DB/server runtime trong lượt này.
+
+| Nhóm việc | Cách chạy |
+|---|---|
+| TCP/TLS, SQL, file và SMTP I/O | `async/await` trên các đường đã rà; form không dùng `.Result`/`.Wait()` |
+| Password hashing | Server gọi trực tiếp PBKDF2 đồng bộ; không bọc `Task.Run` phía server |
+| CPU-bound phía WinForms | Hiện chưa có bước băm mật khẩu ở client; không có `Task.Run` băm password phía client |
 
 ## 3. Kiến trúc và triển khai AWS
 
@@ -181,7 +203,7 @@ Khi triển khai: publish `linux-x64`, cài .NET 10 runtime, chép app vào `/op
 - **Truyền phiên:** Launcher truyền username, host, port, TLS flag, mode và room ID bằng process arguments; token chuyển qua environment của tiến trình Unity, không nằm trong command line. Unity `Boot` xác thực token, tải thông tin user rồi chuyển tới menu/select/lobby.
 - **Sửa cấu hình:** `NetworkClientService` trước đây chỉ tìm `host`/`port` phân biệt hoa-thường trong JSON nên không đọc được file Release dùng `Host`/`Port`; nay đọc không phân biệt hoa-thường và lấy cả `useTls`. TLS flag từ cấu hình hiện được truyền tiếp sang game.
 - **Fail-fast cấu hình:** TLS mặc định bật; thiếu certificate hợp lệ làm Server dừng trước khi mở listener. Giá trị `DANTOPHONG_USE_TLS` khác true/false hoặc port không hợp lệ sẽ báo lỗi, không âm thầm fallback.
-- **Điểm chưa xác nhận:** hai Unity GUI đã mở đồng thời tới main menu; chưa login, tạo/join phòng hay chạy trận vì local SQL Server không khởi động được. DPI, crash/thoát game và client-server end-to-end còn cần test.
+- **Điểm chưa xác nhận:** hai Unity GUI đã mở đồng thời tới main menu; chưa login, tạo/join phòng hay chạy trận. Docker SQL/SMTP hiện chạy và listener được quan sát trên loopback, nhưng Launcher window không có trong giao diện tương tác của phiên này. DPI, crash/thoát game và client-server end-to-end còn cần test.
 
 ### Kiến trúc GUI và yêu cầu tối thiểu hai client
 
@@ -190,6 +212,24 @@ Client desktop là WinForms C# chạy độc lập trên Windows; các Form gồ
 Đã ghi nhận hai cửa sổ Unity cùng hiển thị main menu trong
 [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log). Đây chỉ là
 kiểm tra GUI launch; TC02 đầy đủ vẫn BLOCKED vì chưa login/đồng bộ qua server.
+
+Hiện Docker `dtp-sql`/`dtp-smtp` đang chạy và `netstat` thấy server listener
+loopback `127.0.0.1:9000`; tuy nhiên Launcher window không có trong giao diện
+tương tác của phiên này. Vì vậy không suy ra login hoặc gameplay từ listener.
+
+### Bảng trường form Đăng ký/Đăng nhập
+
+| Trường | Kiểu / bắt buộc | Ràng buộc | Control / thời điểm | Thông báo lỗi |
+|---|---|---|---|---|
+| Username | Chuỗi, bắt buộc | 3–20 ký tự ASCII: chữ, số hoặc `_` | `txtUsername`; khi nhập và khi submit | Ví dụ: `Username must be 3-20 chars (letters, numbers, _).` |
+| Password | Chuỗi, bắt buộc | 8–128 ký tự; có chữ cái và chữ số | `txtPassword`; khi submit, giới hạn thêm tại server | Tối thiểu/tối đa hoặc `Password must include both letters and numbers.` |
+| Confirm password | Chuỗi, chỉ đăng ký/đặt lại | Phải bằng password | `txtConfirmPassword`; khi nhập/submit | `Passwords do not match.` |
+| Full name | Chuỗi, đăng ký bắt buộc | 2–100 ký tự | `txtFullName`; khi submit | `Full name must be 2-100 characters.` |
+| Email | Chuỗi, đăng ký bắt buộc | 1–100 ký tự, dạng `name@example.com` | `txtEmail`; khi nhập, xin OTP và submit | Lỗi rỗng, quá độ dài hoặc ví dụ địa chỉ hợp lệ |
+| Verification code | Chuỗi, đăng ký bắt buộc | Đúng 6 chữ số; server kiểm hạn và số lần thử | `txtVerificationCode`; khi submit | `Please enter the 6-digit verification code.` |
+
+Validation email/password được dùng chung giữa client và server. Kiểm tra GUI
+hiện chưa chứng minh mọi thông báo/đường lỗi; xem [ma trận truy vết](docs/requirements-traceability.md).
 
 ## 5. Xác thực OTP và gửi email
 
@@ -203,6 +243,7 @@ Server trước đây dùng `System.Net.Mail.SmtpClient` cố định `smtp.gmai
 - `DANTOPHONG_SMTP_PORT=587`: STARTTLS bắt buộc.
 - Mặc định port 465, timeout 15 giây; `DANTOPHONG_SMTP_HOST` có thể override.
 - Credential chỉ lấy từ `DANTOPHONG_SMTP_USER` và `DANTOPHONG_SMTP_PASSWORD`.
+- MailKit chỉ dùng cho luồng server → SMTP; client ↔ server vẫn là TCP/TLS và framing tự phát triển.
 - SMTP failure được log phía server nhưng phản hồi client không lộ chi tiết SMTP.
 - Khi gửi lỗi, Server giải phóng reservation OTP chưa có hash code; lần thử sau không nhận phản hồi “đã gửi” nhưng thực tế chưa có email.
 - Form đăng ký đặt cooldown hiển thị 60 giây khớp cooldown server (OTP vẫn có hiệu lực 10 phút).
@@ -212,6 +253,11 @@ Server trước đây dùng `System.Net.Mail.SmtpClient` cố định `smtp.gmai
 Đặt địa chỉ sender và App Password trong secret store/service environment. Không ghi giá trị vào `.env.example`, source, `server.json`, Unity, tài liệu hay log. Sau khi cập nhật, restart service và xác nhận mail thực tế đến đúng inbox.
 
 **Trạng thái kiểm thử:** code path đã được build tĩnh; chưa có credential được sử dụng và chưa gửi email thật. Vì vậy không thể đánh dấu Gmail/OTP end-to-end là OK cho tới khi cấu hình secret hợp lệ.
+
+Email hiện vẫn được gửi trong đường xử lý request bằng `await`; chưa có Channel
+background queue hoặc retry 4xx/5xx. Khi SMTP chậm/lỗi, request đăng ký có thể
+chờ SMTP timeout rồi nhận lỗi thân thiện. Chưa bật ProtocolLogger và chưa có
+sample gửi thư tiếng Việt kèm attachment.
 
 ## 6. Gameplay và đồng bộ xe
 
@@ -292,7 +338,7 @@ EIP/Security Group và không push Git.
 | Build Server | Lượt này: `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore` thành công, 0 warning, 0 error. |
 | Build/Publish Launcher | Lượt này: `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore` thành công; còn 6 cảnh báo nullable (`CS8669`) trong file Designer sinh tự động. |
 | Build Unity | Unity Editor 6000.3.28f1 báo `Build Successful` cả ở cây làm việc và clone sạch commit `82b1f5f`; player và `Assembly-CSharp.dll` có mặt. Hai GUI main menu đã mở; chưa thử kết nối/match. [Clean-clone log](docs/evidence/TC08-clean-clone-build.log) |
-| Gameplay wire smoke | `GAME_EVENT` và `GAME_SNAPSHOT` được serialize thành frame riêng theo đúng thứ tự, với event ID, sequence và timestamp; chỉ kiểm tra in-memory, không phải live stream. |
+| Gameplay wire/mailbox smoke | `GAME_EVENT` và `GAME_SNAPSHOT` serialize đúng wire order; mailbox kiểm tra event chờ capacity và snapshot bỏ trạng thái cũ. Chỉ in-memory, không phải live stream. |
 | Local runtime prerequisites | Docker `dtp-sql`/`dtp-smtp` chạy; server dùng riêng `DanToPhongDB_Test`. TC05 TLS test, capture TC06/11/12 và TC10 bounded loopback probes đã chạy. OTP entry, limiter, gameplay live, sustained load và impairment chưa chạy đầy đủ. |
 | Draw.io | Draw.io Desktop 32.7.4.0 xuất thành công 4 PNG trong `docs/diagrams/`; không cài thêm phần mềm. |
 | Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp. Runbook AWS đã được thực thi một lần sau khi người dùng duyệt start; resource cuối cùng đã dừng, không đổi EIP/Security Group. |
@@ -312,10 +358,17 @@ EIP/Security Group và không push Git.
 | TC06 | So sánh plaintext/TLS bằng capture Wireshark. | PASS — plaintext PING đọc được; TLS 1.3 application records được mã hóa | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log) |
 | TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — reconnect/khôi phục snapshot chưa được thử runtime; không có trận live | Chưa có |
 | TC08 | Unity Windows x64 build. | PASS — build current source và clean clone; hai GUI main menu cũng được mở nhưng không thử network | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log), [TC08-clean-clone-build.log](docs/evidence/TC08-clean-clone-build.log) |
-| TC09 | TCP framing và thứ tự event/snapshot. | PASS — smoke test in-memory gồm frame lỗi và wire order GAME_EVENT → GAME_SNAPSHOT | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
+| TC09 | TCP framing, mailbox server, giới hạn tài khoản và thứ tự event/snapshot. | PASS — smoke in-memory gồm frame lỗi, event queue chờ capacity, snapshot queue bỏ state cũ và kiểm biên email/password; không phải live stream | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
 | TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | PARTIAL — 50 anonymous loopback PING, fragmented send, disconnect, malformed JSON và oversized length đã kiểm tra; chưa có authenticated/gameplay load hoặc Clumsy | [TC10-loopback-framing-test.log](docs/evidence/TC10-loopback-framing-test.log) |
 | TC11 | TCP 3-way handshake và FIN tới cổng 9000. | PASS — SYN/SYN-ACK và FIN/FIN-ACK quan sát trên Npcap Loopback | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log), [pcapng](docs/evidence/TC11-TC12-loopback-test.pcapng) |
 | TC12 | TLS handshake/cipher và so sánh payload. | PASS — TLS 1.3 handshake/cipher và plaintext probe đối chiếu trong capture đã rà payload | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log), [pcapng](docs/evidence/TC11-TC12-loopback-test.pcapng) |
+
+### Kiểm thử 8 bước Chương 3
+
+| Bước | Kết quả | Bằng chứng |
+|---|---|---|
+| T1 | PASS — `netstat -ano | findstr 9000` thấy `127.0.0.1:9000 LISTENING`; chỉ là loopback. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log) |
+| T2–T8 | BLOCKED — không có cửa sổ Launcher để tương tác; chưa gửi tin giữa hai client, đo dưới 1 giây, tắt client/server hay xác minh tiếng Việt. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log) |
 
 Ảnh phải tránh hiển thị password, OTP, token, connection string, App Password, private key và dữ liệu cá nhân. Ghi thêm ngày/commit, Windows/Unity build, endpoint test, network condition và pass/fail; giữ log đã redact cùng ảnh. Không đánh dấu “Đạt” khi chỉ có ảnh UI tĩnh.
 
@@ -345,11 +398,14 @@ PNG sơ đồ: [architecture](docs/diagrams/architecture.png),
 
 | Actor | User story | Tiêu chí nghiệm thu |
 |---|---|---|
-| Người chơi mới | Là người chơi, tôi muốn đăng ký bằng email và OTP để tạo tài khoản. | OTP đúng, chưa hết hạn, dùng một lần; code sai/expired bị từ chối. |
-| Người chơi | Là người chơi, tôi muốn đăng nhập và mở game bằng phiên an toàn. | Login phát token; Unity xác thực token; logout/expiry thu hồi quyền. |
-| Người chơi | Là người chơi, tôi muốn vào Solo hoặc tạo/join phòng với bạn. | Solo chuyển đúng scene; hai client Internet cùng vào room và đồng bộ scene. |
-| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input gửi qua TCP; server đẩy event/snapshot có thứ tự, kiểm tra checkpoint/finish gates và client nội suy. Physics đầy đủ, timer/elimination authority và test trận live còn thiếu. |
-| Quản trị viên | Là quản trị viên, tôi muốn Server tự lên sau reboot và lưu dữ liệu trong DB. | systemd active, SQL Server/RDS reachable, log không lộ secret. |
+| Người chơi mới | Là người chơi, tôi muốn đăng ký bằng email và OTP để tạo tài khoản. | Cho trước email hợp lệ và OTP chưa hết hạn; khi nhập đúng mã thì server tạo tài khoản. Cho trước mã sai/hết hạn; khi submit thì server từ chối. |
+| Người chơi | Là người chơi, tôi muốn đăng nhập và mở game bằng phiên an toàn. | Cho trước tài khoản hợp lệ; khi đăng nhập thì server trả token để Unity xác thực. Cho trước thông tin sai; khi thử thì phản hồi chung, không tiết lộ tài khoản. |
+| Người chơi | Là người chơi, tôi muốn khôi phục mật khẩu bằng email/OTP. | Cho trước email đã đăng ký và mã đúng; khi xác nhận thì mật khẩu hash được cập nhật. Cho trước mã sai/hết hạn; khi submit thì từ chối. |
+| Người chơi | Là người chơi, tôi muốn tạo hoặc vào phòng cùng bạn. | Cho trước phòng có chỗ và hai phiên xác thực; khi tạo/join thì membership cập nhật. Cho trước mã phòng sai/đầy; khi join thì báo lỗi và không thêm thành viên. |
+| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Cho trước room đang chạy; khi gửi input hợp lệ thì server mô phỏng và đẩy snapshot/event. Input ngoài giới hạn bị từ chối; timer/elimination authority và physics đầy đủ chưa hoàn thành. |
+| Người chơi | Là người chơi, tôi muốn rời trận hoặc kết nối lại. | Cho trước racer mất kết nối trong trận; khi reconnect trong 120 giây thì source trả state hiện tại. Sau hạn/server restart thì state không được phục hồi; runtime chưa thử. |
+| Người chơi | Là người chơi, tôi muốn xem trận với tư cách spectator. | Cho trước room đang chạy; khi yêu cầu spectate thì server đưa user vào danh sách spectator và stream state. Yêu cầu ngoài quyền/room không hợp lệ bị từ chối; runtime chưa thử. |
+| Quản trị viên | Là quản trị viên, tôi muốn quản lý hệ thống từ vai trò tài khoản. | Tiêu chí chưa đạt: source hiện chưa có vai trò admin và kiểm quyền server; không khẳng định chức năng đã triển khai. |
 
 ### Flow đăng ký/login và vào game
 
@@ -621,6 +677,8 @@ room state không bền sau restart, và chưa có trận live hoặc tải đo 
 ### Tệp bằng chứng và tái hiện
 
 - Bảng TC01–TC12 và trạng thái: [docs/evidence/README.md](docs/evidence/README.md).
+- T1–T8 Chương 3: [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log).
+- Ma trận yêu cầu/rubric: [docs/requirements-traceability.md](docs/requirements-traceability.md).
 - Framing/event wire smoke: [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log).
 - Unity build: [TC08-unity-build.log](docs/evidence/TC08-unity-build.log).
 - Clean-clone Server/Launcher/Unity builds: [TC08-clean-clone-build.log](docs/evidence/TC08-clean-clone-build.log).

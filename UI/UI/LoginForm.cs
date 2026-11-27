@@ -34,6 +34,7 @@ namespace UI
         {
             _netClient = netClient;
             InitializeComponent();
+            txtPassword.MaxLength = AccountInputValidation.MaxPasswordLength;
             CauHinhNutDoExit();
             DoubleBuffered = true;
             AcceptButton = btnLogin;

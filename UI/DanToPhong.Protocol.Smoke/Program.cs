@@ -6,6 +6,7 @@ await RunAsync();
 
 static async Task RunAsync()
 {
+    VerifyAccountInputValidation();
     await VerifyGameClientMailboxAsync();
 
     using var frames = new MemoryStream();
@@ -92,6 +93,21 @@ static async Task RunAsync()
     Console.WriteLine("PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.");
     Console.WriteLine("PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.");
     Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
+    Console.WriteLine("PASS: shared account validation accepts the email limit and rejects overlong email/password values.");
+}
+
+static void VerifyAccountInputValidation()
+{
+    string maxLengthEmail = new string('a', 88) + "@example.com";
+    string overlongEmail = new string('a', 89) + "@example.com";
+    string maxLengthPassword = new string('A', AccountInputValidation.MaxPasswordLength - 1) + "1";
+    if (!AccountInputValidation.IsValidEmail(maxLengthEmail) ||
+        AccountInputValidation.IsValidEmail(overlongEmail) ||
+        AccountInputValidation.IsValidEmail("not-an-email") ||
+        !AccountInputValidation.IsValidPassword("Abcdefg1") ||
+        !AccountInputValidation.IsValidPassword(maxLengthPassword) ||
+        AccountInputValidation.IsValidPassword(maxLengthPassword + "2"))
+        throw new InvalidOperationException("Account input length or format validation is inconsistent.");
 }
 
 static async Task VerifyGameClientMailboxAsync()

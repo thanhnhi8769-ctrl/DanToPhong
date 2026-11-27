@@ -5,7 +5,6 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using DanToPhong.Protocol;
@@ -395,10 +394,6 @@ namespace UI
         private const int HeaderAvatarSize = 34;
         private const int RacerAvatarSize = 76;
 
-        private static readonly Regex HasLetterRegex = new(@"[A-Za-z]", RegexOptions.Compiled);
-        private static readonly Regex HasDigitRegex = new(@"[0-9]", RegexOptions.Compiled);
-        private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
-
         public event EventHandler? LogoutRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler<GameReviewItem>? ReviewSubmitted;
@@ -463,6 +458,9 @@ namespace UI
             _coins = coins;
 
             InitializeComponent();
+            txtSettingsEmail.MaxLength = AccountInputValidation.MaxEmailLength;
+            txtSettingsNewPass.MaxLength = AccountInputValidation.MaxPasswordLength;
+            txtSettingsConfirmPass.MaxLength = AccountInputValidation.MaxPasswordLength;
 
             foreach (Button s in new[] { btnPickStar1, btnPickStar2, btnPickStar3, btnPickStar4, btnPickStar5 })
             {
@@ -826,13 +824,19 @@ namespace UI
 
             if (hasNewPass)
             {
-                if (newPass.Length < 8)
+                if (newPass.Length < AccountInputValidation.MinPasswordLength)
                 {
                     SetSettingsStatus("New password must be at least 8 characters.", isError: true);
                     txtSettingsNewPass.Focus();
                     return;
                 }
-                if (!HasLetterRegex.IsMatch(newPass) || !HasDigitRegex.IsMatch(newPass))
+                if (newPass.Length > AccountInputValidation.MaxPasswordLength)
+                {
+                    SetSettingsStatus("New password must be 128 characters or fewer.", isError: true);
+                    txtSettingsNewPass.Focus();
+                    return;
+                }
+                if (!AccountInputValidation.IsValidPassword(newPass))
                 {
                     SetSettingsStatus("New password must include letters and numbers.", isError: true);
                     txtSettingsNewPass.Focus();
@@ -847,9 +851,12 @@ namespace UI
                 return;
             }
 
-            if (hasEmail && !EmailRegex.IsMatch(email))
+            if (hasEmail && !AccountInputValidation.IsValidEmail(email))
             {
-                SetSettingsStatus("Invalid email address.", isError: true);
+                string message = email.Length > AccountInputValidation.MaxEmailLength
+                    ? "Email must be 100 characters or fewer."
+                    : "Enter a valid address, e.g. name@example.com.";
+                SetSettingsStatus(message, isError: true);
                 txtSettingsEmail.Focus();
                 return;
             }
@@ -1469,7 +1476,7 @@ namespace UI
             bool emailInvalid = hasError
                 && !string.IsNullOrEmpty(inputEmail)
                 && !string.Equals(inputEmail, currentEmail, StringComparison.OrdinalIgnoreCase)
-                && !EmailRegex.IsMatch(inputEmail);
+                && !AccountInputValidation.IsValidEmail(inputEmail);
 
             VeGachChanSettings(e.Graphics, txtSettingsOldPass, btnToggleSettingsOldPass, hasError && string.IsNullOrEmpty(txtSettingsOldPass.Text));
             VeGachChanSettings(e.Graphics, txtSettingsNewPass, btnToggleSettingsNewPass, hasError && !string.IsNullOrEmpty(txtSettingsNewPass.Text));

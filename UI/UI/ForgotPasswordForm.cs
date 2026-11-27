@@ -12,9 +12,6 @@ namespace UI
     public partial class ForgotPasswordForm : Form
     {
         private static readonly Regex UsernameRegex = new(@"^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
-        private static readonly Regex HasLetterRegex = new(@"[A-Za-z]", RegexOptions.Compiled);
-        private static readonly Regex HasDigitRegex = new(@"[0-9]", RegexOptions.Compiled);
-        private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
         private static readonly Regex CodeRegex = new(@"^[0-9]{6}$", RegexOptions.Compiled);
 
         private readonly NetworkClientService _netClient;
@@ -34,6 +31,9 @@ namespace UI
             DoubleBuffered = true;
             AcceptButton = btnResetPassword;
 
+            txtEmail.MaxLength = AccountInputValidation.MaxEmailLength;
+            txtNewPassword.MaxLength = AccountInputValidation.MaxPasswordLength;
+            txtConfirmPassword.MaxLength = AccountInputValidation.MaxPasswordLength;
             txtNewPassword.PlaceholderText = "Min 8 chars, letters and numbers";
             txtVerificationCode.MaxLength = 6;
 
@@ -510,7 +510,8 @@ namespace UI
         private static string? ValidateEmailRequired(string em)
         {
             if (string.IsNullOrEmpty(em)) return "Please enter your registered email.";
-            if (!EmailRegex.IsMatch(em)) return "Invalid email address.";
+            if (em.Length > AccountInputValidation.MaxEmailLength) return "Email must be 100 characters or fewer.";
+            if (!AccountInputValidation.IsValidEmail(em)) return "Enter a valid address, e.g. name@example.com.";
             return null;
         }
 
@@ -524,8 +525,9 @@ namespace UI
         private static string? ValidatePassword(string p)
         {
             if (string.IsNullOrEmpty(p)) return "Please enter a new password.";
-            if (p.Length < 8) return "Password must be at least 8 characters.";
-            if (!HasLetterRegex.IsMatch(p) || !HasDigitRegex.IsMatch(p))
+            if (p.Length < AccountInputValidation.MinPasswordLength) return "Password must be at least 8 characters.";
+            if (p.Length > AccountInputValidation.MaxPasswordLength) return "Password must be 128 characters or fewer.";
+            if (!AccountInputValidation.IsValidPassword(p))
                 return "Password must include both letters and numbers.";
             return null;
         }

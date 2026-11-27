@@ -24,9 +24,6 @@ namespace DanToPhong.Server
         private static readonly string ConnectionString = Environment.GetEnvironmentVariable("DANTOPHONG_DB_CONNECTION") ?? string.Empty;
 
         private static readonly Regex UsernameRegex = new(@"^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
-        private static readonly Regex HasLetterRegex = new(@"[A-Za-z]", RegexOptions.Compiled);
-        private static readonly Regex HasDigitRegex = new(@"[0-9]", RegexOptions.Compiled);
-        private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
         private static readonly Regex CategoryRegex = new(@"^[A-Za-z_]{1,30}$", RegexOptions.Compiled);
         private static readonly Regex RoomCodeRegex = new(@"^[A-Za-z0-9]{3,12}$", RegexOptions.Compiled);
         private static readonly Regex TargetRegex = new(@"^[A-Za-z0-9_]{1,20}$", RegexOptions.Compiled);
@@ -665,9 +662,9 @@ namespace DanToPhong.Server
             string? avatarPath = req.AvatarPath?.Trim();
 
             if (!UsernameRegex.IsMatch(username) ||
-                !IsValidPassword(password) ||
+                !AccountInputValidation.IsValidPassword(password) ||
                 fullName.Length < 2 || fullName.Length > 100 ||
-                !EmailRegex.IsMatch(email) ||
+                !AccountInputValidation.IsValidEmail(email) ||
                 (racerId != null && racerId.Length > 30) ||
                 (gender != null && gender.Length > 20) ||
                 (avatarPath != null && avatarPath.Length > 260))
@@ -726,7 +723,9 @@ namespace DanToPhong.Server
             string username = (req.Username ?? string.Empty).Trim();
             string password = req.Password ?? string.Empty;
 
-            if (!UsernameRegex.IsMatch(username) || string.IsNullOrEmpty(password))
+            if (!UsernameRegex.IsMatch(username) ||
+                string.IsNullOrEmpty(password) ||
+                password.Length > AccountInputValidation.MaxPasswordLength)
             {
                 return new ResponsePacket
                 {
@@ -833,7 +832,7 @@ namespace DanToPhong.Server
         {
             string username = (req.Username ?? string.Empty).Trim();
             string email = (req.Email ?? string.Empty).Trim();
-            if (!UsernameRegex.IsMatch(username) || !EmailRegex.IsMatch(email))
+            if (!UsernameRegex.IsMatch(username) || !AccountInputValidation.IsValidEmail(email))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
 
             string key = $"reset|{username}|{email.ToLowerInvariant()}";
@@ -867,7 +866,7 @@ namespace DanToPhong.Server
         {
             string username = (req.Username ?? string.Empty).Trim();
             string email = (req.Email ?? string.Empty).Trim();
-            if (!UsernameRegex.IsMatch(username) || !EmailRegex.IsMatch(email))
+            if (!UsernameRegex.IsMatch(username) || !AccountInputValidation.IsValidEmail(email))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
 
             string key = $"register|{username}|{email.ToLowerInvariant()}";
@@ -1256,8 +1255,8 @@ namespace DanToPhong.Server
             string newPassword = req.Password ?? string.Empty;
 
             if (!UsernameRegex.IsMatch(username) ||
-                !EmailRegex.IsMatch(email) ||
-                !IsValidPassword(newPassword))
+                !AccountInputValidation.IsValidEmail(email) ||
+                !AccountInputValidation.IsValidPassword(newPassword))
             {
                 return new ResponsePacket
                 {
@@ -1290,11 +1289,5 @@ namespace DanToPhong.Server
             return new ResponsePacket { Success = result.Success, Code = result.Code, Message = result.Message };
         }
 
-        private static bool IsValidPassword(string password)
-        {
-            return password.Length >= 8 &&
-                   HasLetterRegex.IsMatch(password) &&
-                   HasDigitRegex.IsMatch(password);
-        }
     }
 }

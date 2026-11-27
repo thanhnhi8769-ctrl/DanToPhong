@@ -15,10 +15,6 @@ namespace UI
     public partial class RegisterForm : Form
     {
         private static readonly Regex UsernameRegex = new(@"^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
-        private static readonly Regex HasLetterRegex = new(@"[A-Za-z]", RegexOptions.Compiled);
-        private static readonly Regex HasDigitRegex = new(@"[0-9]", RegexOptions.Compiled);
-        private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
-
         private readonly NetworkClientService _netClient;
         private readonly System.Windows.Forms.Timer _otpTimer = new();
         private bool isPasswordVisible;
@@ -36,6 +32,9 @@ namespace UI
         {
             _netClient = netClient;
             InitializeComponent();
+            txtEmail.MaxLength = AccountInputValidation.MaxEmailLength;
+            txtPassword.MaxLength = AccountInputValidation.MaxPasswordLength;
+            txtConfirmPassword.MaxLength = AccountInputValidation.MaxPasswordLength;
             picAvatar.Size = new Size(68, 68);   // vuông để avatar tròn không bị méo
             CauHinhNutDoExit();
             DoubleBuffered = true;
@@ -396,8 +395,9 @@ namespace UI
         private static string? ValidatePassword(string p)
         {
             if (string.IsNullOrEmpty(p)) return "Please enter a password.";
-            if (p.Length < 8) return "Password must be at least 8 characters.";
-            if (!HasLetterRegex.IsMatch(p) || !HasDigitRegex.IsMatch(p))
+            if (p.Length < AccountInputValidation.MinPasswordLength) return "Password must be at least 8 characters.";
+            if (p.Length > AccountInputValidation.MaxPasswordLength) return "Password must be 128 characters or fewer.";
+            if (!AccountInputValidation.IsValidPassword(p))
                 return "Password must include both letters and numbers.";
             return null;
         }
@@ -419,7 +419,8 @@ namespace UI
         private static string? ValidateEmailRequired(string email)
         {
             if (string.IsNullOrWhiteSpace(email)) return "Please enter your email address.";
-            if (!EmailRegex.IsMatch(email)) return "Invalid email address.";
+            if (email.Length > AccountInputValidation.MaxEmailLength) return "Email must be 100 characters or fewer.";
+            if (!AccountInputValidation.IsValidEmail(email)) return "Enter a valid address, e.g. name@example.com.";
             return null;
         }
 

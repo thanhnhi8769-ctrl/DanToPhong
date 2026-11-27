@@ -48,6 +48,9 @@ the other fields are optional and command-specific. The response envelope is
 optional DTOs and game-state fields. The authoritative field definitions are
 the C# DTOs in `Packets.cs`.
 
+There is currently no explicit protocol-version field or version negotiation.
+All deployed clients must therefore use a compatible protocol build.
+
 Important fields include:
 
 - Account/session: `username`, `password`, `verificationCode`, `token`,
@@ -65,7 +68,10 @@ Per-field validation is command-specific. The generic frame limit does not
 replace input validation. Game input requires finite throttle/steer values and
 timestamps, rejects controls outside `[-1, 1]` and non-increasing client ticks,
 and does not accept a client-selected position. Checkpoint order and chat
-length/control characters are validated server-side.
+length/control characters are validated server-side. Shared account validation
+limits email addresses to 100 characters and passwords to 8–128 characters;
+registration, reset, profile update and login enforce the corresponding server
+limits, and the launcher applies the same length limits to its controls.
 
 ## 4. Commands
 
