@@ -6,11 +6,11 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 |---|---|---|---|
 | TC01 | Kết nối TCP từ một máy kiểm thử tới cổng 9000 public | PASS — chỉ xác nhận reachability từ máy hiện tại, không đại diện cho hai máy | [TC01-tcp-reachability.log](TC01-tcp-reachability.log) |
 | TC02 | Hai máy khác mạng đăng nhập, vào phòng và đồng bộ trạng thái | BLOCKED — chưa chạy hai client Unity đã đăng nhập trên hai máy/mạng khác nhau | [TC02-two-client-gui.log](TC02-two-client-gui.log) |
-| TC03 | TCP room: tạo/vào phòng và nhận snapshot giữa hai client | BLOCKED — server đã chạy với DB test, nhưng chưa chạy hai client trong một trận thật | Chưa có |
-| TC04 | OTP SMTP: gửi, nhận, mã đúng/sai/hết hạn | PARTIAL — smtp4dev ghi nhận email registration đã gửi/nhận; nhập mã đúng/sai/hết hạn và khóa do thử sai chưa kiểm chứng | [TC04-prior-otp-delivery.log](TC04-prior-otp-delivery.log); chưa có ảnh app/mail cho các lần nhập |
+| TC03 | TCP room: tạo/vào phòng và nhận snapshot giữa hai client | BLOCKED — chưa chạy trận hai client; Launcher process không có cửa sổ UI truy cập được trong phiên này | Chưa có |
+| TC04 | OTP SMTP: gửi, nhận, mã đúng/sai/hết hạn | PARTIAL — smtp4dev ghi nhận email registration đã gửi/nhận; nhập mã đúng/sai/hết hạn và khóa do thử sai chưa kiểm chứng; không có cửa sổ UI truy cập được để tiếp tục | [TC04-prior-otp-delivery.log](TC04-prior-otp-delivery.log); chưa có ảnh app/mail cho các lần nhập |
 | TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh | PASS — 4/4 ca quan sát trực tiếp trên loopback TCP 9000 với database test riêng | [TC05-local-tls-fail-closed.log](TC05-local-tls-fail-closed.log); [TC05-tls-plaintext.log](TC05-tls-plaintext.log) (lịch sử deployment cũ, không dùng làm kết quả hiện tại) |
 | TC06 | DPI: so sánh plaintext/TLS bằng Wireshark | PASS — trace local cho thấy PING plaintext đọc được, còn TLS 1.3 application records được mã hóa | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log) |
-| TC07 | Mất mạng, reconnect và server restart | BLOCKED — live server sẵn sàng nhưng reconnect giữa trận và khôi phục snapshot chưa được thử runtime | Chưa có |
+| TC07 | Mất mạng, reconnect và server restart | BLOCKED — chưa có trận để thử reconnect runtime; Launcher process không có cửa sổ UI truy cập được trong phiên này | Chưa có |
 | TC08 | Build Unity Windows x64 từ các scene đang bật trong Build Settings | PASS — build source TCP hiện tại; chưa chạy game hoặc xác minh kết nối server | [TC08-unity-build.log](TC08-unity-build.log) |
 | TC09 | Framing TCP và thứ tự event/snapshot | PASS — smoke test in-memory kiểm tra frame phân mảnh/nối liền, lỗi frame và wire order GAME_EVENT → GAME_SNAPSHOT | [TC09-framing-smoke.log](TC09-framing-smoke.log) |
 | TC10 | 10–50 client, slow sender, abort và malformed traffic tới server thật | BLOCKED — chưa chạy load/slow-sender/malformed test trên server thật | Chưa có |
@@ -37,6 +37,9 @@ Các mục PARTIAL/BLOCKED chưa được thực hiện đầy đủ; không xem
   Clumsy is installed, but network-impairment tests are still pending.
 - A short-lived TLS test certificate was created outside the repository. It
   was not imported into a system certificate store.
+- The local Launcher process remained responsive, but no UI window was exposed
+  to Computer Use. No second launch or interactive gameplay/OTP attempt was
+  made; `LauncherRelease/server.json` is ignored by Git.
 
 ### Draw.io
 
