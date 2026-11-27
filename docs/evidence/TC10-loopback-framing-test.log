@@ -1,0 +1,18 @@
+Test ID: TC10 (bounded local protocol-resilience subcheck)
+Date: 2026-11-27
+Target: 127.0.0.1:9000; listener was confirmed loopback-only.
+Traffic: Anonymous PING requests only; no login, account data, or credentials.
+
+Observed:
+- 50 concurrent TCP clients each received a valid framed response: PASS.
+- A frame sent in fragments with a 1-second pause was accepted: PASS.
+- A peer closing after a partial header did not prevent a subsequent PING: PASS.
+- Malformed JSON was rejected without a success response: PASS.
+- An advertised body length of 65,537 bytes was rejected: PASS.
+
+Limitations:
+- This was not a sustained authenticated/gameplay load test and did not measure throughput or latency.
+- Clumsy impairment was not applied.
+- TC10 remains PARTIAL; these loopback checks do not establish production capacity.
+
+Redaction: No credentials, account identifiers, OTPs, tokens, or public endpoints were used or recorded.

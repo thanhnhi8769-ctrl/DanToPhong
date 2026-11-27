@@ -53,3 +53,12 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Work | Result | Commands / checks |
 |---|---|---|
 | Inspect local Launcher availability | `UI.exe` remained responsive, but the Computer Use window inventory did not expose a Launcher window. Did not launch a duplicate instance or submit any UI actions; TC03/TC04/TC07 therefore remain unverified. `LauncherRelease/server.json` is ignored by Git. | `Get-Process -Name UI,DanToPhong`; Computer Use `listWindows()`; `git check-ignore -v .\LauncherRelease\server.json` |
+
+## 2026-11-27 — Evidence and documentation follow-up
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Run bounded TC10 loopback checks | On the loopback-only plaintext test listener, 50 anonymous PING clients received valid framed responses. Fragmented send, partial-header disconnect/recovery, malformed JSON rejection and oversized-length rejection passed. This is a partial resilience check, not authenticated/gameplay load or a latency/capacity measurement. | `Get-NetTCPConnection -LocalPort 9000 -State Listen`; bounded PowerShell TCP harness; [TC10-loopback-framing-test.log](evidence/TC10-loopback-framing-test.log) |
+| Locate and attempt Clumsy impairment | Found the existing `clumsy.exe` WinGet link and launched it once through Computer Use. No Clumsy window was exposed; no impairment was enabled and TC10 remains partial. | PATH lookup; Computer Use `startApp()` / `listWindows()` |
+| Export and review Draw.io diagrams | Exported all four `.drawio` sources to PNG with the already-installed Draw.io Desktop CLI. Updated architecture and user-story labels to match the current prototype and visible test limits. | `draw.io.exe --export --format png --output ...`; visual review of all four PNGs |
+| Align project documentation with observed status | Updated README, protocol, requirements checklist, report and evidence index. Recorded TC05/06/11/12 PASS, TC10 PARTIAL, and remaining OTP/gameplay/load blockers without claiming a live match. No AWS action or Git push. | Documentation/evidence cross-check; `git diff --check` |

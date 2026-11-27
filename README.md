@@ -27,13 +27,24 @@ Unity multiplayer: TCP/TLS 9000 input requests + dedicated event/snapshot stream
 The TCP framing is a 4-byte big-endian length followed by UTF-8 JSON. The
 Launcher/server protocol supports account, OTP and application data. A partial
 room/gameplay path implements room membership, 15–20 Hz input requests,
-simplified server-side kinematics, and an authenticated TCP stream for ordered
-events and nominal 20 Hz snapshots. It does **not** yet provide track-aware
-authoritative physics, verified checkpoint crossings, spectator/durable
-reconnect support, or authoritative rewards. Do not treat multiplayer as
-release-ready until those gaps are closed and live two-client tests pass. See
-[docs/protocol.md](docs/protocol.md) and
+simplified server-side kinematics, configured checkpoint/finish gate checks,
+and an authenticated TCP stream for ordered events and nominal 20 Hz
+snapshots. The server has in-memory spectate/reconnect paths (120-second
+disconnect grace) and server-side winner rewards, but these paths have not
+been verified in a live match. The model is not full Unity vehicle/track
+physics, and elimination can still be requested by a client, so gameplay is
+not fully authoritative or release-ready. Room state is process-local and is
+lost on server restart. See [docs/protocol.md](docs/protocol.md) and
 [docs/requirements-checklist.md](docs/requirements-checklist.md).
+
+All implemented network features, including gameplay synchronization, use the
+custom TCP/TLS stack. UDP is not implemented; it is only noted as a possible
+future direction in [docs/protocol.md](docs/protocol.md#8-future-transport-direction-not-implemented).
+
+Diagrams: [architecture](docs/diagrams/architecture.png),
+[application flow](docs/diagrams/application-flow.png),
+[GUI wireframe](docs/diagrams/gui-wireframe.png), and
+[user stories](docs/diagrams/user-stories.png).
 
 ## Local prerequisites and configuration
 

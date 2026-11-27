@@ -13,7 +13,7 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | TC07 | Mất mạng, reconnect và server restart | BLOCKED — chưa có trận để thử reconnect runtime; Launcher process không có cửa sổ UI truy cập được trong phiên này | Chưa có |
 | TC08 | Build Unity Windows x64 từ các scene đang bật trong Build Settings | PASS — build source TCP hiện tại; chưa chạy game hoặc xác minh kết nối server | [TC08-unity-build.log](TC08-unity-build.log) |
 | TC09 | Framing TCP và thứ tự event/snapshot | PASS — smoke test in-memory kiểm tra frame phân mảnh/nối liền, lỗi frame và wire order GAME_EVENT → GAME_SNAPSHOT | [TC09-framing-smoke.log](TC09-framing-smoke.log) |
-| TC10 | 10–50 client, slow sender, abort và malformed traffic tới server thật | BLOCKED — chưa chạy load/slow-sender/malformed test trên server thật | Chưa có |
+| TC10 | 10–50 client, slow sender, abort và malformed traffic tới server thật | PARTIAL — 50 PING ẩn danh đồng thời, frame phân mảnh, disconnect, JSON lỗi và length quá lớn đều bị xử lý đúng trên loopback; chưa có tải authenticated/gameplay hoặc Clumsy | [TC10-loopback-framing-test.log](TC10-loopback-framing-test.log) |
 | TC11 | TCP 3-way handshake và FIN tới cổng 9000 | PASS — SYN/SYN-ACK và FIN/FIN-ACK quan sát được trên Npcap Loopback | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log); [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng) |
 | TC12 | TLS handshake/cipher và so sánh plaintext/TLS bằng Wireshark | PASS — TLS 1.3 ServerHello/cipher và plaintext probe đối chiếu trong trace đã rà payload | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log); [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng) |
 
@@ -43,8 +43,12 @@ Các mục PARTIAL/BLOCKED chưa được thực hiện đầy đủ; không xem
 
 ### Draw.io
 
-Draw.io Desktop is installed (32.7.4.0). All four `.drawio` files parse as XML;
-PNG export has not yet been verified in this run.
+Draw.io Desktop 32.7.4.0 exported all four diagrams to PNG:
+[architecture](../diagrams/architecture.png),
+[application flow](../diagrams/application-flow.png),
+[GUI wireframe](../diagrams/gui-wireframe.png), and
+[user stories](../diagrams/user-stories.png). The architecture and user-story
+diagrams identify simplified gameplay and the remaining unverified behavior.
 
 ### TC08 — Unity Windows x64 build
 
@@ -56,10 +60,11 @@ redact: [TC08-clean-clone-build.log](TC08-clean-clone-build.log).
 
 ### Phase 4B — kiểm thử giao thức mạng
 
-TC09 remains an in-memory framing smoke test, not a server-load test. TC11 and
-TC12 use a sanitized Npcap Loopback capture with anonymous traffic; TC10 load,
-slow-sender and malformed-input cases remain untested. Any later capture must
-exclude or redact account data, email, OTPs, tokens and non-loopback addresses.
+TC09 remains an in-memory framing smoke test, not a server-load test. TC10's
+loopback probes use anonymous PING only and are not an authenticated load test.
+TC11 and TC12 use a sanitized Npcap Loopback capture with anonymous traffic.
+Any later capture must exclude or redact account data, email, OTPs, tokens and
+non-loopback addresses.
 
 Đối với TC11/TC12, xem checklist capture trong
 [protocol.md](../protocol.md#9-verification-and-capture-guidance).

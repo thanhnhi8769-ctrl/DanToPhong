@@ -2,7 +2,7 @@
 
 **Ngày rà soát:** 27/11/2026
 **Phạm vi:** WinForms Launcher, TCP Server cổng 9000, cấu hình SMTP/DB, Unity scripts/scenes, build settings, AWS EC2/RDS và hướng dẫn phát hành.
-**Cách đánh giá:** đọc mã nguồn/cấu hình và build tĩnh; không giả định kết quả test end-to-end khi không chạy được dịch vụ thực.
+**Cách đánh giá:** rà mã nguồn, build và kiểm thử runtime local theo bằng chứng ghi tại Chương 9; không suy rộng từ smoke test sang gameplay Internet/load. AWS không được truy vấn hoặc thay đổi trong lượt kiểm tra này.
 
 ## MỤC LỤC
 
@@ -44,11 +44,11 @@ Unity Solo: vật lý local
 Unity multiplayer: TCP/TLS input requests + authenticated event/snapshot stream
 ```
 
-Launcher/server dùng frame TCP 4-byte big-endian và JSON. TCP Server quản lý
-tài khoản, OTP, inventory và prototype phòng/game. Client gửi input qua kết
-nối request/response; một kết nối TCP thứ hai xác thực token rồi nhận event
-riêng có thứ tự và snapshot server-push danh nghĩa 20 Hz. Room/game state vẫn
-đặt trong RAM và simulation chưa thay thế physics/va chạm đường đua của Unity.
+Launcher/server dùng frame TCP 4-byte big-endian và JSON, TLS bật mặc định và
+fail-closed; cả input game lẫn stream event/snapshot đều dùng TCP/TLS. Server
+quản lý tài khoản, OTP, inventory và room/game state in-memory. Simulation
+server dùng kinematics đơn giản, spawn từ track catalog và kiểm tra checkpoint/
+finish theo gate cấu hình; đây chưa phải physics/va chạm đầy đủ của Unity.
 
 ### 1.2. Kết quả tổng hợp
 
@@ -58,11 +58,11 @@ riêng có thứ tự và snapshot server-push danh nghĩa 20 Hz. Room/game stat
 | SMTP/OTP | **Đã sửa** | Hỗ trợ Gmail implicit TLS 465 và STARTTLS 587; lỗi gửi không còn khóa gửi lại bằng cooldown giả. Server build thành công. |
 | Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS đọc không phân biệt hoa-thường; TLS được chuyển tiếp từ Launcher sang Unity; env port sai giờ báo lỗi thay vì âm thầm fallback. |
 | Điều khiển/va chạm xe | **Đã rà soát** | Có ga, phanh/lùi, rẽ, nhảy, chống kẹt, bám đường và hồi sinh; chưa test vật lý bằng build chạy. |
-| Multiplayer state | **Một phần** | Unity gửi input 15–20 Hz; server push snapshot danh nghĩa 20 Hz và event có thứ tự trên TCP; client có queue tối đa 8 mẫu và nội suy. Chưa có track-aware physics, spectator, durable resume hay test trận hai client. |
+| Multiplayer state | **Prototype; live test BLOCKED** | Server mô phỏng kinematics, kiểm tra checkpoint/finish gate, push snapshot/event; có code spectate/reconnect 120 giây và thưởng winner phía server. Chưa có physics đầy đủ; client còn có thể yêu cầu loại mình; chưa kiểm chứng trận live. |
 | Scene mặc định `game` | **Đã sửa** | Scene có dùng làm fallback nhưng thiếu Build Settings; đã thêm vào danh sách build. |
 | Git hygiene | **Đã sửa** | Cho phép các project .NET và scene thuộc `Assets/scene` được version; tiếp tục loại build/cache/demo scenes. |
 | AWS Internet-ready | **Chưa sẵn sàng** | Lần đọc/truy vấn AWS được ghi trước đây báo EC2 và RDS đã dừng sau smoke test. EIP khi đó gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; lượt hiện tại không đọc lại trạng thái AWS và không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
-| Production readiness | **Chưa xác nhận** | Chưa xác minh TLS/SMTP/DB runtime, hai client Internet, hoặc tải thực tế. |
+| Production readiness | **Chưa xác nhận** | TC05 TLS fail-closed và capture local TC06/11/12 đã PASS; OTP chỉ có bằng chứng email delivery. Chưa xác minh gameplay hai client, reconnect runtime, load, hay hai mạng Internet. |
 
 ## 2. Network stack tự phát triển và đặc tả giao thức
 
@@ -231,10 +231,12 @@ tối đa 8 snapshot, bỏ mẫu cũ nhất khi đầy, loại sequence cũ và 
 trễ mục tiêu khoảng 100 ms. Stream có thử kết nối lại khi primary session còn
 sống; mất mọi session hoặc restart Server không phục hồi membership.
 
-Server chỉ mô phỏng kinematics đơn giản; chưa xác thực collision/đường đua
-hoặc checkpoint theo vị trí, chưa có spectate và chưa có durable reconnect.
-Vì vậy đây chưa phải gameplay authoritative hoàn chỉnh, dù snapshot đã được
-push trên TCP.
+Server mô phỏng kinematics đơn giản, dùng spawn/gate trong track catalog và
+kiểm tra checkpoint/finish dựa trên giao cắt gate server-side; chưa mô phỏng
+đầy đủ vật lý/collision của Unity. Spectate và reconnect trong grace period
+120 giây có trong source, nhưng chưa được xác minh bằng trận live. Server
+chưa sở hữu timer multiplayer và vẫn nhận `ELIMINATE` từ client, nên kết quả
+loại người chơi chưa hoàn toàn authoritative. Room state không bền sau restart.
 
 **Đánh giá:** logic có guard cho xe owner/remote, timeout room, missing scene và respawn. Không thể kết luận chống kẹt/văng/bay lạ hoặc đồng bộ Internet đạt ngưỡng chất lượng nếu chưa chạy build thật trên đường đua và hai client có latency/jitter. Cần kiểm tra phanh khi rẽ gấp, va tường, qua khe nối, rơi nước, respawn gần xe khác và rời mạng giữa trận.
 
@@ -291,8 +293,8 @@ EIP/Security Group và không push Git.
 | Build/Publish Launcher | Lượt này: `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore` thành công; còn 6 cảnh báo nullable (`CS8669`) trong file Designer sinh tự động. |
 | Build Unity | Unity Editor 6000.3.28f1 báo `Build Successful` cả ở cây làm việc và clone sạch commit `82b1f5f`; player và `Assembly-CSharp.dll` có mặt. Hai GUI main menu đã mở; chưa thử kết nối/match. [Clean-clone log](docs/evidence/TC08-clean-clone-build.log) |
 | Gameplay wire smoke | `GAME_EVENT` và `GAME_SNAPSHOT` được serialize thành frame riêng theo đúng thứ tự, với event ID, sequence và timestamp; chỉ kiểm tra in-memory, không phải live stream. |
-| Local runtime prerequisites | Không có SQL listener trên loopback:1433; thao tác start service local bị từ chối do quyền service; Docker daemon không chạy. `sqlcmd`, `SqlLocalDB`, `tshark`, Wireshark GUI và `clumsy` không có sẵn; DB-backed live server, TLS, OTP, limiter, load, impairment và DPI chưa chạy. |
-| Draw.io | Cả 4 tệp `.drawio` parse XML thành công. Không có Draw.io CLI/desktop executable cài sẵn nên PNG export BLOCKED; lệnh cài được xác định là `winget install --id JGraph.Draw --exact --source winget`, chưa thực hiện vì sẽ thay đổi phần mềm hệ thống. |
+| Local runtime prerequisites | Docker `dtp-sql`/`dtp-smtp` chạy; server dùng riêng `DanToPhongDB_Test`. TC05 TLS test, capture TC06/11/12 và TC10 bounded loopback probes đã chạy. OTP entry, limiter, gameplay live, sustained load và impairment chưa chạy đầy đủ. |
+| Draw.io | Draw.io Desktop 32.7.4.0 xuất thành công 4 PNG trong `docs/diagrams/`; không cài thêm phần mềm. |
 | Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp. Runbook AWS đã được thực thi một lần sau khi người dùng duyệt start; resource cuối cùng đã dừng, không đổi EIP/Security Group. |
 | Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; `game` fallback có trong build. Windows x64 player vừa được build; scene/runtime flow chưa được chơi thử. |
 | Git hygiene | TCP stream đã commit tại `82b1f5f`; clean-clone evidence/report/work-log được ghi trong commit local kế tiếp. Không push. |
@@ -304,16 +306,16 @@ EIP/Security Group và không push Git.
 |---|---|---|---|
 | TC01 | Reachability TCP/9000 từ một máy. | PASS lịch sử — chỉ xác nhận cổng, không xác nhận nghiệp vụ | [TC01-tcp-reachability.log](docs/evidence/TC01-tcp-reachability.log) |
 | TC02 | Hai máy khác mạng đăng nhập, vào phòng, đồng bộ. | BLOCKED — chỉ có hai GUI main menu, chưa có login/server hay máy mạng thứ hai | [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log) |
-| TC03 | Hai client dùng TCP tạo/vào phòng và nhận snapshot. | BLOCKED — không có SQL Server runtime và server gameplay live | Chưa có |
-| TC04 | OTP SMTP gửi/nhận, mã đúng/sai/hết hạn. | BLOCKED — không có DB runtime hoặc SMTP giả đang chạy | Chưa có |
-| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh. | BLOCKED — log deployment cũ FAIL; local DB/runtime server không sẵn sàng để chạy bốn ca | [TC05-tls-plaintext.log](docs/evidence/TC05-tls-plaintext.log) |
-| TC06 | DPI so sánh plaintext/TLS bằng capture. | BLOCKED — server/TLS runtime và capture chưa chạy | Chưa có |
-| TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — server DB-backed chưa khởi động; retry code chưa được kiểm chứng live | Chưa có |
+| TC03 | Hai client dùng TCP tạo/vào phòng và nhận snapshot. | BLOCKED — chưa quan sát trận hai client; Launcher process không có cửa sổ UI truy cập được trong lần tiếp tục này | Chưa có |
+| TC04 | OTP SMTP gửi/nhận, mã đúng/sai/hết hạn. | PARTIAL — mail registration được smtp4dev nhận; chưa nhập mã đúng/sai/hết hạn hay kiểm tra khóa do thử sai | [TC04-prior-otp-delivery.log](docs/evidence/TC04-prior-otp-delivery.log) |
+| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh. | PASS — 4/4 ca local trên loopback; evidence harness hiện tại, không phải GUI login | [TC05-local-tls-fail-closed.log](docs/evidence/TC05-local-tls-fail-closed.log) |
+| TC06 | So sánh plaintext/TLS bằng capture Wireshark. | PASS — plaintext PING đọc được; TLS 1.3 application records được mã hóa | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log) |
+| TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — reconnect/khôi phục snapshot chưa được thử runtime; không có trận live | Chưa có |
 | TC08 | Unity Windows x64 build. | PASS — build current source và clean clone; hai GUI main menu cũng được mở nhưng không thử network | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log), [TC08-clean-clone-build.log](docs/evidence/TC08-clean-clone-build.log) |
 | TC09 | TCP framing và thứ tự event/snapshot. | PASS — smoke test in-memory gồm frame lỗi và wire order GAME_EVENT → GAME_SNAPSHOT | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
-| TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | BLOCKED — SQL Server/Docker runtime không khả dụng, chưa mở server thật | Chưa có |
-| TC11 | TCP 3-way handshake và FIN tới cổng 9000. | BLOCKED — chưa capture | Chưa có |
-| TC12 | TLS handshake/cipher và so sánh payload. | BLOCKED — TC05 chưa chạy; chưa có TLS server/capture | Chưa có |
+| TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | PARTIAL — 50 anonymous loopback PING, fragmented send, disconnect, malformed JSON và oversized length đã kiểm tra; chưa có authenticated/gameplay load hoặc Clumsy | [TC10-loopback-framing-test.log](docs/evidence/TC10-loopback-framing-test.log) |
+| TC11 | TCP 3-way handshake và FIN tới cổng 9000. | PASS — SYN/SYN-ACK và FIN/FIN-ACK quan sát trên Npcap Loopback | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log), [pcapng](docs/evidence/TC11-TC12-loopback-test.pcapng) |
+| TC12 | TLS handshake/cipher và so sánh payload. | PASS — TLS 1.3 handshake/cipher và plaintext probe đối chiếu trong capture đã rà payload | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log), [pcapng](docs/evidence/TC11-TC12-loopback-test.pcapng) |
 
 Ảnh phải tránh hiển thị password, OTP, token, connection string, App Password, private key và dữ liệu cá nhân. Ghi thêm ngày/commit, Windows/Unity build, endpoint test, network condition và pass/fail; giữ log đã redact cùng ảnh. Không đánh dấu “Đạt” khi chỉ có ảnh UI tĩnh.
 
@@ -336,12 +338,17 @@ Chi tiết lệnh AWS/systemd và biến môi trường có trong [README](READM
 
 ## 11. User story và sơ đồ luồng
 
+PNG sơ đồ: [architecture](docs/diagrams/architecture.png),
+[application flow](docs/diagrams/application-flow.png),
+[GUI wireframe](docs/diagrams/gui-wireframe.png),
+[user stories](docs/diagrams/user-stories.png).
+
 | Actor | User story | Tiêu chí nghiệm thu |
 |---|---|---|
 | Người chơi mới | Là người chơi, tôi muốn đăng ký bằng email và OTP để tạo tài khoản. | OTP đúng, chưa hết hạn, dùng một lần; code sai/expired bị từ chối. |
 | Người chơi | Là người chơi, tôi muốn đăng nhập và mở game bằng phiên an toàn. | Login phát token; Unity xác thực token; logout/expiry thu hồi quyền. |
 | Người chơi | Là người chơi, tôi muốn vào Solo hoặc tạo/join phòng với bạn. | Solo chuyển đúng scene; hai client Internet cùng vào room và đồng bộ scene. |
-| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input gửi qua TCP; server đẩy event/snapshot có thứ tự và client nội suy. Chưa có track-authoritative physics hoặc test trận live. |
+| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input gửi qua TCP; server đẩy event/snapshot có thứ tự, kiểm tra checkpoint/finish gates và client nội suy. Physics đầy đủ, timer/elimination authority và test trận live còn thiếu. |
 | Quản trị viên | Là quản trị viên, tôi muốn Server tự lên sau reboot và lưu dữ liệu trong DB. | systemd active, SQL Server/RDS reachable, log không lộ secret. |
 
 ### Flow đăng ký/login và vào game
@@ -578,32 +585,32 @@ git push
 
 ## 14. Hạn chế và kết luận phát hành
 
-**Chưa thể xác nhận “clone về dùng ngay”:** build Server/Launcher/Unity và
-protocol smoke test đã chạy; hai Unity GUI chỉ tới main menu. Local SQL runtime
-không khởi động được do quyền service và Docker engine không hoạt động, nên
-chưa chạy live Server, TLS/OTP, login limiter, gameplay, load hay DPI. Các
-trạng thái AWS/EIP nêu trong báo cáo là bằng chứng lịch sử, chưa được đọc lại
-trong lượt này. Không có AWS mutation hoặc Git push.
+**Chưa thể xác nhận “clone về dùng ngay” hoặc release-ready multiplayer:**
+build Server/Launcher/Unity và protocol smoke đã chạy; TC05 local TLS fail-closed
+4/4, TC06/11/12 packet capture PASS. TC04 mới có bằng chứng email delivery;
+TC02/03/07 chưa đạt đầy đủ; TC10 chỉ có bounded loopback checks. Launcher
+process không có cửa sổ UI truy cập được trong lần kiểm tra tiếp tục này.
+Trạng thái AWS/EIP trong báo cáo là lịch sử, chưa được đọc lại; không có AWS
+mutation hoặc Git push.
 
-Gameplay hiện có input TCP request/response, server-pushed snapshot/event
-stream, client queue giới hạn và interpolation. Còn thiếu track-aware
-collision/checkpoint authority, spectate, durable reconnect, OTP runtime,
-multi-client test và tải đo thật. Báo cáo không xác nhận độ ổn định hoặc khả
-năng chịu tải production.
+Gameplay prototype có server-side motion/gate checks, event/snapshot stream,
+interpolation, spectate/reconnect và server-side winner reward trong source.
+Physics còn đơn giản, timer/elimination chưa hoàn toàn server-authoritative,
+room state không bền sau restart, và chưa có trận live hoặc tải đo thật.
 
 ## 15. Đối chiếu đề bài
 
 | Yêu cầu | Trạng thái | Bằng chứng/giới hạn |
 |---|---|---|
 | Client có GUI; ít nhất hai client | PARTIAL | Hai Unity GUI main menu mở đồng thời; chưa login hoặc chạy trận. [TC02 log](docs/evidence/TC02-two-client-gui.log) |
-| Server và database | SOURCE IMPLEMENTED; RUNTIME BLOCKED | Server C# Release build đạt; SQL Server chưa chạy được trên máy kiểm thử. |
+| Server và database | SOURCE IMPLEMENTED; LOCAL TEST DB USED | Server Release build đạt; TC05 dùng riêng `DanToPhongDB_Test`; đăng nhập/OTP end-to-end chưa xác minh đầy đủ. |
 | Network stack nhóm tự viết | SOURCE IMPLEMENTED | Framing/protocol TCP/TLS tự viết; không có UDP hoặc thư viện networking bên thứ ba trong source. |
 | Port và cấu trúc message | DOCUMENTED | TCP 9000, length-prefix BE, JSON, `GAME_STREAM`, event/snapshot, giới hạn ở [protocol](docs/protocol.md). |
-| Đa kết nối | SOURCE IMPLEMENTED; LOAD BLOCKED | Async accept và giới hạn session 128; TC10 chưa chạy. |
-| OTP, login limiter, brute-force | SOURCE IMPLEMENTED; E2E BLOCKED | Có SQL limiter theo account+IP và OTP logic; cần DB/SMTP giả để xác minh thực. |
-| Đồng bộ game, event và interpolation | SOURCE IMPLEMENTED; LIVE TEST BLOCKED | Smoke wire test TC09; chưa có trận live, track-aware authority hay spectate/resume. |
-| Internet/TLS/DPI | BLOCKED | TC05/TC06/TC12 chưa chạy với server/certificate thực. |
-| Tài liệu, sơ đồ và bằng chứng | PARTIAL | Tài liệu/evidence cập nhật, XML 4 sơ đồ hợp lệ; PNG Draw.io và DPI captures chưa có (CLI chưa cài). |
+| Đa kết nối | SOURCE IMPLEMENTED; PARTIAL | Async accept/giới hạn session 128; 50 anonymous loopback PING và malformed-frame checks PASS; sustained/authenticated load chưa chạy. |
+| OTP, login limiter, brute-force | SOURCE IMPLEMENTED; PARTIAL | Mail delivery có bằng chứng; nhập OTP và login limiter chưa được kiểm chứng runtime. |
+| Đồng bộ game, event và interpolation | SOURCE IMPLEMENTED; LIVE TEST BLOCKED | TC09 wire smoke PASS; có server-side gates và in-memory spectate/reconnect trong source; chưa xác minh trận live. |
+| Internet/TLS/DPI | PARTIAL | TC05 loopback 4/4 và TC06/11/12 capture PASS; hai client Internet chưa thử. |
+| Tài liệu, sơ đồ và bằng chứng | PARTIAL | Bảng evidence cập nhật; 4 Draw.io PNG đã xuất; các TC BLOCKED/PARTIAL vẫn thiếu bằng chứng cần thiết. |
 
 ## 16. Phụ lục
 
