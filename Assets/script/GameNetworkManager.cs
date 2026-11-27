@@ -99,6 +99,13 @@ public class GameNetworkManager : MonoBehaviour
 
         TuDongTimSpawnPointsNeuThieu();
         daTaoXe = false;
+        if (LauncherArgs.IsSpectating)
+        {
+            TcpGameplaySync sync = GetComponent<TcpGameplaySync>();
+            if (sync == null) sync = gameObject.AddComponent<TcpGameplaySync>();
+            sync.ConfigureSpectator();
+            return;
+        }
         StartCoroutine(ChoVaoPhongVaSinhXe());
     }
 

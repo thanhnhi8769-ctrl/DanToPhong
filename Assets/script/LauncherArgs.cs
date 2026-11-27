@@ -13,6 +13,7 @@ public static class LauncherArgs
     public static string RoomMap = "";
     public static int SpawnIndex;
     public static bool IsRoomHost;
+    public static bool IsSpectating;
     public static string RacerId = "";
     public static string FullName = "";
     public static bool HasLauncher;

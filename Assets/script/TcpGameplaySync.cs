@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
+using Unity.Cinemachine;
 
 public sealed class TcpGameplaySync : MonoBehaviour
 {
@@ -22,6 +23,8 @@ public sealed class TcpGameplaySync : MonoBehaviour
     private float nextStreamAttempt;
 
     public static event Action<string> GameFinished;
+    public static event Action<int> CheckpointCollected;
+    public static event Action<string> PlayerEliminated;
 
     public void ConfigureLocalCar(GameObject car, int vehicleIndex, int updatesPerSecond)
     {
@@ -39,6 +42,14 @@ public sealed class TcpGameplaySync : MonoBehaviour
             body.useGravity = false;
         }
         StartCoroutine(SendInputLoop());
+    }
+
+    public void ConfigureSpectator()
+    {
+        if (configured)
+            return;
+        configured = true;
+        StartCoroutine(SpectatorStreamLoop());
     }
 
     public System.Threading.Tasks.Task<Resp> SendGameEventAsync(Req gameEvent)
@@ -69,17 +80,12 @@ public sealed class TcpGameplaySync : MonoBehaviour
                 }
 
                 scooter controls = localCar.GetComponent<scooter>();
-                Vector3 position = localCar.transform.position;
                 Resp response = null;
                 var request = new Req
                 {
                     command = "GAME_INPUT",
                     roomId = LauncherArgs.Room,
                     vehicleIndex = localVehicleIndex,
-                    positionX = position.x,
-                    positionY = position.y,
-                    positionZ = position.z,
-                    rotationY = localCar.transform.eulerAngles.y,
                     throttle = controls != null ? controls.NetworkThrottle : 0f,
                     steer = controls != null ? controls.NetworkSteer : 0f,
                     clientTick = ++clientTick,
@@ -100,6 +106,28 @@ public sealed class TcpGameplaySync : MonoBehaviour
             }
 
             yield return new WaitForSecondsRealtime(interval);
+        }
+    }
+
+    private IEnumerator SpectatorStreamLoop()
+    {
+        while (configured)
+        {
+            if (ServerClient.Ready && !streamReady && !streamStarting && Time.unscaledTime >= nextStreamAttempt)
+            {
+                streamStarting = true;
+                Task startTask = stateChannel.StartReceivingAsync();
+                yield return new WaitUntil(() => startTask.IsCompleted);
+                streamStarting = false;
+                if (startTask.Status == TaskStatus.RanToCompletion)
+                    streamReady = true;
+                else
+                {
+                    nextStreamAttempt = Time.unscaledTime + 5f;
+                    Debug.LogWarning("[TCP gameplay] Spectator stream subscription failed; retrying.");
+                }
+            }
+            yield return new WaitForSecondsRealtime(0.25f);
         }
     }
 
@@ -154,6 +182,15 @@ public sealed class TcpGameplaySync : MonoBehaviour
                     body.useGravity = false;
                 }
                 replica.Object = remote;
+                if (LauncherArgs.IsSpectating)
+                {
+                    CinemachineCamera camera = FindFirstObjectByType<CinemachineCamera>();
+                    if (camera != null)
+                    {
+                        Transform followTarget = remote.transform.Find("pointFollowTarget");
+                        camera.Target.TrackingTarget = followTarget != null ? followTarget : remote.transform;
+                    }
+                }
             }
 
             AddSample(replica, state, now);
@@ -233,9 +270,17 @@ public sealed class TcpGameplaySync : MonoBehaviour
 
     private void ApplyGameEvent(Resp response)
     {
-        if (response.gameEvent != null &&
-            string.Equals(response.gameEvent.type, "FINISH", StringComparison.OrdinalIgnoreCase))
+        if (response.gameEvent == null)
+            return;
+
+        if (string.Equals(response.gameEvent.type, "FINISH", StringComparison.OrdinalIgnoreCase))
             RaiseGameFinished(response.gameEvent.username);
+        else if (string.Equals(response.gameEvent.type, "CHECKPOINT", StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals(response.gameEvent.username, LauncherArgs.User, StringComparison.OrdinalIgnoreCase))
+            CheckpointCollected?.Invoke(response.gameEvent.checkpointIndex);
+        else if (string.Equals(response.gameEvent.type, "PLAYER_ELIMINATED", StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals(response.gameEvent.username, LauncherArgs.User, StringComparison.OrdinalIgnoreCase))
+            PlayerEliminated?.Invoke(response.gameEvent.username);
     }
 
     private void RaiseGameFinished(string username)
@@ -244,6 +289,21 @@ public sealed class TcpGameplaySync : MonoBehaviour
             return;
         finishEventRaised = true;
         GameFinished?.Invoke(username ?? string.Empty);
+        _ = RefreshInventoryAsync();
+    }
+
+    private static async Task RefreshInventoryAsync()
+    {
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req { command = "LAYKHO" });
+            if (response == null || !response.success)
+                Debug.LogWarning("[TCP gameplay] Could not refresh the server-authoritative coin balance.");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("[TCP gameplay] Coin balance refresh failed: " + ex.GetType().Name);
+        }
     }
 
     private void OnDestroy()

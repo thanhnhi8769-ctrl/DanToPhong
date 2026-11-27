@@ -51,7 +51,8 @@ namespace DanToPhong.Server
                 IF OBJECT_ID('dbo.AuthTokens') IS NULL OR
                    OBJECT_ID('dbo.VerificationCodes') IS NULL OR
                       OBJECT_ID('dbo.RequestIdempotency') IS NULL OR
-                      OBJECT_ID('dbo.LoginRateLimits') IS NULL
+                      OBJECT_ID('dbo.LoginRateLimits') IS NULL OR
+                      OBJECT_ID('dbo.GameMatchRewards') IS NULL
                 BEGIN
                     THROW 51000, 'Required security-state tables are missing.', 1;
                 END;", db))
@@ -81,6 +82,16 @@ namespace DanToPhong.Server
                   SelectedMap     NVARCHAR(50)   NOT NULL CONSTRAINT DF_NguoiDung_Map DEFAULT 'game',
                   NgayTao         DATETIME2      NOT NULL CONSTRAINT DF_NguoiDung_NgayTao DEFAULT SYSDATETIME(),
                   LanDangNhapCuoi DATETIME2      NULL
+              );",
+
+            @"IF OBJECT_ID('dbo.GameMatchRewards') IS NULL
+              CREATE TABLE dbo.GameMatchRewards (
+                  MatchId UNIQUEIDENTIFIER NOT NULL,
+                  UserId INT NOT NULL,
+                  CoinsAwarded INT NOT NULL,
+                  AwardedAt DATETIME2 NOT NULL CONSTRAINT DF_GameMatchRewards_AwardedAt DEFAULT SYSUTCDATETIME(),
+                  CONSTRAINT PK_GameMatchRewards PRIMARY KEY (MatchId, UserId),
+                  CONSTRAINT FK_GameMatchRewards_NguoiDung FOREIGN KEY (UserId) REFERENCES dbo.NguoiDung(UserId)
               );",
 
             // Bảng đã có từ trước (script cũ của nhóm): bổ sung cột mới

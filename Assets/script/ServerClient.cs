@@ -8,6 +8,8 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using UnityEngine;
 
 // Tên field viết thường chữ đầu để JsonUtility khớp JSON camelCase của server.
@@ -33,6 +35,8 @@ public class Req
     public long sequence;
     public float positionX, positionY, positionZ, rotationX, rotationY, rotationZ, rotationW;
     public float velocityX, velocityY, velocityZ;
+    public int checkpointsCompleted;
+    public bool isEliminated, isFinished, isDisconnected;
     public long serverTimestampMs;
 }
 [Serializable] public class GameEventDto
@@ -48,7 +52,7 @@ public class Req
 }
 [Serializable] public class Resp
 {
-    public bool success, isHost, isRacing, gameFinished;
+    public bool success, isHost, isSpectator, isRacing, gameFinished;
     public string code, command, message, roomId, mapName, winnerUsername;
     public int playerCount, maxPlayers, spawnIndex;
     public int winnerUserId;
@@ -87,6 +91,29 @@ public static class ServerClient
 
     public static InvDto Cache;
     public static bool Ready => Cache != null && ns != null;
+
+    public static bool ValidateServerCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors errors)
+    {
+        if (errors == SslPolicyErrors.None)
+            return true;
+        if (certificate == null || errors != SslPolicyErrors.RemoteCertificateChainErrors)
+            return false;
+
+        string expectedPin = Environment.GetEnvironmentVariable("DANTOPHONG_TLS_TEST_CERT_SHA256") ?? "";
+        if (string.IsNullOrWhiteSpace(expectedPin))
+            return false;
+
+        using (SHA256 sha256 = SHA256.Create())
+        {
+            string actualPin = BitConverter.ToString(sha256.ComputeHash(certificate.GetRawCertData())).Replace("-", "");
+            return string.Equals(
+                actualPin, expectedPin.Replace(":", "").Replace("-", "").Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     // Bắn khi kho (xu / xe / map) khác với Cache hiện tại (kể cả khi Cache vừa bị game sửa lạc quan rồi server từ chối)
     public static event Action DaCapNhat;
@@ -185,7 +212,7 @@ public static class ServerClient
             stream = client.GetStream();
             if (LauncherArgs.UseTls)
             {
-                var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
+                var ssl = new SslStream(stream, leaveInnerStreamOpen: false, ValidateServerCertificate);
                 try
                 {
                     Task authenticate = ssl.AuthenticateAsClientAsync(LauncherArgs.Host);

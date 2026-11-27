@@ -16,4 +16,8 @@
     <ProjectReference Include="..\DanToPhong.Protocol\DanToPhong.Protocol.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="RaceTrackCatalog.json" />
+  </ItemGroup>
+
 </Project>

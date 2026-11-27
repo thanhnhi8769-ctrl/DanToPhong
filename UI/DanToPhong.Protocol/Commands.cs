@@ -39,6 +39,8 @@
         public const string GameInput = "GAME_INPUT";
         public const string GameStream = "GAME_STREAM";
         public const string GameSnapshot = "GAME_SNAPSHOT";
+        public const string GameSpectate = "GAME_SPECTATE";
+        public const string GameReconnect = "GAME_RECONNECT";
         public const string ChatSend = "CHAT_SEND";
         public const string ChatPoll = "CHAT_POLL";
         public const string GameEvent = "GAME_EVENT";

@@ -127,6 +127,7 @@ public class GameManager : MonoBehaviour
 
     private bool cheDoNhieuNguoi = false;
     private readonly HashSet<int> checkpointRequestsPending = new HashSet<int>();
+    private bool eliminationRequestPending;
 
     // Cho các script khác (HelpSystem...) biết đang chơi 1 người hay nhiều người
     public bool CheDoNhieuNguoi { get { return cheDoNhieuNguoi; } }
@@ -288,11 +289,15 @@ public class GameManager : MonoBehaviour
     {
         if (instance == null) instance = this;
         TcpGameplaySync.GameFinished += OnServerGameFinished;
+        TcpGameplaySync.CheckpointCollected += OnServerCheckpointCollected;
+        TcpGameplaySync.PlayerEliminated += OnServerPlayerEliminated;
     }
 
     private void OnDisable()
     {
         TcpGameplaySync.GameFinished -= OnServerGameFinished;
+        TcpGameplaySync.CheckpointCollected -= OnServerCheckpointCollected;
+        TcpGameplaySync.PlayerEliminated -= OnServerPlayerEliminated;
         if (instance == this) instance = null;
     }
 
@@ -885,14 +890,7 @@ public class GameManager : MonoBehaviour
         KetNoiNutResultPanel();
 
         danhSachDongXu = GameObject.FindGameObjectsWithTag("CheckPoint");
-        System.Array.Sort(danhSachDongXu, (a, b) =>
-        {
-            int byName = string.CompareOrdinal(a.name, b.name);
-            if (byName != 0) return byName;
-            int byX = a.transform.position.x.CompareTo(b.transform.position.x);
-            if (byX != 0) return byX;
-            return a.transform.position.z.CompareTo(b.transform.position.z);
-        });
+        System.Array.Sort(danhSachDongXu, CompareCheckpoints);
 
         if (eliminatePanelObject == null)
             eliminatePanelObject = TimObjectTrongCanvas("eliminate");
@@ -1947,51 +1945,42 @@ public class GameManager : MonoBehaviour
         if (other == null || !other.gameObject.activeSelf || !daBatDauDua || ketThucGame || winGame || daBiLoai)
             return;
 
-        if (!cheDoNhieuNguoi)
-        {
-            other.gameObject.SetActive(false);
-            QuaCheckPoint();
+        if (cheDoNhieuNguoi)
             return;
-        }
 
-        int index = System.Array.IndexOf(danhSachDongXu, other.gameObject) + 1;
-        if (index <= 0 || !checkpointRequestsPending.Add(index))
-            return;
-        SubmitCheckpointAsync(other, index);
+        other.gameObject.SetActive(false);
+        QuaCheckPoint();
     }
 
-    private async void SubmitCheckpointAsync(Collider checkpoint, int index)
+    private static int CompareCheckpoints(GameObject a, GameObject b)
     {
-        try
-        {
-            TcpGameplaySync sync = FindFirstObjectByType<TcpGameplaySync>();
-            if (sync == null)
-                throw new InvalidOperationException("TCP gameplay synchronizer is unavailable.");
-            Resp response = await sync.SendGameEventAsync(new Req
-            {
-                command = "GAME_EVENT",
-                gameEventType = "CHECKPOINT",
-                checkpointIndex = index,
-                totalCheckpoints = danhSachDongXu != null ? danhSachDongXu.Length : 0
-            });
-            if (response != null && response.success && checkpoint != null)
-            {
-                checkpoint.gameObject.SetActive(false);
-                QuaCheckPoint();
-            }
-            else
-            {
-                Debug.LogWarning("[GameManager] Server rejected checkpoint event.");
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogWarning("[GameManager] Checkpoint event failed: " + ex.GetType().Name);
-        }
-        finally
-        {
-            checkpointRequestsPending.Remove(index);
-        }
+        int byIndex = GetCheckpointIndex(a.name).CompareTo(GetCheckpointIndex(b.name));
+        if (byIndex != 0) return byIndex;
+        int byName = string.CompareOrdinal(a.name, b.name);
+        if (byName != 0) return byName;
+        int byX = a.transform.position.x.CompareTo(b.transform.position.x);
+        return byX != 0 ? byX : a.transform.position.z.CompareTo(b.transform.position.z);
+    }
+
+    private static int GetCheckpointIndex(string name)
+    {
+        int open = name.LastIndexOf('(');
+        if (open >= 0 && name.EndsWith(")", StringComparison.Ordinal) &&
+            int.TryParse(name.Substring(open + 1, name.Length - open - 2), out int index))
+            return index;
+        return 0;
+    }
+
+    private void OnServerCheckpointCollected(int index)
+    {
+        if (!cheDoNhieuNguoi || danhSachDongXu == null || index < 1 || index > danhSachDongXu.Length)
+            return;
+
+        GameObject checkpoint = danhSachDongXu[index - 1];
+        if (checkpoint == null || !checkpoint.activeSelf)
+            return;
+        checkpoint.SetActive(false);
+        QuaCheckPoint();
     }
 
     public void ChamNuoc()
@@ -2028,30 +2017,7 @@ public class GameManager : MonoBehaviour
             XuLyThang(false);
             return;
         }
-        SubmitFinishAsync();
-    }
-
-    private async void SubmitFinishAsync()
-    {
-        try
-        {
-            TcpGameplaySync sync = FindFirstObjectByType<TcpGameplaySync>();
-            if (sync == null)
-                throw new InvalidOperationException("TCP gameplay synchronizer is unavailable.");
-            Resp response = await sync.SendGameEventAsync(new Req
-            {
-                command = "GAME_EVENT",
-                gameEventType = "FINISH"
-            });
-            if (response != null && response.success && response.gameFinished)
-                OnServerGameFinished(response.winnerUsername);
-            else
-                Debug.LogWarning("[GameManager] Server rejected finish event.");
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("[GameManager] Finish event failed: " + ex.GetType().Name);
-        }
+        Debug.Log("[GameManager] Multiplayer finish is validated by the server.");
     }
 
     private void OnServerGameFinished(string winnerUsername)
@@ -2069,6 +2035,14 @@ public class GameManager : MonoBehaviour
         string name = string.IsNullOrWhiteSpace(winnerUsername) ? "ANOTHER PLAYER" : winnerUsername.ToUpperInvariant();
         HienKetQuaThua(name + " WON THE RACE!", true);
     }
+
+    private void OnServerPlayerEliminated(string username)
+    {
+        eliminationRequestPending = false;
+        if (cheDoNhieuNguoi && string.Equals(username, LauncherArgs.User, StringComparison.OrdinalIgnoreCase))
+            XuLyBanThanBiLoaiNoiBo();
+    }
+
     private void XuLyThang(bool thangVoiLyDoConLaiCuoiCung)
     {
         if (!daBatDauDua || ketThucGame || winGame || daBiLoai || daCoNguoiThang) return;
@@ -2077,8 +2051,8 @@ public class GameManager : MonoBehaviour
         winGame = true;
         ketThucGame = true;
 
-        int xuNhan = cheDoNhieuNguoi ? thuongNguoiThang : thuongChoiSolo;
-        if (!daNhanThuongTranNay && xuNhan > 0)
+        int xuNhan = cheDoNhieuNguoi ? 0 : thuongChoiSolo;
+        if (!cheDoNhieuNguoi && !daNhanThuongTranNay && xuNhan > 0)
         {
             daNhanThuongTranNay = true;
             PlayerInventory.AddCoins(xuNhan);
@@ -2099,6 +2073,45 @@ public class GameManager : MonoBehaviour
     }
 
     private void XuLyBanThanBiLoai()
+    {
+        if (!cheDoNhieuNguoi)
+        {
+            XuLyBanThanBiLoaiNoiBo();
+            return;
+        }
+        if (eliminationRequestPending || daBiLoai || ketThucGame || winGame)
+            return;
+
+        eliminationRequestPending = true;
+        SubmitEliminationAsync();
+    }
+
+    private async void SubmitEliminationAsync()
+    {
+        try
+        {
+            TcpGameplaySync sync = FindFirstObjectByType<TcpGameplaySync>();
+            if (sync == null)
+                throw new InvalidOperationException("TCP gameplay synchronizer is unavailable.");
+            Resp response = await sync.SendGameEventAsync(new Req
+            {
+                command = "GAME_EVENT",
+                gameEventType = "ELIMINATE"
+            });
+            if (response == null || !response.success)
+            {
+                eliminationRequestPending = false;
+                Debug.LogWarning("[GameManager] Server rejected the elimination event.");
+            }
+        }
+        catch (Exception ex)
+        {
+            eliminationRequestPending = false;
+            Debug.LogWarning("[GameManager] Elimination event failed: " + ex.GetType().Name);
+        }
+    }
+
+    private void XuLyBanThanBiLoaiNoiBo()
     {
         if (daBiLoai || ketThucGame || winGame) return;
         daBiLoai = true;

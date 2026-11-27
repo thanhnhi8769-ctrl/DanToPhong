@@ -45,7 +45,8 @@ namespace DanToPhong.Server
             string password = Environment.GetEnvironmentVariable("DANTOPHONG_CERT_PASSWORD") ?? string.Empty;
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
                 throw new InvalidOperationException("TLS is enabled but DANTOPHONG_CERT_PATH is missing or unavailable.");
-            X509Certificate2 certificate = X509CertificateLoader.LoadPkcs12FromFile(path, password, X509KeyStorageFlags.EphemeralKeySet);
+            X509Certificate2 certificate = X509CertificateLoader.LoadPkcs12FromFile(
+                path, password, X509KeyStorageFlags.UserKeySet);
             if (!certificate.HasPrivateKey || DateTime.UtcNow < certificate.NotBefore.ToUniversalTime() || DateTime.UtcNow >= certificate.NotAfter.ToUniversalTime())
             {
                 certificate.Dispose();
@@ -113,9 +114,10 @@ namespace DanToPhong.Server
                 throw;
             }
 
-            var listener = new TcpListener(IPAddress.Any, Port);
+            IPAddress listenAddress = UseTls ? IPAddress.Any : IPAddress.Loopback;
+            var listener = new TcpListener(listenAddress, Port);
             listener.Start();
-            Console.WriteLine($"[TCP] Server listening on port {Port}; TLS={(UseTls ? "enabled" : "disabled")}.");
+            Console.WriteLine($"[TCP] Server listening on {listenAddress}:{Port}; TLS={(UseTls ? "enabled" : "disabled")}.");
 
             try
             {
@@ -234,7 +236,7 @@ namespace DanToPhong.Server
                         !ActiveSessions.Values.Any(s => s != session && s.AuthenticatedUserId == session.AuthenticatedUserId))
                     {
                         RoomRegistry.RemoveByOwner(session.AuthenticatedUserId.Value);
-                        TcpGameRoomRegistry.RemoveUser(session.AuthenticatedUserId.Value);
+                        TcpGameRoomRegistry.DisconnectUser(session.AuthenticatedUserId.Value);
                     }
                 }
                 finally
@@ -388,11 +390,13 @@ namespace DanToPhong.Server
                     Commands.LeaveGameRoom => HandleLeaveGameRoom(session),
                     Commands.GameRoomState => HandleGameRoomState(session),
                     Commands.StartGameRoom => HandleStartGameRoom(session, req),
-                    Commands.GameInput => HandleGameInput(session, req),
+                    Commands.GameInput => await HandleGameInputAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.GameStream => HandleGameStream(session),
+                    Commands.GameSpectate => HandleGameSpectate(session, req),
+                    Commands.GameReconnect => HandleGameReconnect(session, req),
                     Commands.ChatSend => HandleChatSend(session, req),
                     Commands.ChatPoll => HandleChatPoll(session, req),
-                    Commands.GameEvent => HandleGameEvent(session, req),
+                    Commands.GameEvent => await HandleGameEventAsync(session, req, repo, token).ConfigureAwait(false),
 
                     _ => new ResponsePacket
                     {
@@ -472,11 +476,35 @@ namespace DanToPhong.Server
             return TcpGameRoomRegistry.Start(session.AuthenticatedUserId.Value, request);
         }
 
-        private static ResponsePacket HandleGameInput(ClientSession session, RequestPacket request)
+        private static async Task<ResponsePacket> HandleGameInputAsync(
+            ClientSession session,
+            RequestPacket request,
+            NguoiDungRepository repo,
+            CancellationToken token)
         {
             if (!session.AuthenticatedUserId.HasValue)
                 return Unauth();
-            return TcpGameRoomRegistry.SubmitInput(session.AuthenticatedUserId.Value, request);
+
+            int userId = session.AuthenticatedUserId.Value;
+            ResponsePacket response = TcpGameRoomRegistry.SubmitInput(userId, request);
+            await AwardWinnerIfNeededAsync(userId, repo, token).ConfigureAwait(false);
+            return response;
+        }
+
+        private static ResponsePacket HandleGameSpectate(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            if (!RoomCodeRegex.IsMatch((request.RoomId ?? string.Empty).Trim()))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid room code." };
+            return TcpGameRoomRegistry.Spectate(session.AuthenticatedUserId.Value, request.RoomId!);
+        }
+
+        private static ResponsePacket HandleGameReconnect(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.Reconnect(session.AuthenticatedUserId.Value, request.RoomId);
         }
 
         private static ResponsePacket HandleGameStream(ClientSession session)
@@ -517,11 +545,41 @@ namespace DanToPhong.Server
             return TcpGameRoomRegistry.PollChat(session.AuthenticatedUserId.Value, request.AfterMessageId ?? 0);
         }
 
-        private static ResponsePacket HandleGameEvent(ClientSession session, RequestPacket request)
+        private static async Task<ResponsePacket> HandleGameEventAsync(
+            ClientSession session,
+            RequestPacket request,
+            NguoiDungRepository repo,
+            CancellationToken token)
         {
             if (!session.AuthenticatedUserId.HasValue)
                 return Unauth();
-            return TcpGameRoomRegistry.SubmitEvent(session.AuthenticatedUserId.Value, request);
+
+            int userId = session.AuthenticatedUserId.Value;
+            ResponsePacket response = TcpGameRoomRegistry.SubmitEvent(userId, request);
+            await AwardWinnerIfNeededAsync(userId, repo, token).ConfigureAwait(false);
+            return response;
+        }
+
+        private static async Task AwardWinnerIfNeededAsync(
+            int requestingUserId,
+            NguoiDungRepository repo,
+            CancellationToken token)
+        {
+            if (TcpGameRoomRegistry.TryBeginWinnerReward(
+                    requestingUserId, out string roomCode, out Guid matchId, out int winnerUserId))
+            {
+                try
+                {
+                    await repo.AwardRaceWinnerAsync(
+                        matchId, winnerUserId, TcpGameRoomRegistry.WinnerRewardCoins, token).ConfigureAwait(false);
+                    TcpGameRoomRegistry.CompleteWinnerReward(roomCode, succeeded: true);
+                }
+                catch
+                {
+                    TcpGameRoomRegistry.CompleteWinnerReward(roomCode, succeeded: false);
+                    throw;
+                }
+            }
         }
 
         private static async Task<ResponsePacket> HandleLogoutAsync(ClientSession session, ServerStateRepository state, CancellationToken token)

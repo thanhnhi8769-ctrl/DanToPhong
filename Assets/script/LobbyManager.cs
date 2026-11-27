@@ -122,8 +122,17 @@ public class LobbyManager : MonoBehaviour
         });
         if (response == null || !response.success)
         {
-            SetStatus(response != null ? response.message : "Joining room failed.");
-            return;
+            Resp spectate = await ServerClient.CallAsync(new Req
+            {
+                command = "GAME_SPECTATE",
+                roomId = code
+            });
+            if (spectate == null || !spectate.success)
+            {
+                SetStatus(spectate != null ? spectate.message : response != null ? response.message : "Joining room failed.");
+                return;
+            }
+            response = spectate;
         }
 
         ApplyRoomState(response);
@@ -221,6 +230,7 @@ public class LobbyManager : MonoBehaviour
         LauncherArgs.RoomMap = response.mapName ?? PlayerInventory.GetSelectedMap();
         LauncherArgs.SpawnIndex = response.spawnIndex;
         LauncherArgs.IsRoomHost = response.isHost;
+        LauncherArgs.IsSpectating = response.isSpectator;
 
         if (roomInput != null && !string.IsNullOrWhiteSpace(LauncherArgs.Room))
             roomInput.text = LauncherArgs.Room;
@@ -231,8 +241,10 @@ public class LobbyManager : MonoBehaviour
         if (copyButton != null)
             copyButton.SetActive(!string.IsNullOrWhiteSpace(LauncherArgs.Room));
 
-        SetStatus($"Room {LauncherArgs.Room}: {response.playerCount}/{response.maxPlayers} players" +
-                  (response.isHost ? " (host)" : string.Empty));
+        SetStatus(response.isSpectator
+            ? $"Spectating room {LauncherArgs.Room}."
+            : $"Room {LauncherArgs.Room}: {response.playerCount}/{response.maxPlayers} players" +
+              (response.isHost ? " (host)" : string.Empty));
     }
 
     private void LoadGame(Resp response)

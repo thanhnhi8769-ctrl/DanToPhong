@@ -302,6 +302,36 @@ namespace DanToPhong.Server
             return (false, ErrorCodes.InsufficientCoins, "Số xu hiện tại không đủ.", user);
         }
 
+        internal async Task AwardRaceWinnerAsync(Guid matchId, int userId, int coins, CancellationToken token)
+        {
+            if (coins < 0)
+                throw new ArgumentOutOfRangeException(nameof(coins));
+
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(
+                IsolationLevel.Serializable, token).ConfigureAwait(false);
+
+            await using var cmd = new SqlCommand(@"
+                IF NOT EXISTS (
+                    SELECT 1 FROM dbo.GameMatchRewards WITH (UPDLOCK, HOLDLOCK)
+                    WHERE MatchId=@MatchId AND UserId=@UserId
+                )
+                BEGIN
+                    INSERT dbo.GameMatchRewards (MatchId, UserId, CoinsAwarded)
+                    VALUES (@MatchId, @UserId, @Coins);
+                    UPDATE dbo.NguoiDung SET Coins=Coins+@Coins WHERE UserId=@UserId;
+                    IF @@ROWCOUNT = 0
+                        THROW 51001, 'Race winner account was not found.', 1;
+                END;", conn, tx);
+            cmd.Parameters.Add("@MatchId", SqlDbType.UniqueIdentifier).Value = matchId;
+            cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+            cmd.Parameters.Add("@Coins", SqlDbType.Int).Value = coins;
+            await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            await tx.CommitAsync(token).ConfigureAwait(false);
+            XoaCacheKho(userId);
+        }
+
         internal async Task<ResponsePacket> CongTruXuTrongGiaoDichAsync(
             SqlConnection conn, SqlTransaction tx, int userId, int delta, CancellationToken token)
         {

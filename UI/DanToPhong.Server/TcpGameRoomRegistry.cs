@@ -11,7 +11,9 @@ namespace DanToPhong.Server
         private const int DefaultMaxPlayers = 6;
         private const double TickSeconds = 0.05;
         private const double InputTimeoutSeconds = 0.5;
-        private const float MaxWorldCoordinate = 100000f;
+        private const double DisconnectGraceSeconds = 120;
+        private const float VehicleCollisionRadius = 0.65f;
+        internal const int WinnerRewardCoins = 50;
         private static readonly object Gate = new();
         private static readonly Dictionary<string, GameRoom> Rooms = new(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, string> Membership = new();
@@ -21,6 +23,10 @@ namespace DanToPhong.Server
         {
             lock (Gate)
             {
+                string mapName = SanitizeMap(request.MapName);
+                if (!RaceTrackCatalog.TryGet(mapName, out RaceTrackCatalog.RaceTrack track))
+                    return Failure("The selected race track is unavailable.");
+
                 RemoveUserInternal(userId);
                 string code;
                 do
@@ -30,7 +36,7 @@ namespace DanToPhong.Server
                 } while (Rooms.ContainsKey(code));
 
                 int maxPlayers = Math.Clamp(request.MaxPlayers ?? DefaultMaxPlayers, 2, 8);
-                var room = new GameRoom(code, userId, username, maxPlayers, SanitizeMap(request.MapName));
+                var room = new GameRoom(code, userId, username, maxPlayers, track);
                 Rooms.Add(code, room);
                 Membership[userId] = code;
                 RecordEvent(room, "ROOM_CREATED", userId, username, 0);
@@ -44,10 +50,10 @@ namespace DanToPhong.Server
             {
                 if (!Rooms.TryGetValue(NormalizeCode(roomCode), out GameRoom? room))
                     return Failure("Room not found.");
-                if (room.IsRacing)
-                    return Failure("The game has already started.");
                 if (room.Players.ContainsKey(userId))
                     return ToResponse(room, userId, "Already in room.");
+                if (room.IsRacing)
+                    return Failure("The game has already started. Use spectate or reconnect.");
                 if (room.Players.Count >= room.MaxPlayers)
                     return Failure("Room is full.");
 
@@ -82,9 +88,34 @@ namespace DanToPhong.Server
                     return Failure("The game has already started.");
 
                 if (!string.IsNullOrWhiteSpace(request.MapName))
-                    room.MapName = request.MapName.Trim();
+                {
+                    if (!RaceTrackCatalog.TryGet(request.MapName.Trim(), out RaceTrackCatalog.RaceTrack selectedTrack))
+                        return Failure("The selected race track is unavailable.");
+                    room.Track = selectedTrack;
+                }
+
+                DateTime now = DateTime.UtcNow;
+                foreach (GamePlayer player in room.Players.Values)
+                {
+                    RaceTrackCatalog.RaceSpawn spawn = room.Track.Spawns[player.SpawnIndex % room.Track.Spawns.Length];
+                    player.X = spawn.X;
+                    player.Y = spawn.Y;
+                    player.Z = spawn.Z;
+                    player.Yaw = NormalizeAngle(spawn.Yaw);
+                    player.Speed = 0f;
+                    player.Throttle = 0f;
+                    player.Steer = 0f;
+                    player.Brake = false;
+                    player.Initialized = true;
+                    player.LastInputAt = now;
+                    player.LastClientTick = -1;
+                    player.NextCheckpoint = 0;
+                    player.IsEliminated = false;
+                    player.IsFinished = false;
+                    player.DisconnectedAt = null;
+                }
                 room.IsRacing = true;
-                room.LastSimulationAt = DateTime.UtcNow;
+                room.LastSimulationAt = now;
                 RecordEvent(room, "RACE_STARTED", userId, room.Players[userId].Username, 0);
                 return ToResponse(room, userId, "Game started.");
             }
@@ -109,32 +140,18 @@ namespace DanToPhong.Server
                     return Failure("You are not in a running game.");
                 if (!room.Players.TryGetValue(userId, out GamePlayer? player))
                     return Failure("Player is not in this room.");
-                if (!IsFinite(request.PositionX) || !IsFinite(request.PositionY) ||
-                    !IsFinite(request.PositionZ) || !IsFinite(request.RotationY) ||
-                    !IsFinite(request.Throttle) || !IsFinite(request.Steer) ||
+                if (room.WinnerUserId.HasValue || player.IsEliminated || player.DisconnectedAt.HasValue)
+                    return Failure("This player cannot submit input in the current race state.");
+                if (!IsFinite(request.Throttle) || !IsFinite(request.Steer) ||
                     !request.ClientTick.HasValue || !request.ClientTimestampMs.HasValue)
                     return Failure("Invalid game input.");
                 if (request.ClientTick.Value <= player.LastClientTick)
                     return Failure("Stale game input.");
+                if (Math.Abs(request.Throttle!.Value) > 1f || Math.Abs(request.Steer!.Value) > 1f)
+                    return Failure("Game input is outside the permitted range.");
 
-                if (!player.Initialized)
-                {
-                    float x = request.PositionX!.Value;
-                    float y = request.PositionY!.Value;
-                    float z = request.PositionZ!.Value;
-                    if (Math.Abs(x) > MaxWorldCoordinate || Math.Abs(y) > MaxWorldCoordinate ||
-                        Math.Abs(z) > MaxWorldCoordinate)
-                        return Failure("Initial position is out of bounds.");
-
-                    player.X = x;
-                    player.Y = y;
-                    player.Z = z;
-                    player.Yaw = NormalizeAngle(request.RotationY!.Value);
-                    player.Initialized = true;
-                }
-
-                player.Throttle = Math.Clamp(request.Throttle!.Value, -1f, 1f);
-                player.Steer = Math.Clamp(request.Steer!.Value, -1f, 1f);
+                player.Throttle = request.Throttle.Value;
+                player.Steer = request.Steer.Value;
                 player.Brake = request.Brake == true;
                 player.LastInputAt = DateTime.UtcNow;
                 player.LastClientTick = request.ClientTick.Value;
@@ -158,32 +175,105 @@ namespace DanToPhong.Server
                     return ToResponse(room, userId, "A winner has already been recorded.");
 
                 string eventType = (request.GameEventType ?? string.Empty).Trim().ToUpperInvariant();
-                if (eventType == "CHECKPOINT")
+                if (eventType == "ELIMINATE")
                 {
-                    int total = request.TotalCheckpoints ?? -1;
-                    int checkpoint = request.CheckpointIndex ?? 0;
-                    if (total is < 0 or > 100 || checkpoint is < 1 or > 100 ||
-                        (player.TotalCheckpoints != 0 && player.TotalCheckpoints != total) ||
-                        checkpoint != player.NextCheckpoint + 1 || checkpoint > total)
-                        return Failure("Checkpoint sequence is invalid.");
-
-                    player.TotalCheckpoints = total;
-                    player.NextCheckpoint = checkpoint;
-                    RecordEvent(room, "CHECKPOINT", userId, player.Username, checkpoint);
-                    return ToResponse(room, userId, "Checkpoint accepted.");
+                    if (player.IsEliminated)
+                        return ToResponse(room, userId, "Player was already eliminated.");
+                    player.IsEliminated = true;
+                    player.Throttle = 0f;
+                    player.Steer = 0f;
+                    player.Brake = true;
+                    RecordEvent(room, "PLAYER_ELIMINATED", userId, player.Username, player.NextCheckpoint);
+                    GamePlayer[] activePlayers = room.Players.Values
+                        .Where(candidate => !candidate.IsEliminated && !candidate.DisconnectedAt.HasValue)
+                        .ToArray();
+                    if (activePlayers.Length == 1 && room.Players.Count > 1)
+                    {
+                        GamePlayer winner = activePlayers[0];
+                        winner.IsFinished = true;
+                        room.WinnerUserId = winner.UserId;
+                        room.WinnerUsername = winner.Username;
+                        RecordEvent(room, "FINISH", winner.UserId, winner.Username, winner.NextCheckpoint);
+                    }
+                    return ToResponse(room, userId, "Player eliminated.");
                 }
 
-                if (eventType == "FINISH")
-                {
-                    if (player.NextCheckpoint < player.TotalCheckpoints)
-                        return Failure("Required checkpoints have not been completed.");
-                    room.WinnerUserId = userId;
-                    room.WinnerUsername = player.Username;
-                    RecordEvent(room, "FINISH", userId, player.Username, 0);
-                    return ToResponse(room, userId, "Finish recorded.");
-                }
-
+                if (eventType is "CHECKPOINT" or "FINISH")
+                    return Failure("Checkpoint and finish events are determined by the server.");
                 return Failure("Unsupported game event.");
+            }
+        }
+
+        public static ResponsePacket Spectate(int userId, string roomCode)
+        {
+            lock (Gate)
+            {
+                if (!Rooms.TryGetValue(NormalizeCode(roomCode), out GameRoom? room) || !room.IsRacing)
+                    return Failure("A running game with that room code was not found.");
+                if (room.Players.ContainsKey(userId))
+                    return ToResponse(room, userId, "Player state restored.");
+
+                RemoveUserInternal(userId);
+                room.Spectators.Add(userId);
+                Membership[userId] = room.Code;
+                return ToResponse(room, userId, "Spectating game.");
+            }
+        }
+
+        public static ResponsePacket Reconnect(int userId, string? roomCode)
+        {
+            lock (Gate)
+            {
+                if (!TryGetMemberRoom(userId, out GameRoom? room) ||
+                    !string.IsNullOrWhiteSpace(roomCode) &&
+                    !string.Equals(room.Code, NormalizeCode(roomCode), StringComparison.OrdinalIgnoreCase) ||
+                    !room.IsRacing)
+                    return Failure("No reconnectable race was found.");
+
+                if (room.Spectators.Contains(userId))
+                    return ToResponse(room, userId, "Spectating state restored.");
+                if (!room.Players.TryGetValue(userId, out GamePlayer? player))
+                    return Failure("No reconnectable race was found.");
+
+                player.DisconnectedAt = null;
+                player.Throttle = 0f;
+                player.Steer = 0f;
+                player.Brake = true;
+                player.LastInputAt = DateTime.UtcNow;
+                RecordEvent(room, "PLAYER_RECONNECTED", userId, player.Username, player.NextCheckpoint);
+                return ToResponse(room, userId, "Race state restored.");
+            }
+        }
+
+        public static bool TryBeginWinnerReward(int userId, out string roomCode, out Guid matchId, out int winnerUserId)
+        {
+            lock (Gate)
+            {
+                if (TryGetMemberRoom(userId, out GameRoom? room) &&
+                    room.WinnerUserId.HasValue && !room.WinnerRewardInProgress && !room.WinnerRewarded)
+                {
+                    room.WinnerRewardInProgress = true;
+                    roomCode = room.Code;
+                    matchId = room.MatchId;
+                    winnerUserId = room.WinnerUserId.Value;
+                    return true;
+                }
+                roomCode = string.Empty;
+                matchId = Guid.Empty;
+                winnerUserId = 0;
+                return false;
+            }
+        }
+
+        public static void CompleteWinnerReward(string roomCode, bool succeeded)
+        {
+            lock (Gate)
+            {
+                if (Rooms.TryGetValue(roomCode, out GameRoom? room))
+                {
+                    room.WinnerRewardInProgress = false;
+                    room.WinnerRewarded = succeeded;
+                }
             }
         }
 
@@ -224,6 +314,25 @@ namespace DanToPhong.Server
         {
             lock (Gate)
                 RemoveUserInternal(userId);
+        }
+
+        public static void DisconnectUser(int userId)
+        {
+            lock (Gate)
+            {
+                if (!TryGetMemberRoom(userId, out GameRoom? room))
+                    return;
+                if (room.IsRacing && room.Players.TryGetValue(userId, out GamePlayer? player))
+                {
+                    player.DisconnectedAt = DateTime.UtcNow;
+                    player.Throttle = 0f;
+                    player.Steer = 0f;
+                    player.Brake = true;
+                    RecordEvent(room, "PLAYER_DISCONNECTED", userId, player.Username, player.NextCheckpoint);
+                    return;
+                }
+                RemoveUserInternal(userId);
+            }
         }
 
         public static List<GameEventDto> ReadEventsAfter(int userId, ref long lastEventId)
@@ -276,7 +385,17 @@ namespace DanToPhong.Server
 
         private static void Simulate(GameRoom room, DateTime now)
         {
-            if (!room.IsRacing)
+            if (!room.IsRacing || room.WinnerUserId.HasValue)
+                return;
+
+            int[] expiredPlayers = room.Players.Values
+                .Where(player => player.DisconnectedAt.HasValue &&
+                    (now - player.DisconnectedAt.Value).TotalSeconds > DisconnectGraceSeconds)
+                .Select(player => player.UserId)
+                .ToArray();
+            foreach (int expiredUserId in expiredPlayers)
+                RemoveUserInternal(expiredUserId);
+            if (!Rooms.ContainsKey(room.Code))
                 return;
 
             double elapsed = (now - room.LastSimulationAt).TotalSeconds;
@@ -289,7 +408,7 @@ namespace DanToPhong.Server
 
             foreach (GamePlayer player in room.Players.Values)
             {
-                if (!player.Initialized)
+                if (!player.Initialized || player.IsEliminated || player.DisconnectedAt.HasValue)
                     continue;
 
                 if ((now - player.LastInputAt).TotalSeconds > InputTimeoutSeconds)
@@ -301,6 +420,9 @@ namespace DanToPhong.Server
 
                 for (int i = 0; i < steps; i++)
                 {
+                    float previousX = player.X;
+                    float previousY = player.Y;
+                    float previousZ = player.Z;
                     float acceleration = player.Brake ? 18f : player.Throttle >= 0f ? 12f : 8f;
                     player.Speed += player.Throttle * acceleration * dt;
                     if (player.Brake || Math.Abs(player.Throttle) < 0.01f)
@@ -310,10 +432,62 @@ namespace DanToPhong.Server
                     float turnRate = 65f * Math.Min(Math.Abs(player.Speed) / 8f, 1f);
                     player.Yaw = NormalizeAngle(player.Yaw + player.Steer * turnRate * dt);
                     double radians = player.Yaw * Math.PI / 180d;
-                    player.X += (float)Math.Sin(radians) * player.Speed * dt;
-                    player.Z += (float)Math.Cos(radians) * player.Speed * dt;
+                    player.X += (float)Math.Cos(radians) * player.Speed * dt;
+                    player.Z -= (float)Math.Sin(radians) * player.Speed * dt;
+
+                    if (player.NextCheckpoint < room.Track.Checkpoints.Length &&
+                        CrossedGate(previousX, previousY, previousZ, player.X, player.Y, player.Z,
+                            room.Track.Checkpoints[player.NextCheckpoint]))
+                    {
+                        player.NextCheckpoint++;
+                        RecordEvent(room, "CHECKPOINT", player.UserId, player.Username, player.NextCheckpoint);
+                    }
+
+                    if (player.NextCheckpoint == room.Track.Checkpoints.Length &&
+                        CrossedGate(previousX, previousY, previousZ, player.X, player.Y, player.Z, room.Track.Finish))
+                    {
+                        player.IsFinished = true;
+                        room.WinnerUserId = player.UserId;
+                        room.WinnerUsername = player.Username;
+                        RecordEvent(room, "FINISH", player.UserId, player.Username, player.NextCheckpoint);
+                        return;
+                    }
                 }
             }
+        }
+
+        private static bool CrossedGate(
+            float startX, float startY, float startZ,
+            float endX, float endY, float endZ,
+            RaceTrackCatalog.RaceGate gate)
+        {
+            float radius = VehicleCollisionRadius;
+            float minX = gate.X - gate.ExtentX - radius;
+            float maxX = gate.X + gate.ExtentX + radius;
+            float minY = gate.Y - gate.ExtentY - 1f;
+            float maxY = gate.Y + gate.ExtentY + 1f;
+            float minZ = gate.Z - gate.ExtentZ - radius;
+            float maxZ = gate.Z + gate.ExtentZ + radius;
+            float near = 0f;
+            float far = 1f;
+
+            return ClipAxis(startX, endX - startX, minX, maxX, ref near, ref far) &&
+                   ClipAxis(startY, endY - startY, minY, maxY, ref near, ref far) &&
+                   ClipAxis(startZ, endZ - startZ, minZ, maxZ, ref near, ref far);
+        }
+
+        private static bool ClipAxis(float start, float delta, float min, float max, ref float near, ref float far)
+        {
+            if (Math.Abs(delta) < 0.0001f)
+                return start >= min && start <= max;
+
+            float first = (min - start) / delta;
+            float second = (max - start) / delta;
+            if (first > second)
+                (first, second) = (second, first);
+            near = Math.Max(near, first);
+            far = Math.Min(far, second);
+            return near <= far;
         }
 
         private static ResponsePacket ToResponse(GameRoom room, int userId, string message)
@@ -331,11 +505,12 @@ namespace DanToPhong.Server
                 MaxPlayers = room.MaxPlayers,
                 SpawnIndex = room.Players.TryGetValue(userId, out GamePlayer? currentPlayer) ? currentPlayer.SpawnIndex : 0,
                 IsHost = room.HostUserId == userId,
+                IsSpectator = room.Spectators.Contains(userId),
                 IsRacing = room.IsRacing,
                 GameFinished = room.WinnerUserId.HasValue,
                 WinnerUserId = room.WinnerUserId,
                 WinnerUsername = room.WinnerUsername,
-                MapName = room.MapName,
+                MapName = room.Track.Name,
                 ServerTick = serverTick,
                 ServerTimestampMs = timestamp,
                 GamePlayers = room.Players.Values
@@ -354,9 +529,13 @@ namespace DanToPhong.Server
                         RotationY = player.Yaw,
                         RotationZ = 0f,
                         RotationW = 1f,
-                        VelocityX = (float)Math.Sin(player.Yaw * Math.PI / 180d) * player.Speed,
+                        VelocityX = (float)Math.Cos(player.Yaw * Math.PI / 180d) * player.Speed,
                         VelocityY = 0f,
-                        VelocityZ = (float)Math.Cos(player.Yaw * Math.PI / 180d) * player.Speed,
+                        VelocityZ = -(float)Math.Sin(player.Yaw * Math.PI / 180d) * player.Speed,
+                        CheckpointsCompleted = player.NextCheckpoint,
+                        IsEliminated = player.IsEliminated,
+                        IsFinished = player.IsFinished,
+                        IsDisconnected = player.DisconnectedAt.HasValue,
                         ServerTimestampMs = timestamp
                     })
                     .ToList()
@@ -373,12 +552,13 @@ namespace DanToPhong.Server
                 return;
 
             room.Players.Remove(userId);
+            room.Spectators.Remove(userId);
             if (room.Players.Count == 0)
             {
                 Rooms.Remove(roomCode);
                 return;
             }
-            if (room.HostUserId == userId)
+            if (room.HostUserId == userId && room.Players.Count > 0)
                 room.HostUserId = room.Players.Keys.First();
         }
 
@@ -425,12 +605,12 @@ namespace DanToPhong.Server
 
         private sealed class GameRoom
         {
-            public GameRoom(string code, int hostUserId, string hostUsername, int maxPlayers, string mapName)
+            public GameRoom(string code, int hostUserId, string hostUsername, int maxPlayers, RaceTrackCatalog.RaceTrack track)
             {
                 Code = code;
                 HostUserId = hostUserId;
                 MaxPlayers = maxPlayers;
-                MapName = mapName;
+                Track = track;
                 Players.Add(hostUserId, new GamePlayer(hostUserId, hostUsername, 0));
                 NextSpawnIndex = 1;
             }
@@ -438,13 +618,17 @@ namespace DanToPhong.Server
             public string Code { get; }
             public int HostUserId { get; set; }
             public int MaxPlayers { get; }
-            public string MapName { get; set; }
+            public RaceTrackCatalog.RaceTrack Track { get; set; }
+            public Guid MatchId { get; } = Guid.NewGuid();
             public Dictionary<int, GamePlayer> Players { get; } = new();
+            public HashSet<int> Spectators { get; } = new();
             public List<RoomChatMessageDto> ChatMessages { get; } = new();
             public int NextSpawnIndex { get; set; }
             public long NextMessageId { get; set; }
             public int? WinnerUserId { get; set; }
             public string? WinnerUsername { get; set; }
+            public bool WinnerRewardInProgress { get; set; }
+            public bool WinnerRewarded { get; set; }
             public bool IsRacing { get; set; }
             public long ServerTick { get; set; }
             public DateTime LastSimulationAt { get; set; } = DateTime.UtcNow;
@@ -478,7 +662,9 @@ namespace DanToPhong.Server
             public DateTime LastInputAt { get; set; }
             public int LastClientTick { get; set; } = -1;
             public int NextCheckpoint { get; set; }
-            public int TotalCheckpoints { get; set; }
+            public bool IsEliminated { get; set; }
+            public bool IsFinished { get; set; }
+            public DateTime? DisconnectedAt { get; set; }
         }
     }
 }

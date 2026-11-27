@@ -115,7 +115,7 @@ public sealed class TcpStateChannel : IStateChannel
 
             if (LauncherArgs.UseTls)
             {
-                var ssl = new SslStream(newStream, leaveInnerStreamOpen: false);
+                var ssl = new SslStream(newStream, leaveInnerStreamOpen: false, ServerClient.ValidateServerCertificate);
                 Task authenticate = ssl.AuthenticateAsClientAsync(LauncherArgs.Host);
                 try
                 {
@@ -135,6 +135,14 @@ public sealed class TcpStateChannel : IStateChannel
             Resp authenticated = await ReceiveAsync();
             if (authenticated == null || !authenticated.success)
                 throw new InvalidOperationException("Gameplay stream token validation failed.");
+
+            Resp resumed = await ServerClient.CallAsync(new Req
+            {
+                command = "GAME_RECONNECT",
+                roomId = LauncherArgs.Room
+            });
+            if (resumed == null || !resumed.success)
+                throw new InvalidOperationException("Server could not restore the race membership.");
 
             await SendAsync(new Req { command = "GAME_STREAM", roomId = LauncherArgs.Room });
             Resp subscribed = await ReceiveAsync();

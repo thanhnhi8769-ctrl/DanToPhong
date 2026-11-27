@@ -79,6 +79,7 @@ namespace DanToPhong.Protocol
         public int MaxPlayers { get; set; }
         public int SpawnIndex { get; set; }
         public bool IsHost { get; set; }
+        public bool IsSpectator { get; set; }
         public bool IsRacing { get; set; }
         public bool GameFinished { get; set; }
         public int? WinnerUserId { get; set; }
@@ -168,6 +169,10 @@ namespace DanToPhong.Protocol
         public float VelocityX { get; set; }
         public float VelocityY { get; set; }
         public float VelocityZ { get; set; }
+        public int CheckpointsCompleted { get; set; }
+        public bool IsEliminated { get; set; }
+        public bool IsFinished { get; set; }
+        public bool IsDisconnected { get; set; }
         public long ServerTimestampMs { get; set; }
     }
 
