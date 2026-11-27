@@ -37,20 +37,22 @@
 
 ## TLS fail-closed
 
-`DANTOPHONG_USE_TLS` mặc định `true` ở Server và client; `server.json.example`
-cũng đặt `useTls: true`. Server từ chối khởi động nếu certificate PKCS#12 không
-được cấu hình hợp lệ. Listener TLS yêu cầu handshake trước frame ứng dụng nên
-plaintext bị đóng; Launcher và Unity dùng kiểm tra chứng chỉ mặc định của
-`SslStream`, gồm hostname/chain validation. Không có custom trust bypass.
+`DANTOPHONG_USE_TLS` mặc định `true`; client TLS bắt buộc có thumbprint SHA-256
+64 ký tự hex trong `server.json` (`certificateThumbprintSha256`), tính trên DER
+của leaf certificate. Launcher chuyển pin public sang Unity qua environment
+của tiến trình con, không đưa vào command line. SslStream vẫn kiểm hostname và
+thời hạn certificate; chỉ chain có lỗi duy nhất `UntrustedRoot` mới được chấp
+nhận nếu pin khớp. Pin thiếu/sai, hostname mismatch, certificate hết hạn hoặc
+lỗi chain khác đều bị từ chối. Khi đổi certificate, phải cập nhật pin client
+đồng bộ.
 
-TC05 lịch sử ghi nhận một deployment cũ nhận frame plaintext. Code/config đã
-được sửa, nhưng cần chạy lại TLS+TLS, TLS+plaintext, certificate sai và
-plaintext tường minh trên server mới trước khi kết luận PASS. Khi
-`DANTOPHONG_USE_TLS=false`, password/OTP/token vẫn là plaintext; chỉ dùng dữ
-liệu giả trong thử nghiệm cô lập, không dùng tài khoản thật qua Internet.
-
-TLS là server-authentication; chưa yêu cầu client certificate. Không có cơ chế
-thương lượng bật TLS: bật lệch cấu hình sẽ khiến handshake/frame thất bại.
+Server từ chối khởi động nếu certificate PKCS#12 thiếu hoặc không hợp lệ. TLS
+handshake xảy ra trước frame ứng dụng nên plaintext bị đóng. TC05 đã PASS 4/4
+trên database test cô lập, loopback port 19000; listener TLS phụ port 19001
+cũng được xác minh. Xem [bằng chứng TC05 pinned TLS](evidence/TC05-pinned-local-20261127-180428.log).
+Khi `DANTOPHONG_USE_TLS=false`, password/OTP/token là plaintext; chỉ dùng dữ
+liệu giả trong thử nghiệm loopback cô lập. TLS chỉ xác thực server, không yêu
+cầu client certificate. `DANTOPHONG_SECONDARY_PORT` tùy chọn và tắt mặc định.
 
 ## Kiểm thử cần thực hiện
 

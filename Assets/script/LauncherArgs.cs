@@ -8,6 +8,7 @@ public static class LauncherArgs
     public static string Host = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST") ?? "";
     public static int Port = ParsePort(Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT"));
     public static bool UseTls = ParseBool(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), true);
+    public static string CertificateThumbprintSha256 = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_CERT_SHA256") ?? "";
     public static string Mode = "single";
     public static string Room = "";
     public static string RoomMap = "";

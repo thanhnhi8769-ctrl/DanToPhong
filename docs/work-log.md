@@ -170,3 +170,29 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Work | Result | Commands / checks |
 |---|---|---|
 | Update README gameplay limitations | Replaced the differing paragraph with the supplied wording; the remainder already matched. | `git diff --check`; review `git diff -- README.md` |
+
+## 2026-11-27 - Enforcing pinned TLS and an optional secondary listener
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Add shared SHA-256 certificate pinning | Launcher requires `certificateThumbprintSha256`; Launcher passes the public pin to Unity via child-process environment; shared validation preserves host/time checks and permits only a pinned self-signed `UntrustedRoot`. | Server and Launcher Release builds; protocol smoke tests |
+| Add optional secondary listener | `DANTOPHONG_SECONDARY_PORT` is disabled by default; configured port shares the same TLS certificate, protocol and concurrency controls. | TC05 listener run on 19001; default server runs on 19000 |
+| Rerun TC05 | Four transport cases PASS against `DanToPhongDB_Test` on loopback 19000; wrong pin and plaintext rejected; explicit plaintext succeeds. PFX was encrypted with a process-only generated password, stored outside repo, and not imported into a certificate store. | `tools\run-tc05-pinned.ps1`; [TC05-pinned-local-20261127-180428.log](evidence/TC05-pinned-local-20261127-180428.log) |
+| Update security/config documentation | Updated README, protocol/security notes, traceability, evidence index, and client/server config examples; no AWS command or GUI test. | `git diff --check` |
+
+## 2026-11-27 - Rerunning T1-T8 on a dedicated protocol-test port
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Rerun T1-T8 console protocol checks | T1 listener and T2-T8 behavior observed on loopback port 19000; both temporary accounts were removed. PASS applies to console/protocol only; Launcher/Unity GUI remains manual. | `tools\run-t2t8-protocol-test.ps1`; [T2-T8-protocol-console-20261127-180529.log](evidence/T2-T8-protocol-console-20261127-180529.log) |
+| Verify test server cleanup | Harness exited its server processes; `Get-NetTCPConnection -State Listen -LocalPort 19000` returned no listeners. Existing port 9000 PID 13472 was not stopped. | Port check after the harness |
+
+## 2026-11-27 - Completing local-run guidance and fixing room-list launch
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Make room-list join launch Unity | The dynamic room-card action previously showed only a notice; it now launches the game with the selected room code so the existing lobby flow can join or spectate. GUI behavior remains unverified. | `dotnet build .\UI\UI\UI.csproj -c Release --no-restore` |
+| Add local two-client and Internet demo instructions | README documents test TLS pin setup and two Launcher instances; the demo runbook documents the approved manual AWS sequence only. No AWS command or resource action was used. | Review README and `docs/demo-runbook.md` |
+| Protect local runner environment | `run-local.ps1` restores the process-scoped test DB password as well as other temporary variables; PowerShell syntax parse passed. | PowerShell AST parse of `scripts/run-local.ps1` |
+| Validate source changes and core smoke | Server Release build passed with 0 warnings; Launcher Release build passed with 6 pre-existing generated Designer nullable warnings; protocol smoke passed, including forged `UserId`/`TargetId` elimination isolation and certificate pin validation. | `dotnet build` Server/Launcher Release; `dotnet run` Protocol.Smoke |
+| Rebuild Unity with pinned TLS client code | Unity 6000.3.28f1 batch build reported Build Successful, exited 0, and had no compiler/build failure markers; this is packaging evidence, not gameplay or connection evidence. | `BuildWindowsPlayer.BuildWindows64Release`; [TC08 log](evidence/TC08-unity-build.log) |

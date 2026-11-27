@@ -310,6 +310,7 @@ namespace UI
                 host: _netClient.Host,
                 port: _netClient.Port,
                 useTls: _netClient.UseTls,
+                certificateThumbprintSha256: _netClient.CertificateThumbprintSha256,
                 mode: mode,
                 roomId: roomId,
                 onGameExited: () =>
@@ -1962,12 +1963,7 @@ namespace UI
         {
             if (index < 0 || index >= _rooms.Count) return;
             RoomItem room = _rooms[index];
-            string action = room.IsRacing ? "Spectating" : "Joining";
-            PopupNoticeForm.ShowNotice(
-                this,
-                room.Title,
-                $"{action} {room.Title} ({room.StatusText})...",
-                PopupNoticeForm.NoticeKind.Info);
+            KhoiChayGame("room", room.RoomCode);
         }
 
 

@@ -21,3 +21,10 @@ Observed: Two authenticated TCP clients connected and were logged by the server;
 Scope: The harness launched the current server build with explicitly enabled plaintext on loopback. This is not TLS evidence, GUI evidence, or a graceful-shutdown/UI rendering test. GUI steps still require manual execution.
 
 Redaction: No account data, endpoint outside loopback, or credentials recorded.
+
+T1-T8 console rerun: PASS at protocol level; GUI remains PARTIAL
+Time: 2026-11-27 18:05:29-18:05:32 +07:00
+Command: `tools/run-t2t8-protocol-test.ps1`
+Evidence: [T2-T8-protocol-console-20261127-180529.log](T2-T8-protocol-console-20261127-180529.log)
+Observed: T1 listener on dedicated loopback port 19000; T2 two authenticated clients; T3 PONG 1.9/0.6 ms; T4 chat delivery 5.4 ms; T5 20 ordered messages; T6 exact Vietnamese round-trip; T7 abrupt reset cleanup and peer event/snapshot; T8 both clients detected server termination; temporary accounts removed from DanToPhongDB_Test.
+Scope: No Launcher/Unity GUI actions; this run is protocol evidence only. Test server processes exited; port 19000 was checked clear.

@@ -15,6 +15,7 @@ namespace UI.Services
         private readonly string _host;
         private readonly int _port;
         private readonly bool _useTls;
+        private readonly string _certificateThumbprintSha256;
         private readonly SemaphoreSlim _ioLock = new(1, 1);
         private readonly CancellationTokenSource _heartbeatCts = new();
         private readonly System.Threading.Timer _heartbeatTimer;
@@ -33,6 +34,7 @@ namespace UI.Services
         public string Host => _host;
         public int Port => _port;
         public bool UseTls => _useTls;
+        public string CertificateThumbprintSha256 => _certificateThumbprintSha256;
         public string Token { get; private set; } = string.Empty;
 
         public event Action<bool, string>? ConnectionStatusChanged;
@@ -55,6 +57,7 @@ namespace UI.Services
             string? fileHost = null;
             int? filePort = null;
             bool? fileUseTls = null;
+            string? fileCertificateThumbprintSha256 = null;
             string configPath = Path.Combine(AppContext.BaseDirectory, "server.json");
             if (File.Exists(configPath))
             {
@@ -63,6 +66,7 @@ namespace UI.Services
                 fileHost = config?.Host;
                 filePort = config?.Port;
                 fileUseTls = config?.UseTls;
+                fileCertificateThumbprintSha256 = config?.CertificateThumbprintSha256;
             }
 
             string? envHost = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST");
@@ -90,6 +94,12 @@ namespace UI.Services
             else
                 throw new InvalidOperationException("DANTOPHONG_USE_TLS must be 'true' or 'false'.");
 
+            _certificateThumbprintSha256 = _useTls
+                ? CertificatePinValidator.NormalizeSha256Thumbprint(fileCertificateThumbprintSha256)
+                : string.Empty;
+            if (_useTls && string.IsNullOrEmpty(_certificateThumbprintSha256))
+                throw new InvalidOperationException("TLS requires certificateThumbprintSha256 in server.json.");
+
             if (string.IsNullOrWhiteSpace(_host) || _port is < 1 or > 65535)
                 throw new InvalidOperationException("Thiếu cấu hình DANTOPHONG_SERVER_HOST/PORT hoặc file server.json.");
 
@@ -101,6 +111,7 @@ namespace UI.Services
             public string? Host { get; set; }
             public int? Port { get; set; }
             public bool? UseTls { get; set; }
+            public string? CertificateThumbprintSha256 { get; set; }
         }
 
         private static readonly TimeSpan NetworkTimeout = TimeSpan.FromSeconds(12);
@@ -168,7 +179,9 @@ namespace UI.Services
                 _stream = stream;
                 if (_useTls)
                 {
-                    var ssl = new SslStream(stream, leaveInnerStreamOpen: false);
+                    var ssl = new SslStream(stream, leaveInnerStreamOpen: false,
+                        (_, certificate, chain, errors) => CertificatePinValidator.Validate(
+                            certificate, chain, errors, _certificateThumbprintSha256));
                     _stream = ssl;
                     await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
                     {

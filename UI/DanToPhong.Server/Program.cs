@@ -19,6 +19,7 @@ namespace DanToPhong.Server
     internal static class Program
     {
         private static readonly int Port = ReadPort();
+        private static readonly int? SecondaryPort = ReadSecondaryPort();
         private static readonly bool UseTls = ReadUseTls();
         private const int MaxCoinsDeltaPerRequest = 5000;
         private static readonly string ConnectionString = Environment.GetEnvironmentVariable("DANTOPHONG_DB_CONNECTION") ?? string.Empty;
@@ -59,6 +60,16 @@ namespace DanToPhong.Server
                 return 9000;
             if (!int.TryParse(raw, out int port) || port is < 1 or > 65535)
                 throw new InvalidOperationException("DANTOPHONG_PORT must be an integer between 1 and 65535.");
+            return port;
+        }
+
+        private static int? ReadSecondaryPort()
+        {
+            string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_SECONDARY_PORT");
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+            if (!int.TryParse(raw.Trim(), out int port) || port is < 1 or > 65535 || port == Port)
+                throw new InvalidOperationException("DANTOPHONG_SECONDARY_PORT must be a valid port different from DANTOPHONG_PORT.");
             return port;
         }
 
@@ -113,44 +124,53 @@ namespace DanToPhong.Server
 
             IPAddress listenAddress = UseTls ? IPAddress.Any : IPAddress.Loopback;
             var listener = new TcpListener(listenAddress, Port);
+            TcpListener? secondaryListener = null;
             listener.Start();
+            try
+            {
+                if (SecondaryPort.HasValue)
+                {
+                    secondaryListener = new TcpListener(listenAddress, SecondaryPort.Value);
+                    secondaryListener.Start();
+                }
+            }
+            catch
+            {
+                listener.Stop();
+                secondaryListener?.Stop();
+                throw;
+            }
             Console.WriteLine($"[TCP] Server listening on {listenAddress}:{Port}; TLS={(UseTls ? "enabled" : "disabled")}.");
+            if (SecondaryPort.HasValue)
+                Console.WriteLine($"[TCP] Secondary listener enabled on {listenAddress}:{SecondaryPort.Value}; TLS={(UseTls ? "enabled" : "disabled")}.");
             var emailQueue = new EmailVerificationQueue();
             using var emailWorkerCts = new CancellationTokenSource();
             Task emailWorker = emailQueue.RunAsync(emailWorkerCts.Token);
 
             try
             {
-                while (!cts.IsCancellationRequested)
+                Task primaryAccept = AcceptClientsAsync(listener, repo, state, serverCertificate, emailQueue, cts.Token);
+                if (secondaryListener == null)
                 {
-                    TcpClient client = await listener.AcceptTcpClientAsync(cts.Token).ConfigureAwait(false);
-                    string remote = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
-
-                    if (!ClientCapacity.Wait(0))
-                    {
-                        Console.WriteLine("[TCP] Connection rejected: client capacity reached.");
-                        client.Dispose();
-                        continue;
-                    }
-                    ConfigureTcpKeepAlive(client);
-
-                    var session = new ClientSession
-                    {
-                        Client = client,
-                        RemoteEndPoint = remote
-                    };
-                    ActiveSessions[session.SessionId] = session;
-
-                    Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
-                    _ = HandleClientAsync(session, repo, state, serverCertificate, emailQueue, cts.Token);
+                    await primaryAccept.ConfigureAwait(false);
+                }
+                else
+                {
+                    Task secondaryAccept = AcceptClientsAsync(secondaryListener, repo, state, serverCertificate, emailQueue, cts.Token);
+                    Task firstCompletedAccept = await Task.WhenAny(primaryAccept, secondaryAccept).ConfigureAwait(false);
+                    await firstCompletedAccept.ConfigureAwait(false);
+                    if (!cts.IsCancellationRequested)
+                        throw new InvalidOperationException("A TCP listener accept loop stopped unexpectedly.");
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
             }
             finally
             {
+                cts.Cancel();
                 listener.Stop();
+                secondaryListener?.Stop();
                 ClientSession[] sessions = ActiveSessions.Values.ToArray();
                 foreach (ClientSession active in sessions)
                 {
@@ -176,6 +196,39 @@ namespace DanToPhong.Server
                     Console.Error.WriteLine("[SMTP] Shutdown drain deadline reached; queued emails may not have been delivered.");
                 }
                 Console.WriteLine("[TCP] Server stopped.");
+            }
+        }
+
+        private static async Task AcceptClientsAsync(
+            TcpListener listener,
+            NguoiDungRepository repo,
+            ServerStateRepository state,
+            X509Certificate2? serverCertificate,
+            EmailVerificationQueue emailQueue,
+            CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                TcpClient client = await listener.AcceptTcpClientAsync(token).ConfigureAwait(false);
+                string remote = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
+
+                if (!ClientCapacity.Wait(0))
+                {
+                    Console.WriteLine("[TCP] Connection rejected: client capacity reached.");
+                    client.Dispose();
+                    continue;
+                }
+                ConfigureTcpKeepAlive(client);
+
+                var session = new ClientSession
+                {
+                    Client = client,
+                    RemoteEndPoint = remote
+                };
+                ActiveSessions[session.SessionId] = session;
+
+                Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
+                _ = HandleClientAsync(session, repo, state, serverCertificate, emailQueue, token);
             }
         }
 

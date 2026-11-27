@@ -43,6 +43,7 @@ namespace UI.Services
             string host,
             int port,
             bool useTls,
+            string certificateThumbprintSha256,
             string mode,
             string roomId = "",
             Action? onGameExited = null)
@@ -76,6 +77,7 @@ namespace UI.Services
             };
             psi.ArgumentList.Add("--user"); psi.ArgumentList.Add(safeUser);
             psi.Environment["DANTOPHONG_SESSION_TOKEN"] = token;
+            psi.Environment["DANTOPHONG_SERVER_CERT_SHA256"] = certificateThumbprintSha256;
             psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host);
             psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
             psi.ArgumentList.Add("--tls");

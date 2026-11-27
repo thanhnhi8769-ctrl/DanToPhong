@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using UnityEngine;
+using DanToPhong.Protocol;
 
 // Tên field viết thường chữ đầu để JsonUtility khớp JSON camelCase của server.
 [Serializable]
@@ -98,21 +99,8 @@ public static class ServerClient
         X509Chain chain,
         SslPolicyErrors errors)
     {
-        if (errors == SslPolicyErrors.None)
-            return true;
-        if (certificate == null || errors != SslPolicyErrors.RemoteCertificateChainErrors)
-            return false;
-
-        string expectedPin = Environment.GetEnvironmentVariable("DANTOPHONG_TLS_TEST_CERT_SHA256") ?? "";
-        if (string.IsNullOrWhiteSpace(expectedPin))
-            return false;
-
-        using (SHA256 sha256 = SHA256.Create())
-        {
-            string actualPin = BitConverter.ToString(sha256.ComputeHash(certificate.GetRawCertData())).Replace("-", "");
-            return string.Equals(
-                actualPin, expectedPin.Replace(":", "").Replace("-", "").Trim(), StringComparison.OrdinalIgnoreCase);
-        }
+        return CertificatePinValidator.Validate(
+            certificate, chain, errors, LauncherArgs.CertificateThumbprintSha256);
     }
 
     // Bắn khi kho (xu / xe / map) khác với Cache hiện tại (kể cả khi Cache vừa bị game sửa lạc quan rồi server từ chối)

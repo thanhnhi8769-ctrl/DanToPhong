@@ -1,6 +1,9 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Net;
+using System.Net.Security;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using DanToPhong.Protocol;
 using DanToPhong.Server;
@@ -19,6 +22,7 @@ static async Task RunAsync(string[] args)
         throw new ArgumentException("Supported options are --smtp4dev-sample and --smtp4dev-otp-queue.");
 
     VerifyAccountInputValidation();
+    VerifyCertificatePinValidation();
     VerifyClientEliminationDoesNotDeclareWinner();
     await VerifyGameClientMailboxAsync();
     await VerifyEmailQueueAsync();
@@ -109,6 +113,7 @@ static async Task RunAsync(string[] args)
     Console.WriteLine("PASS: forged UserId/TargetId with ELIMINATE affects only the caller; opponent state and winner remain unchanged.");
     Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
     Console.WriteLine("PASS: shared account validation accepts the email limit and rejects overlong email/password values.");
+    Console.WriteLine("PASS: SHA-256 certificate pinning accepts the exact self-signed certificate and rejects a wrong pin, hostname mismatch, and malformed pin.");
     Console.WriteLine("PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.");
 
     if (sendSmtp4DevSample)
@@ -129,6 +134,34 @@ static void VerifyAccountInputValidation()
         !AccountInputValidation.IsValidPassword(maxLengthPassword) ||
         AccountInputValidation.IsValidPassword(maxLengthPassword + "2"))
         throw new InvalidOperationException("Account input length or format validation is inconsistent.");
+}
+
+static void VerifyCertificatePinValidation()
+{
+    using RSA key = RSA.Create(2048);
+    var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    var subjectAlternativeNames = new SubjectAlternativeNameBuilder();
+    subjectAlternativeNames.AddDnsName("localhost");
+    subjectAlternativeNames.AddIpAddress(IPAddress.Loopback);
+    request.CertificateExtensions.Add(subjectAlternativeNames.Build());
+
+    DateTimeOffset now = DateTimeOffset.UtcNow;
+    using X509Certificate2 certificate = request.CreateSelfSigned(now.AddMinutes(-1), now.AddDays(1));
+    using var chain = new X509Chain();
+    _ = chain.Build(certificate);
+    using SHA256 sha256 = SHA256.Create();
+    string pin = BitConverter.ToString(sha256.ComputeHash(certificate.GetRawCertData())).Replace("-", string.Empty);
+    string formattedPin = string.Join(":", Enumerable.Range(0, pin.Length / 2).Select(index => pin.Substring(index * 2, 2)));
+
+    if (!CertificatePinValidator.IsValidSha256Thumbprint(formattedPin) ||
+        CertificatePinValidator.NormalizeSha256Thumbprint(formattedPin) != pin ||
+        !CertificatePinValidator.Validate(certificate, chain, SslPolicyErrors.RemoteCertificateChainErrors, pin) ||
+        !CertificatePinValidator.Validate(certificate, chain, SslPolicyErrors.None, pin) ||
+        CertificatePinValidator.Validate(certificate, chain, SslPolicyErrors.RemoteCertificateChainErrors, new string('0', 64)) ||
+        CertificatePinValidator.Validate(certificate, chain,
+            SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch, pin) ||
+        CertificatePinValidator.IsValidSha256Thumbprint("not-a-thumbprint"))
+        throw new InvalidOperationException("Certificate pinning accepted an invalid pin, chain error, or hostname mismatch.");
 }
 
 static void VerifyClientEliminationDoesNotDeclareWinner()

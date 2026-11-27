@@ -1,0 +1,11 @@
+2026-11-27 18:05:29.341 +07:00 [INFO] Console TCP protocol integration run; this is protocol-level evidence, not GUI evidence.
+2026-11-27 18:05:29.879 +07:00 [PASS] T1 test server was observed listening on dedicated loopback port 19000.
+2026-11-27 18:05:30.943 +07:00 [PASS] T2 both TCP clients connected, authenticated, and appeared in server session logs.
+2026-11-27 18:05:30.947 +07:00 [PASS] T3 both authenticated clients received PONG in under 1 second (A 1.9 ms; B 0.6 ms).
+2026-11-27 18:05:31.001 +07:00 [PASS] T4 client B received client A's chat message in under 1 second (5.4 ms).
+2026-11-27 18:05:31.011 +07:00 [PASS] T5 all 20 consecutive messages arrived with consecutive IDs and unchanged content.
+2026-11-27 18:05:31.011 +07:00 [PASS] T6 the Vietnamese chat message round-tripped exactly through server storage and TCP framing.
+2026-11-27 18:05:31.046 +07:00 [PASS] T7 an abrupt client-A socket reset removed its session; client B received PLAYER_DISCONNECTED and IsDisconnected=true.
+2026-11-27 18:05:31.877 +07:00 [PASS] T8 terminating the test server made both clients detect command- and game-stream connection loss without a client crash.
+2026-11-27 18:05:31.913 +07:00 [PASS] Temporary protocol-test accounts were removed from DanToPhongDB_Test.
+2026-11-27 18:05:31.913 +07:00 [RESULT] PASS — T2-T8 protocol checks observed; GUI checks remain manual.

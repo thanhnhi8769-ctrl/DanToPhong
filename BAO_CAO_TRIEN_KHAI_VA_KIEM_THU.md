@@ -64,14 +64,14 @@ không treo khi mất kết nối và hiển thị tiếng Việt đúng dấu. 
 | Hạng mục | Trạng thái | Kết quả |
 |---|---|---|
 | WinForms đăng ký/đăng nhập/khôi phục | **Đã rà soát** | Có kiểm tra input, gọi Server và giữ trạng thái phiên; cần kiểm thử UI thật. |
-| SMTP/OTP | **Đã sửa; runtime một phần** | MailKit hỗ trợ implicit TLS 465 và STARTTLS 587; request OTP ghi hash rồi đưa mail vào Channel bounded (64 jobs), worker retry SMTP 4xx/5xx tối đa ba lần. Queue/retry smoke PASS; chưa kiểm tra delivery/failure bằng SMTP thật sau thay đổi. |
-| Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS đọc không phân biệt hoa-thường; TLS được chuyển tiếp từ Launcher sang Unity; env port sai giờ báo lỗi thay vì âm thầm fallback. |
+| SMTP/OTP | **Đã sửa; runtime một phần** | MailKit hỗ trợ implicit TLS 465 và STARTTLS 587; request OTP ghi hash rồi đưa mail vào Channel bounded (64 jobs), worker retry SMTP 4xx/5xx tối đa ba lần. Smoke queue/retry PASS và mail tổng hợp đã được worker giao tới smtp4dev loopback; outage recovery và nhập OTP trên GUI chưa xác minh. |
+| Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS và SHA-256 thumbprint đọc không phân biệt hoa-thường; Launcher chuyển TLS flag và pin sang Unity qua environment; env port sai bị từ chối. |
 | Điều khiển/va chạm xe | **Đã rà soát** | Có ga, phanh/lùi, rẽ, nhảy, chống kẹt, bám đường và hồi sinh; chưa test vật lý bằng build chạy. |
 | Multiplayer state | **Prototype; live test BLOCKED** | Server mô phỏng kinematics, kiểm tra checkpoint/finish gate, push snapshot/event; có code spectate/reconnect 120 giây và thưởng winner phía server. Client có thể xin tự loại nhưng không thể làm đối thủ thắng/nhận thưởng; server chỉ ghi winner khi qua finish gate. Physics loại xe vẫn chưa authoritative; chưa kiểm chứng trận live. |
 | Scene mặc định `game` | **Đã sửa** | Scene có dùng làm fallback nhưng thiếu Build Settings; đã thêm vào danh sách build. |
 | Git hygiene | **Đã sửa** | Cho phép các project .NET và scene thuộc `Assets/scene` được version; tiếp tục loại build/cache/demo scenes. |
 | AWS Internet-ready | **Chưa sẵn sàng** | Lần đọc/truy vấn AWS được ghi trước đây báo EC2 và RDS đã dừng sau smoke test. EIP khi đó gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; lượt hiện tại không đọc lại trạng thái AWS và không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
-| Production readiness | **Chưa xác nhận** | TC05 TLS fail-closed và capture local TC06/11/12 đã PASS; OTP chưa được xác minh end-to-end qua GUI/DB, và worker SMTP mới chưa được kiểm tra delivery thật. Chưa xác minh gameplay hai client, reconnect runtime, load, hay hai mạng Internet. |
+| Production readiness | **Chưa xác nhận** | TC05 pinned TLS fail-closed và capture local TC06/11/12 đã PASS; email tổng hợp qua worker tới smtp4dev đã quan sát nhưng OTP chưa được xác minh end-to-end qua GUI/DB. Chưa xác minh gameplay hai client, reconnect runtime, authenticated load, hay hai mạng Internet. |
 
 ## 2. Network stack tự phát triển và đặc tả giao thức
 
@@ -86,7 +86,7 @@ snapshot/event push; đây vẫn là prototype chưa hoàn chỉnh.
 | Thuộc tính | Đặc tả hiện thực |
 |---|---|
 | Vận chuyển | TCP stream; client kết nối tới hostname/IP cấu hình và cổng mặc định `9000` (`DANTOPHONG_PORT` có thể override; giá trị sai bị từ chối). |
-| TLS | Bật mặc định ở Server/Launcher/Unity; Server từ chối khởi động nếu không có certificate hợp lệ. TLS 1.2/1.3 bọc từng stream TCP; client xác thực chain và hostname theo cấu hình. Plaintext chỉ dành cho thử nghiệm cô lập có chủ đích. |
+| TLS | Bật mặc định ở Server/Launcher/Unity; Server từ chối khởi động nếu certificate không hợp lệ. Client bắt buộc pin SHA-256 trong `server.json`, vẫn kiểm hostname/thời hạn và chỉ cho phép chain status `UntrustedRoot` khi pin khớp. TC05 4/4 đã quan sát trên loopback 19000; listener phụ 19001 tùy chọn/tắt mặc định. |
 | Frame | 4 byte đầu là số nguyên độ dài **big-endian**, theo sau là đúng số byte payload. TCP không giữ ranh giới bản tin nên reader phải đọc đủ header/body. |
 | Payload | UTF-8 JSON, tên thuộc tính camelCase; deserialize không phân biệt hoa/thường. |
 | Phiên bản | Chưa có trường/thoả thuận protocol version trong `RequestPacket`/`ResponsePacket`; đây là thiếu sót cần xử lý trước khi cần tương thích client-server khác phiên bản. |
@@ -309,7 +309,7 @@ bộ chuyển cảnh chưa được xác minh.
 
 - Không ghi DB, SMTP, certificate secret hoặc private key thật trong repo. File env mẫu chỉ chứa placeholder; file vận hành phải ở SSM/secret store hoặc path hạn chế quyền.
 - Client server config không nên chứa credential bí mật. Host/port/TLS là cấu hình public; sau khi có EIP thật cần cập nhật config release.
-- TLS bật mặc định ở cả hai đầu và Server fail-closed nếu certificate không hợp lệ; client kiểm tra chain/hostname. Không dùng TLS `false` cho tài khoản thật qua Internet: TCP plaintext có thể lộ mật khẩu/token.
+- TLS bật mặc định; client cần pin SHA-256 khớp certificate, SslStream vẫn kiểm hostname/thời hạn và từ chối mọi chain status khác `UntrustedRoot`. Không dùng TLS `false` cho tài khoản thật qua Internet: TCP plaintext có thể lộ mật khẩu/token.
 - Snapshot AWS được ghi trong lần kiểm tra trước báo RDS `PubliclyAccessible=true` dù Security Group giới hạn inbound; ưu tiên chuyển sang private-only khi được duyệt. Trạng thái chưa được đọc lại trong lượt này. DB account nên có quyền tối thiểu cần thiết. SMTP sender cần App Password riêng và rotation nếu từng bị commit/ghi log.
 - `.gitignore` trước đây bỏ qua toàn bộ `.unity` nên scene chính không xuất hiện trong clone; đồng thời bỏ qua `.csproj` Launcher/Server. Nay chỉ mở lại scene `Assets/scene/*.unity` và project `.csproj` bên `UI`, còn scene demo package/cache/build vẫn bỏ qua.
 - Cần `git status --short` trước khi push và kiểm tra history nếu secret từng commit. `.gitignore` không xóa secret đã nằm trong commit cũ.
@@ -351,7 +351,7 @@ EIP/Security Group và không push Git.
 | TC02 | Hai máy khác mạng đăng nhập, vào phòng, đồng bộ. | BLOCKED — chỉ có hai GUI main menu, chưa có login/server hay máy mạng thứ hai | [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log) |
 | TC03 | Hai client dùng TCP tạo/vào phòng và nhận snapshot. | BLOCKED — chưa quan sát trận hai client; Launcher process không có cửa sổ UI truy cập được trong lần tiếp tục này | Chưa có |
 | TC04 | OTP SMTP gửi/nhận, mã đúng/sai/hết hạn. | PARTIAL — mail registration được smtp4dev nhận; chưa nhập mã đúng/sai/hết hạn hay kiểm tra khóa do thử sai | [TC04-prior-otp-delivery.log](docs/evidence/TC04-prior-otp-delivery.log) |
-| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh. | PASS — 4/4 ca local trên loopback; evidence harness hiện tại, không phải GUI login | [TC05-local-tls-fail-closed.log](docs/evidence/TC05-local-tls-fail-closed.log) |
+| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh. | PASS — 4/4 ca quan sát bằng self-signed certificate được pin SHA-256 trên loopback 19000; không phải GUI login | [TC05-pinned-local-20261127-180428.log](docs/evidence/TC05-pinned-local-20261127-180428.log) |
 | TC06 | So sánh plaintext/TLS bằng capture Wireshark. | PASS — plaintext PING đọc được; TLS 1.3 application records được mã hóa | [TC06-TC11-TC12-loopback-capture.log](docs/evidence/TC06-TC11-TC12-loopback-capture.log) |
 | TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — reconnect/khôi phục snapshot chưa được thử runtime; không có trận live | Chưa có |
 | TC08 | Unity Windows x64 build. | PASS — build current source và clean clone; hai GUI main menu cũng được mở nhưng không thử network | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log), [TC08-clean-clone-build.log](docs/evidence/TC08-clean-clone-build.log) |
@@ -365,7 +365,7 @@ EIP/Security Group và không push Git.
 | Bước | Kết quả | Bằng chứng |
 |---|---|---|
 | T1 | PASS — `netstat -ano | findstr 9000` thấy `127.0.0.1:9000 LISTENING`; chỉ là loopback. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log) |
-| T2–T8 | PARTIAL — console test đã PASS ở mức giao thức: hai client TCP đăng nhập, PONG/chat dưới 1 giây, 20 tin liên tiếp, tiếng Việt, peer-disconnect event và server shutdown. GUI thật vẫn cần chạy tay; chưa xác nhận thao tác/hiển thị trên Launcher hoặc Unity. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log), [log console có timestamp](docs/evidence/T2-T8-protocol-console-20261127-173442.log) |
+| T2–T8 | PARTIAL — console test đã PASS ở mức giao thức: hai client TCP đăng nhập, PONG/chat dưới 1 giây, 20 tin liên tiếp, tiếng Việt, peer-disconnect event và server shutdown. GUI thật vẫn cần chạy tay; chưa xác nhận thao tác/hiển thị trên Launcher hoặc Unity. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log), [log console có timestamp](docs/evidence/T2-T8-protocol-console-20261127-180529.log) |
 
 Console harness: chạy `.\tools\run-t2t8-protocol-test.ps1`. Harness khởi động server test ngắn hạn trên loopback với plaintext được bật tường minh, tạo hai account ngẫu nhiên trong `DanToPhongDB_Test`, rồi xóa chúng sau test. Đây là bằng chứng framing/protocol TCP, không thay thế kiểm thử GUI; TC05 là bằng chứng TLS riêng.
 
@@ -638,7 +638,7 @@ git push
 
 `git add -A` đưa mọi thay đổi trong worktree vào stage; bỏ dòng này nếu còn thay đổi cá nhân không thuộc dự án, thay bằng stage tường minh các file đã kiểm tra. Không đưa `LauncherRelease`, `bin/obj`, Unity `Library/Temp`, file `.env` vận hành, certificate hay log vào commit.
 
-## 14. Hạn chế và kết luận phát hành
+## 14. Hạn chế đã biết và kết luận phát hành
 
 **Chưa thể xác nhận “clone về dùng ngay” hoặc release-ready multiplayer:**
 build Server/Launcher/Unity và protocol smoke đã chạy; TC05 local TLS fail-closed

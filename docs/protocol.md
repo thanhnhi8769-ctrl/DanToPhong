@@ -13,9 +13,12 @@ Runtime/load-test claims are only made when backed by evidence in
   host and port through runtime configuration.
 - TLS wraps the TCP stream before application framing and is enabled by
   default. The server fails closed if a valid certificate is unavailable;
-  clients validate the certificate chain and hostname. Plaintext is an
-  explicit isolated-test option only, and both ends must use matching
-  settings.
+  Launcher and Unity require the exact SHA-256 certificate thumbprint from
+  `server.json`, while SslStream hostname and certificate-time validation stay
+  enabled. Only an otherwise-valid self-signed chain with `UntrustedRoot` is
+  accepted when the pin matches. Plaintext is an explicit isolated-test option.
+- `DANTOPHONG_SECONDARY_PORT` optionally enables a second listener with the
+  same protocol and TLS certificate; it is disabled by default.
 - Application requests are processed sequentially per connection and receive
   one response. Gameplay opens a second authenticated TCP connection with
   `GAME_STREAM`; the server then sends separate ordered event frames and

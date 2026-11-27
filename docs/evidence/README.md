@@ -8,7 +8,7 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | TC02 | Hai máy khác mạng đăng nhập, vào phòng và đồng bộ trạng thái | BLOCKED — chưa chạy hai client Unity đã đăng nhập trên hai máy/mạng khác nhau | [TC02-two-client-gui.log](TC02-two-client-gui.log) |
 | TC03 | TCP room: tạo/vào phòng và nhận snapshot giữa hai client | BLOCKED — chưa chạy trận hai client; Launcher process không có cửa sổ UI truy cập được trong phiên này | Chưa có |
 | TC04 | OTP SMTP: gửi, nhận, mã đúng/sai/hết hạn | PARTIAL — smtp4dev ghi nhận email registration đã gửi/nhận; nhập mã đúng/sai/hết hạn và khóa do thử sai chưa kiểm chứng; không có cửa sổ UI truy cập được để tiếp tục | [TC04-prior-otp-delivery.log](TC04-prior-otp-delivery.log); chưa có ảnh app/mail cho các lần nhập |
-| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh | PASS — 4/4 ca quan sát trực tiếp trên loopback TCP 9000 với database test riêng | [TC05-local-tls-fail-closed.log](TC05-local-tls-fail-closed.log); [TC05-tls-plaintext.log](TC05-tls-plaintext.log) (lịch sử deployment cũ, không dùng làm kết quả hiện tại) |
+| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh | PASS — 4/4 ca trên loopback 19000 với `DanToPhongDB_Test`; TLS secondary listener 19001 cũng được kiểm chứng | [TC05-pinned-local-20261127-180428.log](TC05-pinned-local-20261127-180428.log); [TC05-local-tls-fail-closed.log](TC05-local-tls-fail-closed.log) (lần quan sát trước) |
 | TC06 | DPI: so sánh plaintext/TLS bằng Wireshark | PASS — trace local cho thấy PING plaintext đọc được, còn TLS 1.3 application records được mã hóa | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log) |
 | TC07 | Mất mạng, reconnect và server restart | BLOCKED — chưa có trận để thử reconnect runtime; Launcher process không có cửa sổ UI truy cập được trong phiên này | Chưa có |
 | TC08 | Build Unity Windows x64 từ các scene đang bật trong Build Settings | PASS — build source TCP hiện tại; chưa chạy game hoặc xác minh kết nối server | [TC08-unity-build.log](TC08-unity-build.log) |
@@ -24,13 +24,13 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | Test | Kết quả | Bằng chứng |
 |---|---|---|
 | T1 | PASS — `netstat` thấy listener `127.0.0.1:9000`; chỉ xác nhận loopback. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
-| T2–T8 | PARTIAL — PASS ở mức console/protocol TCP; kiểm thử Launcher/Unity GUI vẫn cần chạy tay. | [T2-T8-protocol-console-20261127-173442.log](T2-T8-protocol-console-20261127-173442.log); [lịch sử GUI blocker](T1-T8-chapter3-tests.log) |
+| T2–T8 | PARTIAL — PASS ở mức console/protocol TCP; kiểm thử Launcher/Unity GUI vẫn cần chạy tay. | [T2-T8-protocol-console-20261127-180529.log](T2-T8-protocol-console-20261127-180529.log); [lịch sử GUI blocker](T1-T8-chapter3-tests.log) |
 
 Harness chạy hai server test ngắn hạn trên loopback với plaintext bật tường minh, dùng tài khoản tạm trong `DanToPhongDB_Test` rồi xóa chúng. Kết quả không chứng minh TLS (TC05 có log riêng), GUI rendering hay thao tác nút đóng.
 
 ### Phân tích TC05
 
-`TC05-local-tls-fail-closed.log` records all four current local transport cases. The older `TC05-tls-plaintext.log` describes a failed TLS attempt against a previous deployment and is retained only as historical context. The current PASS is limited to loopback transport behavior; GUI authentication, Internet reachability and packet-capture analysis are separate tests.
+`TC05-pinned-local-20261127-180428.log` records all four current transport cases against a self-signed localhost certificate whose SHA-256 pin was supplied only to the test process. It also verifies the opt-in TLS secondary listener on 19001. The test server used only the isolated `DanToPhongDB_Test` and closed after testing; TLS evidence is loopback-only, not GUI login, Internet reachability, or packet-capture evidence. Older TC05 logs remain for historical context.
 
 Các mục PARTIAL/BLOCKED chưa được thực hiện đầy đủ; không xem là PASS và không có ảnh/log giả lập.
 

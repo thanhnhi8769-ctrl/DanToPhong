@@ -5,6 +5,7 @@ Set-Location $root
 $previousSaPassword = $env:DANTOPHONG_TEST_SA_PASSWORD
 $previousConnection = $env:DANTOPHONG_DB_CONNECTION
 $previousServerDll = $env:DANTOPHONG_TEST_SERVER_DLL
+$previousTestPort = $env:DANTOPHONG_TEST_PORT
 $exitCode = 0
 
 try {
@@ -19,7 +20,15 @@ try {
         $exitCode = 2
     }
     else {
-        $env:DANTOPHONG_DB_CONNECTION = "Server=localhost,1433;Database=DanToPhongDB_Test;User Id=sa;Password=$env:DANTOPHONG_TEST_SA_PASSWORD;Encrypt=True;TrustServerCertificate=True"
+        $connectionBuilder = New-Object System.Data.Common.DbConnectionStringBuilder
+        $connectionBuilder['Server'] = 'localhost,1433'
+        $connectionBuilder['Database'] = 'DanToPhongDB_Test'
+        $connectionBuilder['User Id'] = 'sa'
+        $connectionBuilder['Password'] = $env:DANTOPHONG_TEST_SA_PASSWORD
+        $connectionBuilder['Encrypt'] = 'True'
+        $connectionBuilder['TrustServerCertificate'] = 'True'
+        $env:DANTOPHONG_DB_CONNECTION = $connectionBuilder.ConnectionString
+        $env:DANTOPHONG_TEST_PORT = '19000'
         $buildOutput = 'bin\t2t8-protocol\'
         $project = '.\tools\T2T8ProtocolTest\T2T8ProtocolTest.csproj'
 
@@ -53,6 +62,12 @@ finally {
     }
     else {
         $env:DANTOPHONG_TEST_SERVER_DLL = $previousServerDll
+    }
+    if ($null -eq $previousTestPort) {
+        Remove-Item Env:DANTOPHONG_TEST_PORT -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:DANTOPHONG_TEST_PORT = $previousTestPort
     }
 }
 

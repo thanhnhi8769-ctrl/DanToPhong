@@ -63,9 +63,13 @@ variables. Supply secret values through a local secret manager or environment;
 never write real credentials to tracked files or command history. Example
 variable names and placeholders are in `deploy/aws/server.env.example`.
 
-The listener port defaults to `9000`. TLS is required by default; configure a
-certificate path/password outside the repository. Set TLS off only explicitly
-for an isolated test using dummy data. Client endpoint template:
+The listener port defaults to `9000`; optional `DANTOPHONG_SECONDARY_PORT` is
+disabled by default and uses the same TLS certificate. TLS is required by
+default; configure a certificate path/password outside the repository and set
+a 64-hex SHA-256 leaf-certificate thumbprint in `server.json` as
+`certificateThumbprintSha256`. The certificate SAN must match the configured
+host; update the pin in a coordinated certificate rotation. Set TLS off only
+explicitly for an isolated test using dummy data. Client endpoint template:
 `deploy/client/server.json.example`.
 
 ### Start the server locally
@@ -82,6 +86,36 @@ dotnet run --project .\UI\DanToPhong.Server\DanToPhong.Server.csproj
 ```powershell
 dotnet run --project .\UI\UI\UI.csproj
 ```
+
+### Run two GUI clients on one machine
+
+This is a manual GUI test; the console evidence in
+[docs/evidence/README.md](docs/evidence/README.md) does not verify Launcher or
+Unity rendering and controls.
+
+1. Make sure only the designated local test services are in use: `dtp-sql`
+   and `dtp-smtp`. Set `DANTOPHONG_TEST_SA_PASSWORD` in the user environment.
+   From the repository root, run `.\scripts\run-local.ps1` in its own
+   PowerShell window. It builds the Server and keeps it running on loopback
+   port `19000` with TLS. It does not print the database connection string or
+   start/stop containers.
+2. The script prints the public `server.json` values, including the SHA-256
+   certificate pin. Publish the Launcher as described below, copy
+   `deploy\client\server.json.example` to `LauncherRelease\server.json`, and
+   set `host` to `localhost`, `port` to `19000`, `useTls` to `true`, and
+   `certificateThumbprintSha256` to the printed pin. Do not copy the temporary
+   server certificate into the repository.
+3. Place the Unity player at `LauncherRelease\Game\DanToPhong.exe` (or use the
+   documented `BuildGame36` layout), then start the Launcher executable twice.
+   Sign in with two different disposable test accounts. The Launcher hides
+   while its Unity game is running and returns when that game exits.
+4. In the first client, open Rooms and choose Create Room. In the second,
+   refresh/open the room list and choose the host's room to join. Observe both
+   Unity windows and the server output; do not treat a successful launch as
+   proof that game state is synchronized. Use the GUI checklist in
+   [docs/morning-checklist.md](docs/morning-checklist.md) to record results.
+5. Close both Unity clients, then stop the server with Ctrl+C in the server
+   window. Do not stop a listener you did not start.
 
 ## Build and run
 
@@ -141,6 +175,10 @@ The systemd unit template is `deploy/aws/dantophong.service`. Configure its
 environment file outside Git with restricted permissions and install/enable
 the service only on an approved EC2 deployment.
 
+The manual startup, verification, cost-safety, and shutdown checklist is in
+[docs/demo-runbook.md](docs/demo-runbook.md). It documents steps only; this
+repository's local test evidence does not establish an Internet deployment.
+
 ## SMTP and OTP
 
 The server supports implicit TLS on SMTP port 465 and STARTTLS on port 587.
@@ -161,3 +199,25 @@ must remain outside this repository.
   them under `docs/evidence/`; never fabricate evidence.
 - The project is not yet demonstrated as release-ready multiplayer software;
   consult the requirements checklist for incomplete gameplay/server work.
+
+### Test status
+
+| Test | Status | Scope |
+|---|---|---|
+| TC01 | PASS | Local TCP reachability observation only; not a two-network test. |
+| TC02 | BLOCKED | No two clients on independent networks. |
+| TC03 | BLOCKED | No live two-client GUI room/game observation. |
+| TC04 | PARTIAL | SMTP delivery observed; OTP entry/expiry/attempt lockout not observed. |
+| TC05 | PASS | Four pinned TLS/plaintext cases on loopback; see evidence index. |
+| TC06 | PASS | Prior sanitized local capture; see evidence index. |
+| TC07 | BLOCKED | Live match reconnect/restart not observed. |
+| TC08 | PASS | Unity player build only; no gameplay/network proof. |
+| TC09 | PASS | In-memory protocol/framing and queue smoke only. |
+| TC10 | PARTIAL | Anonymous loopback framing/load probes; no authenticated gameplay or Clumsy run. |
+| TC11–TC12 | PASS | Prior sanitized Npcap loopback capture; not proof of Internet behavior. |
+| T1 | PASS | Loopback listener observed; does not show public reachability. |
+| T2–T8 | PARTIAL | Console protocol harness passed; Launcher/Unity GUI still requires manual verification. |
+
+Current evidence and test scope are indexed in
+[docs/evidence/README.md](docs/evidence/README.md); the detailed requirement
+mapping is in [docs/requirements-traceability.md](docs/requirements-traceability.md).

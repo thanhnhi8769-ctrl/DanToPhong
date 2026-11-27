@@ -9,3 +9,10 @@ Compilation warnings: No C# compiler warnings in the final build after removing 
 Environment note: Unity logged non-fatal licensing/package HTTPS errors; the player build still completed successfully.
 Limit: This verifies current-source compilation and packaging only; the player was not launched. It does not verify game scenes, server connectivity, TLS, two-client gameplay, or Internet behavior.
 Redaction: Local paths, host/IP, account data, and credentials omitted.
+
+Verification rerun after TLS thumbprint pinning changes:
+Date/time: 2026-11-27 18:18 +07:00
+Unity Editor: 6000.3.28f1
+Method: batchmode, BuildWindowsPlayer.BuildWindows64Release, StandaloneWindows64
+Result: PASS — Unity batch process exited 0; build log reported "Build Successful"; no compiler/build failure markers were present. PlayerBuildInfo reported 23.1 seconds of build steps.
+Limit: This verifies Unity compilation and player packaging only; no player launch, login, TLS connection, or multiplayer match was observed.

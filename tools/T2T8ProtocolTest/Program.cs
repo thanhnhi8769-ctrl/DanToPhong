@@ -2,8 +2,11 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Channels;
 using DanToPhong.Protocol;
 using DanToPhong.Server;
@@ -13,9 +16,13 @@ internal static class Program
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
-    private static async Task<int> Main()
+    private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
+        if (args.Length == 1 && args[0] == "--tc05-pinned")
+            return await RunTc05PinnedAsync();
+        if (args.Length != 0)
+            throw new ArgumentException("Supported option: --tc05-pinned.");
         string root = FindRepositoryRoot();
         string stamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         string evidencePath = Path.Combine(root, "docs", "evidence", $"T2-T8-protocol-console-{stamp}.log");
@@ -34,6 +41,7 @@ internal static class Program
 
             await using (TestServer server = await TestServer.StartAsync(serverAssembly, connectionString))
             {
+                log.Write("PASS", $"T1 test server was observed listening on dedicated loopback port {server.Port}.");
                 await accounts.SeedAsync(connectionString);
                 await RunDisconnectPhaseAsync(server, accounts, log);
                 await server.StopAbruptlyAsync();
@@ -90,6 +98,152 @@ internal static class Program
 
         log.Write("RESULT", "PASS — T2-T8 protocol checks observed; GUI checks remain manual.");
         return 0;
+    }
+
+    private static async Task<int> RunTc05PinnedAsync()
+    {
+        string root = FindRepositoryRoot();
+        string stamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        string evidencePath = Path.Combine(root, "docs", "evidence", $"TC05-pinned-local-{stamp}.log");
+        using var log = new EvidenceLog(evidencePath);
+        log.Write("INFO", "TC05 transport checks on dedicated loopback ports; no GUI or remote-network claim.");
+        try
+        {
+            string connectionString = ResolveTestConnectionString();
+            string serverAssembly = ResolveServerAssembly(root);
+            using RSA key = RSA.Create(2048);
+            var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var names = new SubjectAlternativeNameBuilder();
+            names.AddDnsName("localhost");
+            names.AddIpAddress(IPAddress.Loopback);
+            request.CertificateExtensions.Add(names.Build());
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            using X509Certificate2 certificate = request.CreateSelfSigned(now.AddMinutes(-1), now.AddDays(1));
+            string certificatePath = Path.Combine(Path.GetTempPath(), $"DanToPhong-tc05-{Guid.NewGuid():N}.pfx");
+            string certificatePassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            byte[] pfx = certificate.Export(X509ContentType.Pkcs12, certificatePassword);
+            await using (var certificateFile = new FileStream(certificatePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                await certificateFile.WriteAsync(pfx);
+            using SHA256 sha256 = SHA256.Create();
+            string pin = BitConverter.ToString(sha256.ComputeHash(certificate.GetRawCertData())).Replace("-", string.Empty);
+            log.Write("INFO", "Ephemeral localhost SAN certificate generated outside the repository; thumbprint omitted.");
+
+            await using (TestServer server = await TestServer.StartAsync(
+                serverAssembly, connectionString, requestedPort: 19000, useTls: true,
+                certificatePath: certificatePath, certificatePassword: certificatePassword, secondaryPort: 19001))
+            {
+                await server.WaitForSecondaryListenerAsync(19001, TimeSpan.FromSeconds(5));
+                ResponsePacket primary = await SendTlsPingAsync(19000, pin);
+                VerifyUnauthorizedPing(primary);
+                log.Write("PASS", "TLS client with exact SHA-256 pin completed TLS 1.2/1.3 and received the expected unauthenticated PING response on port 19000.");
+
+                ResponsePacket secondary = await SendTlsPingAsync(19001, pin);
+                VerifyUnauthorizedPing(secondary);
+                log.Write("PASS", "The optional secondary TLS listener accepted the same pinned certificate and framed protocol on port 19001.");
+
+                await VerifyMismatchedPinRejectedAsync(19000, pin);
+                log.Write("PASS", "A TLS client with a mismatched certificate pin was rejected during handshake.");
+
+                await VerifyPlaintextRejectedAsync(19000);
+                log.Write("PASS", "Plaintext framed PING received no application response from the TLS listener.");
+                await server.StopAbruptlyAsync();
+            }
+
+            await using (TestServer server = await TestServer.StartAsync(
+                serverAssembly, connectionString, requestedPort: 19000, useTls: false))
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var client = new TcpClient();
+                await client.ConnectAsync(IPAddress.Loopback, 19000, timeout.Token);
+                await MessageFramer.SendAsync(client.GetStream(), new RequestPacket { Command = Commands.Ping }, timeout.Token);
+                ResponsePacket response = await MessageFramer.ReceiveAsync<ResponsePacket>(client.GetStream(), timeout.Token)
+                    ?? throw new TestFailureException("The explicitly plaintext test server closed before responding.");
+                VerifyUnauthorizedPing(response);
+                log.Write("PASS", "Explicitly enabled plaintext mode on loopback port 19000 returned the expected framed PING response.");
+                await server.StopAbruptlyAsync();
+            }
+
+            log.Write("RESULT", "PASS — all four TC05 transport cases observed; TLS pinning is required in Launcher and Unity clients.");
+            return 0;
+        }
+        catch (TestBlockedException ex)
+        {
+            log.Write("BLOCKED", ex.Message);
+            log.Write("RESULT", "BLOCKED");
+            return 2;
+        }
+        catch (Exception ex)
+        {
+            string detail = ex is TestFailureException ? ex.Message : $"Unexpected {ex.GetType().Name}; diagnostic details withheld.";
+            log.Write("FAIL", detail);
+            log.Write("RESULT", "FAIL");
+            return 1;
+        }
+    }
+
+    private static void VerifyUnauthorizedPing(ResponsePacket response)
+    {
+        if (response.Success || response.Code != ErrorCodes.Unauthorized)
+            throw new TestFailureException("A pinned or plaintext PING did not reach the expected unauthenticated application response.");
+    }
+
+    private static async Task<ResponsePacket> SendTlsPingAsync(int port, string pin)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+        using var ssl = new SslStream(client.GetStream(), leaveInnerStreamOpen: false,
+            (_, certificate, chain, errors) => CertificatePinValidator.Validate(certificate, chain, errors, pin));
+        await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+        {
+            TargetHost = "localhost",
+            EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+        }, timeout.Token);
+        await MessageFramer.SendAsync(ssl, new RequestPacket { Command = Commands.Ping }, timeout.Token);
+        return await MessageFramer.ReceiveAsync<ResponsePacket>(ssl, timeout.Token)
+            ?? throw new TestFailureException("The pinned TLS connection closed before its application response.");
+    }
+
+    private static async Task VerifyMismatchedPinRejectedAsync(int port, string pin)
+    {
+        string wrongPin = new string(pin[0] == '0' ? '1' : '0', 64);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+        using var ssl = new SslStream(client.GetStream(), leaveInnerStreamOpen: false,
+            (_, certificate, chain, errors) => CertificatePinValidator.Validate(certificate, chain, errors, wrongPin));
+        try
+        {
+            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            {
+                TargetHost = "localhost",
+                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+            }, timeout.Token);
+        }
+        catch (AuthenticationException)
+        {
+            return;
+        }
+        throw new TestFailureException("The TLS handshake succeeded with a mismatched certificate pin.");
+    }
+
+    private static async Task VerifyPlaintextRejectedAsync(int port)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+        NetworkStream stream = client.GetStream();
+        try
+        {
+            await MessageFramer.SendAsync(stream, new RequestPacket { Command = Commands.Ping }, timeout.Token);
+            byte[] response = new byte[1];
+            int received = await stream.ReadAsync(response, timeout.Token);
+            if (received != 0)
+                throw new TestFailureException("A TLS listener returned application bytes to a plaintext client.");
+        }
+        catch (Exception ex) when (ex is IOException or SocketException)
+        {
+        }
     }
 
     private static async Task RunDisconnectPhaseAsync(
@@ -687,9 +841,16 @@ internal sealed class TestServer : IAsyncDisposable
         Port = port;
     }
 
-    public static async Task<TestServer> StartAsync(string serverAssembly, string connectionString)
+    public static async Task<TestServer> StartAsync(
+        string serverAssembly,
+        string connectionString,
+        int? requestedPort = null,
+        bool useTls = false,
+        string? certificatePath = null,
+        string? certificatePassword = null,
+        int? secondaryPort = null)
     {
-        int port = GetAvailableLoopbackPort();
+        int port = requestedPort ?? GetConfiguredTestPort();
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -701,8 +862,11 @@ internal sealed class TestServer : IAsyncDisposable
         };
         startInfo.ArgumentList.Add(serverAssembly);
         startInfo.Environment["DANTOPHONG_DB_CONNECTION"] = connectionString;
-        startInfo.Environment["DANTOPHONG_USE_TLS"] = "false";
+        startInfo.Environment["DANTOPHONG_USE_TLS"] = useTls ? "true" : "false";
         startInfo.Environment["DANTOPHONG_PORT"] = port.ToString(CultureInfo.InvariantCulture);
+        startInfo.Environment["DANTOPHONG_CERT_PATH"] = useTls ? certificatePath ?? string.Empty : string.Empty;
+        startInfo.Environment["DANTOPHONG_CERT_PASSWORD"] = useTls ? certificatePassword ?? string.Empty : string.Empty;
+        startInfo.Environment["DANTOPHONG_SECONDARY_PORT"] = secondaryPort?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var server = new TestServer(process, port);
@@ -726,7 +890,7 @@ internal sealed class TestServer : IAsyncDisposable
             process.BeginErrorReadLine();
 
             Stopwatch startup = Stopwatch.StartNew();
-            while (!server.HasOutput(line => line.Contains($"Server listening on 127.0.0.1:{port}", StringComparison.Ordinal)))
+            while (!server.HasOutput(line => line.Contains($":{port}; TLS=", StringComparison.Ordinal)))
             {
                 if (process.HasExited)
                     throw new TestFailureException($"The test server exited before listening (exit code {process.ExitCode}).");
@@ -742,6 +906,21 @@ internal sealed class TestServer : IAsyncDisposable
             await server.DisposeAsync();
             throw;
         }
+    }
+
+    public async Task WaitForSecondaryListenerAsync(int port, TimeSpan timeout)
+    {
+        Stopwatch wait = Stopwatch.StartNew();
+        while (wait.Elapsed < timeout)
+        {
+            if (_output.Any(line => line.Contains($"Secondary listener enabled on ", StringComparison.Ordinal) &&
+                                    line.Contains($":{port}; TLS=", StringComparison.Ordinal)))
+                return;
+            if (_process.HasExited)
+                break;
+            await Task.Delay(25);
+        }
+        throw new TestFailureException("The optional secondary TLS listener did not start.");
     }
 
     public async Task WaitForAcceptedClientsAsync(int count, TimeSpan timeout)
@@ -794,11 +973,14 @@ internal sealed class TestServer : IAsyncDisposable
         _process.Dispose();
     }
 
-    private static int GetAvailableLoopbackPort()
+    private static int GetConfiguredTestPort()
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
+        string? configured = Environment.GetEnvironmentVariable("DANTOPHONG_TEST_PORT");
+        if (string.IsNullOrWhiteSpace(configured))
+            return 19000;
+        if (!int.TryParse(configured, out int port) || port is < 1024 or > 65535 || port == 9000)
+            throw new TestFailureException("DANTOPHONG_TEST_PORT must be a non-privileged test port other than 9000.");
+        return port;
     }
 }
 

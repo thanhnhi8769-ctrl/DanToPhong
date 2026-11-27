@@ -6,4 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\Assets\script\CertificatePinValidator.cs" Link="CertificatePinValidator.cs" />
+  </ItemGroup>
 </Project>
