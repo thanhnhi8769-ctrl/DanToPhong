@@ -1,0 +1,15 @@
+TC05 - Local TLS fail-closed runtime checks
+Date: 2026-11-27 (local time, UTC+07:00)
+Target: Server on loopback TCP 9000; isolated DanToPhongDB_Test
+Certificate: short-lived self-signed test certificate with localhost SAN; stored outside the repository and not imported into a system trust store
+
+1. TLS client to TLS server: PASS
+   TLS 1.3 handshake completed with the configured certificate pin. A framed PING reached the application and was rejected as unauthenticated (ERR_UNAUTHORIZED).
+2. Plaintext client to TLS server: PASS
+   A valid length-prefixed JSON PING sent without TLS received no application response; the TLS server closed the connection.
+3. TLS client with a mismatched certificate pin: PASS
+   The client-side certificate validation callback rejected the server certificate and the TLS handshake failed.
+4. Plaintext client to explicitly plaintext server: PASS
+   With DANTOPHONG_USE_TLS=false, the loopback-only server accepted a framed plaintext PING and returned the expected ERR_UNAUTHORIZED application response.
+
+The four transport outcomes were observed directly against the running server. No database credential, connection string, certificate fingerprint, token, or OTP is included. This verifies local transport behavior only; it is not evidence of GUI login, remote reachability, or packet-capture inspection.

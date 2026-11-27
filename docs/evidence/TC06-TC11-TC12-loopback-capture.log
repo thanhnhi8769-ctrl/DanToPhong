@@ -1,0 +1,12 @@
+TC06 / TC11 / TC12 - Sanitized loopback capture
+Date: 2026-11-27 (local time, UTC+07:00)
+Interface: Npcap Loopback (\Device\NPF_Loopback)
+Capture: [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng), 32 packets
+
+- Two TCP connections to loopback port 9000 show SYN/SYN-ACK and FIN/FIN-ACK: TC11 PASS.
+- The TLS connection has a TLS 1.3 ServerHello and cipher suite 0x1302 (TLS_AES_256_GCM_SHA384); application records are encrypted.
+- A separate plaintext length-prefixed PING was sent to the TLS listener and rejected before an application response. Wireshark can decode the anonymous PING but not TLS application data: TC06 PASS, local comparison only.
+- TLS handshake/cipher and plaintext-vs-TLS visibility are present in the same capture: TC12 PASS.
+- The plaintext probe contains no account data. Follow-stream inspection found no non-empty password/token fields, OTP, or long hexadecimal credential values.
+
+The earlier tracked capture was replaced with this anonymous trace. A broad field-name scan had matched a serialized null token field in that old capture; a value-level scan found no non-empty token/password/OTP. As a precaution, six active sessions in DanToPhongDB_Test were revoked. No captured payload values are included in this log.

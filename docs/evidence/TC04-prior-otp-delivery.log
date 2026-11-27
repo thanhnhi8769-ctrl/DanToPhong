@@ -1,0 +1,8 @@
+TC04 - Prior OTP delivery evidence (delivery only)
+Observed: 2026-11-27 09:47:36-09:48:13 local time (UTC+07:00), smtp4dev inbox
+Sender: test@dantophong.invalid
+Recipients observed: game_racer_b@example.invalid, game2_racer_a@example.invalid, game2_racer_b@example.invalid
+Subject: Scooter Racing - Registration Code
+Body template: "Your registration code is [REDACTED]. It expires in 10 minutes."
+
+This records the previously received test mail and does not claim that any code was entered or accepted. No OTP value or screenshot containing a code is retained. TC04 still requires GUI evidence for correct/incorrect/expired codes and the attempt limit.

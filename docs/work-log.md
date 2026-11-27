@@ -27,6 +27,17 @@ and Internet tests remain unverified; see `docs/evidence/README.md`.
 
 No AWS mutation, Git push, or Git identity/configuration change was performed.
 
+## 2026-11-27 — Continuation baseline
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify checkout and server build | `feature/own-netcode` was clean at WIP commit `ba62868`; Server Release build passed with 0 warnings/errors. The shorthand `dotnet build Server` does not identify a project in this checkout; building the actual project path succeeded. | `git status --short --branch`; `git diff --stat`; `git log -5 --oneline`; `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore` |
+| Check isolated local test prerequisites | `DANTOPHONG_TEST_SA_PASSWORD` is present (value not displayed); Docker is available and `dtp-sql` is running. Existing `dtp-smtp` container is stopped; no SMTP test was run. | Environment-variable presence check; `docker info`; `docker ps -a --filter name=dtp-smtp` |
+| Recover existing OTP delivery evidence | Started the already-provisioned `dtp-smtp` container. Its inbox shows the prior registration-code messages (including the user-identified 09:47–09:48 messages); this is TC04 delivery-only evidence. No email was resent and no OTP value was recorded; valid/invalid/expired entry and attempt-limit behavior remain unverified. | `docker start dtp-smtp`; loopback ports 1433/2525/5000 reachable; smtp4dev inbox UI |
+| Verify TLS fail-closed runtime cases | TC05 passed all four local cases: TLS/TLS, plaintext-to-TLS rejection, mismatched certificate-pin rejection and explicit plaintext mode. Server created/used only `DanToPhongDB_Test`; TLS certificate remains outside the repository and was not imported into a system store. | Live Server; four framed-TCP/TLS probes; [TC05-local-tls-fail-closed.log](evidence/TC05-local-tls-fail-closed.log) |
+| Review and replace the pre-existing capture | A broad field-name scan matched a serialized null `token` field; follow-up value-level checks found no non-empty token/password/OTP. As a precaution, revoked all six active sessions in `DanToPhongDB_Test`. Replaced the trace with an anonymous PING capture. | `tshark` offline scan (payload suppressed); SQL update restricted to `DanToPhongDB_Test` |
+| Verify packet-capture cases | TC06, TC11 and TC12 passed locally on Npcap Loopback: SYN/FIN, TLS 1.3 cipher metadata and plaintext-vs-encrypted visibility were verified. The replacement trace contains only anonymous probes and passed credential-pattern checks. | `tshark` protocol/flag analysis; [TC06-TC11-TC12-loopback-capture.log](evidence/TC06-TC11-TC12-loopback-capture.log) |
+
 ## 2026-11-27 — Server-pushed TCP gameplay stream
 
 | Work | Result | Commands / checks |
