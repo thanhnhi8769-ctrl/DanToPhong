@@ -75,3 +75,9 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 |---|---|---|
 | Add bounded outbound mailboxes for game streams | Each client now has a bounded important-event channel (`Wait`) and a one-slot snapshot channel (`DropOldest`); one sender serializes frames per stream. Queue waits occur outside room locks, so a slow stream does not block another client's stream. Socket I/O errors are logged by session. | Server Release build; protocol smoke including full-event-queue wait and stale-snapshot drop |
 | Record the focused smoke result and update protocol notes | Updated TC09 evidence, protocol limits and checklist. The tests are in-memory only; no live match, latency or multi-client socket result is claimed. Existing server process PID 13472 held the normal build output, so builds used ignored `obj` output paths without stopping it. | `dotnet build` Server and smoke with isolated `OutDir`; `dotnet <smoke DLL>`; `git diff --check` |
+
+## 2026-11-27 — Rubric traceability baseline
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Create requirements traceability matrix | Added `docs/requirements-traceability.md` for P0/P1/P2 criteria, source locations, evidence and explicit gaps. Test and report requirements remain partial or unverified where live evidence is absent. | Markdown relative-link validation; cross-check against `docs/evidence/README.md` and current source findings |
