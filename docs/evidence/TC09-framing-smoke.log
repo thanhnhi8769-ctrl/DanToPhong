@@ -1,19 +1,19 @@
 Test ID: TC09
 Date: 2026-11-27
-Scope: DanToPhong.Protocol.MessageFramer, per-client game mailbox, shared account input validation, and bounded email queue in in-memory harnesses; no external endpoint used.
+Scope: DanToPhong.Protocol.MessageFramer, TCP game-room elimination result, per-client game mailbox, shared account input validation, and bounded email queue in in-memory harnesses; no external endpoint used.
 Result: PASS
-Checks: fragmented reads capped at one byte; two coalesced length-prefixed frames preserve order; EOF before a header returns null; zero/oversized incoming lengths rejected; malformed JSON throws JsonException; truncated body throws EndOfStreamException; oversized outgoing JSON rejected; separate GAME_EVENT and GAME_SNAPSHOT frames preserve order, event ID, sequence, and timestamps; a full important-event queue waits for capacity; the snapshot queue retains the newest state; email/password boundaries pass; a full email queue rejects extra reservations; simulated SMTP 451 and 550 responses are retried and a later attempt succeeds.
-Command: dotnet restore .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj; dotnet build .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore -p:OutDir=<ignored obj verify output>; dotnet <smoke DLL from ignored obj verify output>
-Observed stdout:
+Checks: fragmented reads capped at one byte; two coalesced length-prefixed frames preserve order; EOF before a header returns null; zero/oversized incoming lengths rejected; malformed JSON throws JsonException; truncated body throws EndOfStreamException; oversized outgoing JSON rejected; separate GAME_EVENT and GAME_SNAPSHOT frames preserve order, event ID, sequence, and timestamps; a two-player room smoke verifies a client ELIMINATE request does not declare a winner or finish the opponent; a full important-event queue waits for capacity; the snapshot queue retains the newest state; email/password boundaries pass; a full email queue rejects extra reservations; simulated SMTP 451 and 550 responses are retried and a later attempt succeeds.
+Command: dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore -p:OutDir=.\UI\DanToPhong.Protocol.Smoke\obj\verify-gameplay\
+Observed output (stdout and stderr merged by the command tool):
+[SMTP] Email job 1 received status 451; retrying (1/3).
 [SMTP] Email job 1 delivered.
+[SMTP] Email job 1 received status 550; retrying (2/3).
 PASS: fragmented reads and coalesced frames preserve order.
 PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.
 PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.
+PASS: a client elimination request does not declare a winner or finish the other player.
 PASS: per-client mailbox waits for important events and drops stale snapshots.
 PASS: shared account validation accepts the email limit and rejects overlong email/password values.
 PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.
-Observed stderr:
-[SMTP] Email job 1 received status 451; retrying (1/3).
-[SMTP] Email job 1 received status 550; retrying (2/3).
 Limit: Queue behavior used an injected sender only; SMTP connection/authentication, smtp4dev delivery through the worker, outage recovery against a real server, live push, TLS, database, mailbox behavior over real sockets, 10–50 client load, socket FIN capture, and multiplayer gameplay remain untested.
 Redaction: No host/IP, account data, or credentials used.

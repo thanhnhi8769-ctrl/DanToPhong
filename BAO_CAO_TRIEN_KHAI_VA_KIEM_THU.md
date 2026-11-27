@@ -67,7 +67,7 @@ không treo khi mất kết nối và hiển thị tiếng Việt đúng dấu. 
 | SMTP/OTP | **Đã sửa; runtime một phần** | MailKit hỗ trợ implicit TLS 465 và STARTTLS 587; request OTP ghi hash rồi đưa mail vào Channel bounded (64 jobs), worker retry SMTP 4xx/5xx tối đa ba lần. Queue/retry smoke PASS; chưa kiểm tra delivery/failure bằng SMTP thật sau thay đổi. |
 | Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS đọc không phân biệt hoa-thường; TLS được chuyển tiếp từ Launcher sang Unity; env port sai giờ báo lỗi thay vì âm thầm fallback. |
 | Điều khiển/va chạm xe | **Đã rà soát** | Có ga, phanh/lùi, rẽ, nhảy, chống kẹt, bám đường và hồi sinh; chưa test vật lý bằng build chạy. |
-| Multiplayer state | **Prototype; live test BLOCKED** | Server mô phỏng kinematics, kiểm tra checkpoint/finish gate, push snapshot/event; có code spectate/reconnect 120 giây và thưởng winner phía server. Chưa có physics đầy đủ; client còn có thể yêu cầu loại mình; chưa kiểm chứng trận live. |
+| Multiplayer state | **Prototype; live test BLOCKED** | Server mô phỏng kinematics, kiểm tra checkpoint/finish gate, push snapshot/event; có code spectate/reconnect 120 giây và thưởng winner phía server. Client có thể xin tự loại nhưng không thể làm đối thủ thắng/nhận thưởng; server chỉ ghi winner khi qua finish gate. Physics loại xe vẫn chưa authoritative; chưa kiểm chứng trận live. |
 | Scene mặc định `game` | **Đã sửa** | Scene có dùng làm fallback nhưng thiếu Build Settings; đã thêm vào danh sách build. |
 | Git hygiene | **Đã sửa** | Cho phép các project .NET và scene thuộc `Assets/scene` được version; tiếp tục loại build/cache/demo scenes. |
 | AWS Internet-ready | **Chưa sẵn sàng** | Lần đọc/truy vấn AWS được ghi trước đây báo EC2 và RDS đã dừng sau smoke test. EIP khi đó gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; lượt hiện tại không đọc lại trạng thái AWS và không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
@@ -276,8 +276,10 @@ Server mô phỏng kinematics đơn giản, dùng spawn/gate trong track catalog
 kiểm tra checkpoint/finish dựa trên giao cắt gate server-side; chưa mô phỏng
 đầy đủ vật lý/collision của Unity. Spectate và reconnect trong grace period
 120 giây có trong source, nhưng chưa được xác minh bằng trận live. Server
-chưa sở hữu timer multiplayer và vẫn nhận `ELIMINATE` từ client, nên kết quả
-loại người chơi chưa hoàn toàn authoritative. Room state không bền sau restart.
+chưa sở hữu timer multiplayer; client có thể xin tự loại (forfeit), nhưng yêu
+cầu này không tuyên bố winner hay phát thưởng. Winner chỉ được ghi khi server
+phát hiện qua finish gate. Tình trạng loại do va chạm/rơi chưa được server
+xác định bằng physics. Room state không bền sau restart.
 
 **Đánh giá:** logic có guard cho xe owner/remote, timeout room, missing scene và respawn. Không thể kết luận chống kẹt/văng/bay lạ hoặc đồng bộ Internet đạt ngưỡng chất lượng nếu chưa chạy build thật trên đường đua và hai client có latency/jitter. Cần kiểm tra phanh khi rẽ gấp, va tường, qua khe nối, rơi nước, respawn gần xe khác và rời mạng giữa trận.
 
@@ -646,8 +648,9 @@ mutation hoặc Git push.
 
 Gameplay prototype có server-side motion/gate checks, event/snapshot stream,
 interpolation, spectate/reconnect và server-side winner reward trong source.
-Physics còn đơn giản, timer/elimination chưa hoàn toàn server-authoritative,
-room state không bền sau restart, và chưa có trận live hoặc tải đo thật.
+Smoke test xác nhận client `ELIMINATE` không tự tuyên bố winner hoặc làm đối thủ
+finished; physics loại xe vẫn chưa hoàn toàn server-authoritative. Room state
+không bền sau restart, và chưa có trận live hoặc tải đo thật.
 
 ## 15. Đối chiếu đề bài
 

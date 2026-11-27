@@ -184,17 +184,6 @@ namespace DanToPhong.Server
                     player.Steer = 0f;
                     player.Brake = true;
                     RecordEvent(room, "PLAYER_ELIMINATED", userId, player.Username, player.NextCheckpoint);
-                    GamePlayer[] activePlayers = room.Players.Values
-                        .Where(candidate => !candidate.IsEliminated && !candidate.DisconnectedAt.HasValue)
-                        .ToArray();
-                    if (activePlayers.Length == 1 && room.Players.Count > 1)
-                    {
-                        GamePlayer winner = activePlayers[0];
-                        winner.IsFinished = true;
-                        room.WinnerUserId = winner.UserId;
-                        room.WinnerUsername = winner.Username;
-                        RecordEvent(room, "FINISH", winner.UserId, winner.Username, winner.NextCheckpoint);
-                    }
                     return ToResponse(room, userId, "Player eliminated.");
                 }
 

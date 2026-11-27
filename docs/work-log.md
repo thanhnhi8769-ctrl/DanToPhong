@@ -106,3 +106,11 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 |---|---|---|
 | Verify a synthetic MIME attachment through smtp4dev | smtp4dev accepted a Vietnamese sample with an in-memory text attachment for a fixed `.invalid` test recipient. A MailKit ProtocolLogger used `RedactSecrets=true` and kept its trace in memory. No real account, SMTP credential, OTP, or external endpoint was used. | `dotnet .\UI\DanToPhong.Protocol.Smoke\obj\verify-email\DanToPhong.Protocol.Smoke.dll --smtp4dev-sample`; SMTP4dev accepted send |
 | Record E3 limitations | E3 remains PARTIAL: no SMTP AUTH exchange tested secret redaction; ProtocolLogger does not redact message bodies and is not enabled in OTP production. Added sanitized evidence and updated matrix/report. | [E3-smtp-sample.log](evidence/E3-smtp-sample.log); relative-link check; `git diff --check`; staged secret-pattern scan |
+
+## 2026-11-27 - Preventing client elimination from awarding a win
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Keep winner assignment server-authoritative | A client may still request its own elimination/forfeit, but that event no longer marks the remaining player finished or awards a win. Winner assignment remains tied to server-side finish-gate detection. | Targeted review of `TcpGameRoomRegistry.SubmitEvent` and `Simulate` |
+| Add a focused two-player room smoke check | The in-memory smoke creates and starts a two-player room, submits one client's elimination request, then asserts there is no winner and the opponent is not finished. This does not verify a live Unity match or server-detected elimination physics. | `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore -p:OutDir=.\UI\DanToPhong.Protocol.Smoke\obj\verify-gameplay\` |
+| Align documentation and evidence | Updated the gameplay limitations, protocol semantics, requirements traceability and TC09 smoke scope. Live gameplay remains unverified; elimination itself is still a client-requested forfeit rather than server physics. | `git diff --check`; relative Markdown-link validation; secret-pattern scan |

@@ -32,9 +32,12 @@ and an authenticated TCP stream for ordered events and nominal 20 Hz
 snapshots. The server has in-memory spectate/reconnect paths (120-second
 disconnect grace) and server-side winner rewards, but these paths have not
 been verified in a live match. The model is not full Unity vehicle/track
-physics, and elimination can still be requested by a client, so gameplay is
-not fully authoritative or release-ready. Room state is process-local and is
-lost on server restart. See [docs/protocol.md](docs/protocol.md) and
+physics. A client may request its own elimination, but that request no longer
+declares another player the winner or grants a winner reward; the server awards
+a winner only after its finish-gate check. Elimination itself is still not
+physics-authoritative, so gameplay is not release-ready. Room state is
+process-local and is lost on server restart. See
+[docs/protocol.md](docs/protocol.md) and
 [docs/requirements-checklist.md](docs/requirements-checklist.md).
 
 All implemented network features, including gameplay synchronization, use the
