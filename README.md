@@ -34,11 +34,9 @@ disconnect grace) and server-side winner rewards, but these paths have not
 been verified in a live match. The model is not full Unity vehicle/track
 physics. A client may request its own elimination, but that request no longer
 declares another player the winner or grants a winner reward; the server awards
-a winner only after its finish-gate check. Game input uses the authenticated
-player identity and server-side motion; client-supplied positions are ignored.
-Elimination itself is still a client-requested forfeit rather than a server
-physics result, so gameplay is not release-ready. Room state is process-local
-and is lost on server restart. See
+a winner only after its finish-gate check. Elimination itself is still not
+physics-authoritative, so gameplay is not release-ready. Room state is
+process-local and is lost on server restart. See
 [docs/protocol.md](docs/protocol.md) and
 [docs/requirements-checklist.md](docs/requirements-checklist.md).
 
