@@ -238,3 +238,10 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Ignore local secret and certificate variants | Added common `.env`, private-key, certificate, and keystore suffixes without hiding the checked-in `.example` configuration files. | `git check-ignore --no-index` on synthetic paths |
 | Audit targeted C# source patterns | No `.Result`, blocking `.Wait()`, `DoEvents`, `Thread.Sleep`, BeginReceive, or EndReceive matches in Server/Protocol/Launcher source. SQL call sites were located, but a full query-by-query parameter audit was not repeated in this pass; prior R4 evidence remains PARTIAL. | `rg` searches in `UI/DanToPhong.Server`, `UI/DanToPhong.Protocol`, and `UI/UI` |
 | Verify architecture/ignore hygiene | Legacy networking-library search returned no matches; build/zip/secret ignore probes passed. No AWS commands or changes. | source search; `git check-ignore -v --no-index` |
+
+## 2026-11-27 - Updating README local and TLS guidance
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Clarify transport and SMTP dependencies | README now states the team-written client/server TCP protocol and limits MailKit/ProtocolLogger to SMTP. | Source search for `MailKit` and `ProtocolLogger`; `git diff --check` |
+| Document pinned TLS and local GUI setup | Added self-signed certificate pinning guidance, `run-local.ps1` usage, test-only loopback plaintext steps, two-client instructions, SMTP4dev OTP viewing, and evidence/report links with the TC/T status table. | Parsed `deploy/client/server.json.example`; checked linked files and local port/config descriptions |

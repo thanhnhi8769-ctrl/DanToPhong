@@ -1,17 +1,21 @@
 # Dân Tổ Phóng
 
 Unity scooter-racing game with a WinForms C# Launcher, a C# TCP service on
-port 9000, and SQL Server. The network stack is developed in this repository;
-no third-party networking library is used.
+port 9000, and SQL Server. The client-to-server TCP transport and application
+protocol are written by this team. MailKit is used only by the Server for
+outbound email to SMTP and by the SMTP smoke-test sample; it is not used for
+client-to-server networking.
 
 ## Contents
 
 1. [Architecture and current limits](#architecture-and-current-limits)
 2. [Local prerequisites and configuration](#local-prerequisites-and-configuration)
-3. [Build and run](#build-and-run)
-4. [AWS deployment notes](#aws-deployment-notes)
-5. [SMTP and OTP](#smtp-and-otp)
-6. [Security and verification](#security-and-verification)
+3. [Local test](#local-test)
+4. [Two GUI clients on one machine](#run-two-gui-clients-on-one-machine)
+5. [Build and run](#build-and-run)
+6. [AWS deployment notes](#aws-deployment-notes)
+7. [SMTP and OTP](#smtp-and-otp)
+8. [Security and verification](#security-and-verification)
 
 ## Architecture and current limits
 
@@ -65,14 +69,71 @@ variable names and placeholders are in `deploy/aws/server.env.example`.
 
 The listener port defaults to `9000`; optional `DANTOPHONG_SECONDARY_PORT` is
 disabled by default and uses the same TLS certificate. TLS is required by
-default; configure a certificate path/password outside the repository and set
-a 64-hex SHA-256 leaf-certificate thumbprint in `server.json` as
-`certificateThumbprintSha256`. The certificate SAN must match the configured
-host; update the pin in a coordinated certificate rotation. Set TLS off only
-explicitly for an isolated test using dummy data. Client endpoint template:
-`deploy/client/server.json.example`.
+default. For Internet connections, the chosen design is a self-signed server
+certificate pinned by its SHA-256 leaf-certificate thumbprint in each client's
+`server.json` (`certificateThumbprintSha256`). The certificate SAN must match
+the configured `host`; clients retain hostname and validity checks and accept
+an untrusted root only when the configured pin matches. Rotate the certificate
+and pin together. The endpoint template is
+[`deploy/client/server.json.example`](deploy/client/server.json.example).
 TLS listens on all interfaces by default; `DANTOPHONG_LISTEN_ADDRESS` can bind
-to a specific IP. Plaintext mode is always loopback-only.
+to a specific IP. Plaintext mode is always loopback-only and must be explicitly
+enabled for isolated testing.
+
+### Local test
+
+Use the test runner for the normal local setup. It requires the already-running
+Docker containers `dtp-sql` and `dtp-smtp`; it checks them and their local
+ports, but does not start, stop, or modify containers. Set
+`DANTOPHONG_TEST_SA_PASSWORD` in the user or current PowerShell environment.
+The runner constructs `DANTOPHONG_DB_CONNECTION` for the dedicated
+`DanToPhongDB_Test` database without printing it, creates a temporary
+self-signed certificate outside the repository, and starts the server with TLS
+bound to `127.0.0.1:19000`. It also configures SMTP4dev at `127.0.0.1:2525`.
+The test Server binds to port `19000`, not `9000`.
+
+```powershell
+.\scripts\run-local.ps1
+```
+
+Script: [`scripts/run-local.ps1`](scripts/run-local.ps1).
+
+Keep that PowerShell window open while testing and stop the server with
+Ctrl+C. Registration mail and OTP messages can be viewed in SMTP4dev at
+`http://localhost:5000`. Never copy the test password, generated certificate,
+or connection string into the repository.
+
+TLS can be disabled **only for isolated GUI testing** with disposable accounts
+and data, never for an Internet test or Release deployment. The normal runner
+above intentionally keeps TLS enabled. For the plaintext-only GUI alternative,
+first verify the same two local containers and use a dedicated PowerShell
+window; the server must remain loopback-bound and use the test database:
+
+```powershell
+if ([string]::IsNullOrWhiteSpace($env:DANTOPHONG_TEST_SA_PASSWORD)) {
+    throw 'Set DANTOPHONG_TEST_SA_PASSWORD before starting the test server.'
+}
+$db = New-Object System.Data.Common.DbConnectionStringBuilder
+$db['Server'] = 'localhost,1433'
+$db['Database'] = 'DanToPhongDB_Test'
+$db['User Id'] = 'sa'
+$db['Password'] = $env:DANTOPHONG_TEST_SA_PASSWORD
+$db['Encrypt'] = 'True'
+$db['TrustServerCertificate'] = 'True'
+$env:DANTOPHONG_DB_CONNECTION = $db.ConnectionString
+$env:DANTOPHONG_PORT = '19000'
+$env:DANTOPHONG_LISTEN_ADDRESS = '127.0.0.1'
+$env:DANTOPHONG_USE_TLS = 'false'
+$env:DANTOPHONG_SMTP_MODE = 'smtp4dev'
+$env:DANTOPHONG_SMTP_HOST = '127.0.0.1'
+$env:DANTOPHONG_SMTP_PORT = '2525'
+dotnet run --project .\UI\DanToPhong.Server\DanToPhong.Server.csproj
+```
+
+For this mode only, configure the untracked client `server.json` with
+`host: "localhost"`, `port: 19000`, and `useTls: false`; do not reuse that
+configuration outside the local GUI test. The test runner's TLS-pinned mode
+remains preferred.
 
 ### Start the server locally
 
@@ -95,19 +156,18 @@ This is a manual GUI test; the console evidence in
 [docs/evidence/README.md](docs/evidence/README.md) does not verify Launcher or
 Unity rendering and controls.
 
-1. Make sure only the designated local test services are in use: `dtp-sql`
-   and `dtp-smtp`. Set `DANTOPHONG_TEST_SA_PASSWORD` in the user environment.
-   From the repository root, run `.\scripts\run-local.ps1` in its own
-   PowerShell window. It builds the Server and keeps it running on loopback
-   port `19000` with TLS. It does not print the database connection string or
-   start/stop containers. It binds only to `127.0.0.1` and forces email OTP
-   traffic to the loopback smtp4dev port `2525`, with no external SMTP fallback.
-2. The script prints the public `server.json` values, including the SHA-256
-   certificate pin. Publish the Launcher as described below, copy
-   `deploy\client\server.json.example` to `LauncherRelease\server.json`, and
-   set `host` to `localhost`, `port` to `19000`, `useTls` to `true`, and
-   `certificateThumbprintSha256` to the printed pin. Do not copy the temporary
-   server certificate into the repository.
+1. Follow [Local test](#local-test) and run `.\scripts\run-local.ps1` in its
+   own PowerShell window. The TLS-pinned test server uses loopback port `19000`
+   and directs OTP mail only to smtp4dev on port `2525`. If you use the
+   plaintext-only GUI alternative instead, follow its explicit environment
+   setup and keep the server bound to `127.0.0.1`.
+2. Publish the Launcher as described below and copy
+   `deploy\client\server.json.example` to `LauncherRelease\server.json`.
+   Set `host` to `localhost` and `port` to `19000`. With the normal TLS runner,
+   set `useTls` to `true` and `certificateThumbprintSha256` to the printed pin.
+   For the isolated plaintext GUI alternative only, set `useTls` to `false`
+   and omit the pin. Do not copy the temporary server certificate into the
+   repository.
 3. Place the Unity player at `LauncherRelease\Game\DanToPhong.exe` (or use the
    documented `BuildGame36` layout), then start the Launcher executable twice.
    Sign in with two different disposable test accounts. The Launcher hides
@@ -159,7 +219,9 @@ dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.cs
 ```
 
 This sends only to `smtp-sample@example.invalid` on `127.0.0.1:2525`, uses no
-SMTP credentials, and keeps the `ProtocolLogger` trace in memory.
+SMTP credentials, and uses MailKit's SMTP `ProtocolLogger` with its trace kept
+in memory. This logger is for the server-to-SMTP sample only, not the
+client-to-server protocol.
 `RedactSecrets` covers authentication secrets only, not message content; the
 logger must not be used with real OTP or personal data.
 
@@ -194,8 +256,9 @@ must remain outside this repository.
 
 - Never commit database credentials, SMTP App Passwords, tokens, private keys,
   certificates, runtime secret files or real user data.
-- For Internet use, TLS must be enabled on server and clients with a trusted
-  certificate matching the configured hostname.
+- For Internet use, enable TLS and pin the self-signed server certificate's
+  SHA-256 thumbprint in client `server.json`; make sure its SAN matches the
+  configured hostname. Do not disable certificate validation.
 - Test SMTP, database access, TLS fail-closed behavior, reconnects, and two
   clients across independent networks before any real-account use.
 - Record only observed test results. Sanitize screenshots/logs before saving
@@ -224,3 +287,5 @@ must remain outside this repository.
 Current evidence and test scope are indexed in
 [docs/evidence/README.md](docs/evidence/README.md); the detailed requirement
 mapping is in [docs/requirements-traceability.md](docs/requirements-traceability.md).
+The implementation and test report is
+[BAO_CAO_TRIEN_KHAI_VA_KIEM_THU.md](BAO_CAO_TRIEN_KHAI_VA_KIEM_THU.md).
