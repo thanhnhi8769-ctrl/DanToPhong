@@ -648,9 +648,24 @@ mutation hoặc Git push.
 
 Gameplay prototype có server-side motion/gate checks, event/snapshot stream,
 interpolation, spectate/reconnect và server-side winner reward trong source.
-Smoke test xác nhận client `ELIMINATE` không tự tuyên bố winner hoặc làm đối thủ
-finished; physics loại xe vẫn chưa hoàn toàn server-authoritative. Room state
-không bền sau restart, và chưa có trận live hoặc tải đo thật.
+Smoke test gửi `UserId`/`TargetId` giả cùng `ELIMINATE`: chỉ người gọi bị loại,
+đối thủ không đổi trạng thái và không có winner/thưởng. Handler dùng danh tính
+phiên đã xác thực; `GAME_INPUT` cũng chỉ tra/cập nhật người gọi. `INVITE` có thể
+tạo lời mời chờ cho người nhận, nhưng không sửa trạng thái ván hoặc tài khoản.
+
+Các kiểm tra gameplay hiện có: input phải thuộc người chơi trong ván đang chạy
+và chưa kết thúc/bị loại/mất kết nối; `Throttle`/`Steer` phải hữu hạn trong
+[-1, 1]; `ClientTick` phải tăng nghiêm ngặt. `ClientTimestampMs` chỉ bắt buộc
+phải có, không kiểm tra độ mới/độ lệch. Client không gửi vị trí được chấp nhận;
+server tự mô phỏng vị trí/yaw từ input, bước 0,05 giây, tốc độ bị kẹp [-5, 25],
+và dùng timeout input 0,5 giây để phanh. Mỗi lần mô phỏng bù tối đa 4 bước.
+Checkpoint chỉ tăng theo checkpoint kế tiếp khi đoạn chuyển động cắt vùng gate
+mở rộng; finish chỉ được ghi sau đủ checkpoint và cắt finish gate. Chưa có bộ
+đo thời gian đua/giới hạn hoàn thành, kiểm tra chiều chạy, phát hiện va chạm,
+văng khỏi đường/rơi, hay detector riêng cho dịch chuyển bất thường (vì client
+không cung cấp vị trí). `ELIMINATE` vẫn là yêu cầu tự-forfeit từ client, không
+phải kết quả physics do server phát hiện. Room state không bền sau restart;
+chưa có trận live hoặc tải đo thật.
 
 ## 15. Đối chiếu đề bài
 

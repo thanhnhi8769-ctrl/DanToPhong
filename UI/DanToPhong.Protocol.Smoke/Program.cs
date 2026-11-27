@@ -103,7 +103,7 @@ static async Task RunAsync(string[] args)
     Console.WriteLine("PASS: fragmented reads and coalesced frames preserve order.");
     Console.WriteLine("PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.");
     Console.WriteLine("PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.");
-    Console.WriteLine("PASS: a client elimination request does not declare a winner or finish the other player.");
+    Console.WriteLine("PASS: forged UserId/TargetId with ELIMINATE affects only the caller; opponent state and winner remain unchanged.");
     Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
     Console.WriteLine("PASS: shared account validation accepts the email limit and rejects overlong email/password values.");
     Console.WriteLine("PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.");
@@ -142,11 +142,18 @@ static void VerifyClientEliminationDoesNotDeclareWinner()
             throw new InvalidOperationException("The gameplay smoke room could not be started.");
 
         ResponsePacket elimination = TcpGameRoomRegistry.SubmitEvent(hostUserId,
-            new RequestPacket { GameEventType = "ELIMINATE" });
+            new RequestPacket
+            {
+                UserId = guestUserId,
+                TargetId = "smoke-guest",
+                GameEventType = "ELIMINATE"
+            });
         if (!elimination.Success || elimination.GameFinished || elimination.WinnerUserId.HasValue ||
             elimination.GamePlayers == null ||
-            elimination.GamePlayers.Any(player => player.UserId == guestUserId && player.IsFinished))
-            throw new InvalidOperationException("A client elimination request incorrectly declared a winner.");
+            !elimination.GamePlayers.Any(player => player.UserId == hostUserId && player.IsEliminated) ||
+            elimination.GamePlayers.Any(player =>
+                player.UserId == guestUserId && (player.IsEliminated || player.IsFinished)))
+            throw new InvalidOperationException("A client elimination request changed another player's state.");
     }
     finally
     {
