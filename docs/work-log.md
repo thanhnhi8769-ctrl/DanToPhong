@@ -211,6 +211,20 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Bind the local runner to loopback | The first run exposed that the general TLS default binds all interfaces. Added optional `DANTOPHONG_LISTEN_ADDRESS`, made plaintext reject non-loopback binds, and set the local runner to `127.0.0.1`. | Server source and local runner update |
 | Rerun and stop the local Server | Build and test DB startup passed; log reported `127.0.0.1:19000` with TLS enabled. Stopped only verified PID 38020; `19000` was clear. | `.\scripts\run-local.ps1`; `Stop-Process -Id 38020`; port check |
 
+## 2026-11-27 - Rechecking T1-T8 after bind hardening
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Rerun protocol T1-T8 | Dedicated loopback listener and both authenticated TCP clients observed; PONG 3.5/1.1 ms, chat 11.2 ms, ordered 20-message and Vietnamese round-trips, abrupt disconnect event, and server-shutdown detection passed. Temporary accounts removed. GUI remains manual. | `tools/run-t2t8-protocol-test.ps1`; [latest log](evidence/T2-T8-protocol-console-20261127-182612.log) |
+| Verify cleanup | Harness exited its server processes; port 19000 returned clear. Port 9000 pre-existing listener was not stopped. | `Get-NetTCPConnection -State Listen -LocalPort 19000` |
+
+## 2026-11-27 - Forcing local-run email to smtp4dev
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Prevent real SMTP fallback in local runner | The runner now sets `DANTOPHONG_SMTP_MODE=smtp4dev`, loopback host/port, dummy sender, and blank process-scoped credentials; it refuses startup if `dtp-smtp` port 2525 is unreachable. The previous runner startup sent no email. | Source review; PowerShell AST parse |
+| Verify local dependencies | Loopback ports 2525 and 1433 were reachable; no container was started or stopped and no SMTP message was sent. | `Test-NetConnection 127.0.0.1 -Port 2525`; `Test-NetConnection 127.0.0.1 -Port 1433` |
+
 ## 2026-11-27 - Tightening secret/build ignore checks
 
 | Work | Result | Commands / checks |

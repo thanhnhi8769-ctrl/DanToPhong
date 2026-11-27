@@ -28,3 +28,10 @@ Command: `tools/run-t2t8-protocol-test.ps1`
 Evidence: [T2-T8-protocol-console-20261127-180529.log](T2-T8-protocol-console-20261127-180529.log)
 Observed: T1 listener on dedicated loopback port 19000; T2 two authenticated clients; T3 PONG 1.9/0.6 ms; T4 chat delivery 5.4 ms; T5 20 ordered messages; T6 exact Vietnamese round-trip; T7 abrupt reset cleanup and peer event/snapshot; T8 both clients detected server termination; temporary accounts removed from DanToPhongDB_Test.
 Scope: No Launcher/Unity GUI actions; this run is protocol evidence only. Test server processes exited; port 19000 was checked clear.
+
+T1-T8 console rerun after local bind-address hardening: PASS at protocol level; GUI remains PARTIAL
+Time: 2026-11-27 18:26:12-18:26:18 +07:00
+Command: `tools/run-t2t8-protocol-test.ps1`
+Evidence: [T2-T8-protocol-console-20261127-182612.log](T2-T8-protocol-console-20261127-182612.log)
+Observed: T1 listener on dedicated loopback port 19000; T2 two authenticated clients; T3 PONG 3.5/1.1 ms; T4 chat delivery 11.2 ms; T5 20 ordered messages; T6 exact Vietnamese round-trip; T7 abrupt reset cleanup and peer event/snapshot; T8 both clients detected server termination; temporary accounts removed from DanToPhongDB_Test.
+Scope: No Launcher/Unity GUI actions; this run is protocol evidence only. Test server processes exited; port 19000 was checked clear.

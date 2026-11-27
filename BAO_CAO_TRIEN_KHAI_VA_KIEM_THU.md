@@ -365,7 +365,7 @@ EIP/Security Group và không push Git.
 | Bước | Kết quả | Bằng chứng |
 |---|---|---|
 | T1 | PASS — `netstat -ano | findstr 9000` thấy `127.0.0.1:9000 LISTENING`; chỉ là loopback. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log) |
-| T2–T8 | PARTIAL — console test đã PASS ở mức giao thức: hai client TCP đăng nhập, PONG/chat dưới 1 giây, 20 tin liên tiếp, tiếng Việt, peer-disconnect event và server shutdown. GUI thật vẫn cần chạy tay; chưa xác nhận thao tác/hiển thị trên Launcher hoặc Unity. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log), [log console có timestamp](docs/evidence/T2-T8-protocol-console-20261127-180529.log) |
+| T2–T8 | PARTIAL — console test đã PASS ở mức giao thức: hai client TCP đăng nhập, PONG/chat dưới 1 giây, 20 tin liên tiếp, tiếng Việt, peer-disconnect event và server shutdown. GUI thật vẫn cần chạy tay; chưa xác nhận thao tác/hiển thị trên Launcher hoặc Unity. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log), [log console có timestamp](docs/evidence/T2-T8-protocol-console-20261127-182612.log) |
 
 Console harness: chạy `.\tools\run-t2t8-protocol-test.ps1`. Harness khởi động server test ngắn hạn trên loopback với plaintext được bật tường minh, tạo hai account ngẫu nhiên trong `DanToPhongDB_Test`, rồi xóa chúng sau test. Đây là bằng chứng framing/protocol TCP, không thay thế kiểm thử GUI; TC05 là bằng chứng TLS riêng.
 

@@ -15,7 +15,13 @@ $names = @(
     'DANTOPHONG_LISTEN_ADDRESS',
     'DANTOPHONG_CERT_PATH',
     'DANTOPHONG_CERT_PASSWORD',
-    'DANTOPHONG_SECONDARY_PORT'
+    'DANTOPHONG_SECONDARY_PORT',
+    'DANTOPHONG_SMTP_MODE',
+    'DANTOPHONG_SMTP_HOST',
+    'DANTOPHONG_SMTP_PORT',
+    'DANTOPHONG_SMTP_USER',
+    'DANTOPHONG_SMTP_PASSWORD',
+    'DANTOPHONG_SMTP_FROM'
 )
 $previous = @{}
 foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -41,6 +47,9 @@ try {
     if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 1433 -InformationLevel Quiet)) {
         throw 'BLOCKED: dtp-sql is running but localhost:1433 is not reachable.'
     }
+    if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 2525 -InformationLevel Quiet)) {
+        throw 'BLOCKED: dtp-smtp is running but localhost:2525 is not reachable; no external SMTP fallback is allowed.'
+    }
 
     $connectionBuilder = New-Object System.Data.Common.DbConnectionStringBuilder
     $connectionBuilder['Server'] = 'localhost,1433'
@@ -53,6 +62,12 @@ try {
     $env:DANTOPHONG_PORT = '19000'
     $env:DANTOPHONG_USE_TLS = 'true'
     $env:DANTOPHONG_LISTEN_ADDRESS = '127.0.0.1'
+    $env:DANTOPHONG_SMTP_MODE = 'smtp4dev'
+    $env:DANTOPHONG_SMTP_HOST = '127.0.0.1'
+    $env:DANTOPHONG_SMTP_PORT = '2525'
+    $env:DANTOPHONG_SMTP_USER = ''
+    $env:DANTOPHONG_SMTP_PASSWORD = ''
+    $env:DANTOPHONG_SMTP_FROM = 'test@dantophong.invalid'
     $listeners = Get-NetTCPConnection -State Listen -LocalPort 19000 -ErrorAction SilentlyContinue
     if ($listeners) { throw 'BLOCKED: test port 19000 is occupied; no listener was stopped.' }
     if ($EnableSecondaryListener) {

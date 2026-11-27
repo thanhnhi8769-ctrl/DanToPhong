@@ -100,7 +100,8 @@ Unity rendering and controls.
    From the repository root, run `.\scripts\run-local.ps1` in its own
    PowerShell window. It builds the Server and keeps it running on loopback
    port `19000` with TLS. It does not print the database connection string or
-   start/stop containers.
+   start/stop containers. It binds only to `127.0.0.1` and forces email OTP
+   traffic to the loopback smtp4dev port `2525`, with no external SMTP fallback.
 2. The script prints the public `server.json` values, including the SHA-256
    certificate pin. Publish the Launcher as described below, copy
    `deploy\client\server.json.example` to `LauncherRelease\server.json`, and
