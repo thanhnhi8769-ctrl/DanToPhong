@@ -115,3 +115,11 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Verify client identity boundaries | The event handler uses the authenticated session user ID; a smoke request with forged `UserId` and `TargetId` only eliminated its caller, left the opponent unchanged and created no winner/reward state. `INVITE` intentionally queues a pending notification for its selected recipient, not a race/account-state change. | Source review of `Program.HandleGameEventAsync` and `HandleInviteAsync`; TC09 in-memory smoke |
 | Record exact gameplay checks and gaps | Documented bounded input values, server speed clamp, ordered gate checks, simulation/input/disconnect timing, and the unvalidated client timestamp; explicitly states no client position is accepted and no separate displacement, collision, direction, race-duration, or fall detector exists. | `TcpGameRoomRegistry.SubmitInput`, `Simulate`, and `CrossedGate`; `git diff --check` |
 | Align documentation and evidence | Updated the report's known-limitations section, README, traceability and TC09. No live match or physics-based elimination is claimed. | Relative path check; secret-pattern scan |
+
+## 2026-11-27 - Closing the client socket with the main form
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Close the TCP connection in `Main_FormClosing` | The form now unsubscribes its status handler and synchronously closes the network stream/socket before finishing shutdown. The outer application owner still disposes the service after `Application.Run` returns. | Source review of `Main_FormClosing` and `NetworkClientService.Disconnect` |
+| Verify the Launcher build | Build succeeded with 0 errors and 6 existing nullable-context warnings in generated Designer files. | `dotnet build .\UI\UI\UI.csproj -c Release --no-restore -p:OutDir=.\UI\UI\obj\verify-r3g\` |
+| Record remaining R3g limitation | The service `Dispose` method still waits synchronously for its heartbeat task after closing the socket; no claim is made that full async shutdown is complete. | `.Result`/`.Wait()` search plus review of `GetAwaiter().GetResult()` in service disposal |

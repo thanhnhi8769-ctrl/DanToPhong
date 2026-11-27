@@ -2055,6 +2055,7 @@ namespace UI
             if (_netClient != null)
             {
                 _netClient.ConnectionStatusChanged -= OnConnectionStatusChanged;
+                _netClient.Disconnect();
             }
 
             if (!_isLoggingOut)
