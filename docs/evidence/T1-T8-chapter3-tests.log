@@ -1,0 +1,13 @@
+Test group: Chương 3 — kiểm thử 8 bước
+Date: 2026-11-27
+
+T1: PASS
+Time: 2026-11-27 16:15:17 +07:00
+Command: netstat -ano | findstr 9000
+Observed: TCP 127.0.0.1:9000 LISTENING, PID 13472.
+Scope: Confirms a local loopback listener only; does not establish public-interface reachability.
+
+T2-T8: BLOCKED — not run.
+Reason: The required Launcher client window is not available for interaction in this session. No client was launched a second time, no GUI actions were submitted, and no client-to-client result is inferred from T1.
+
+Redaction: No account data, endpoint outside loopback, or credentials recorded.

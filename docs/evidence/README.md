@@ -17,6 +17,13 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | TC11 | TCP 3-way handshake và FIN tới cổng 9000 | PASS — SYN/SYN-ACK và FIN/FIN-ACK quan sát được trên Npcap Loopback | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log); [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng) |
 | TC12 | TLS handshake/cipher và so sánh plaintext/TLS bằng Wireshark | PASS — TLS 1.3 ServerHello/cipher và plaintext probe đối chiếu trong trace đã rà payload | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log); [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng) |
 
+### Chương 3 — kiểm thử 8 bước
+
+| Test | Kết quả | Bằng chứng |
+|---|---|---|
+| T1 | PASS — `netstat` thấy listener `127.0.0.1:9000`; chỉ xác nhận loopback. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
+| T2–T8 | BLOCKED — không có cửa sổ Launcher để tương tác; không chạy lại ứng dụng hoặc suy diễn kết quả. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
+
 ### Phân tích TC05
 
 `TC05-local-tls-fail-closed.log` records all four current local transport cases. The older `TC05-tls-plaintext.log` describes a failed TLS attempt against a previous deployment and is retained only as historical context. The current PASS is limited to loopback transport behavior; GUI authentication, Internet reachability and packet-capture analysis are separate tests.
