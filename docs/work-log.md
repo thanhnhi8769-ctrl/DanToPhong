@@ -142,3 +142,10 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 |---|---|---|
 | Clarify gameplay acceptance limits in the report | The story now lists the exact owner/input/tick/speed/gate checks and states that client timestamp freshness, fall/collision physics and live gameplay are unverified. | Source review of `TcpGameRoomRegistry`; report cross-check against the known-limitations section |
 | Correct the gameplay user-story diagram | Replaced the ambiguous "client elimination" label with the current self-forfeit-only and finish-gate winner behavior; exported and visually verified the matching PNG. | `draw.io.exe --export --format png --output .\\docs\\diagrams\\user-stories.png .\\docs\\diagrams\\user-stories.drawio` |
+
+## 2026-11-27 - Verifying bounded OTP worker delivery
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify the real OTP worker with smtp4dev | The bounded queue called `EmailVerificationService`, smtp4dev accepted the synthetic test message, and the inbox API listed its fixed test recipient. No code/body or credentials were retained. TC04 GUI entry remains unverified; E2 remains PARTIAL because outage recovery and production SMTP are not tested. | Isolated Release build and `DanToPhong.Protocol.Smoke.dll --smtp4dev-otp-queue`; local `GET /api/messages`; [E2-smtp4dev-queue-delivery.log](evidence/E2-smtp4dev-queue-delivery.log) |
+| Avoid the active server output lock | The normal `dotnet run` attempt could not replace a Protocol DLL held by the already-running server PID 13472. Rebuilt and ran from project-local ignored `bin\\verify-email-queue` outputs without stopping the server. | `dotnet build ... '-p:BaseOutputPath=bin\\verify-email-queue\\'`; isolated smoke DLL |

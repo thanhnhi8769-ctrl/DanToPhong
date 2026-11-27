@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using DanToPhong.Protocol;
 using DanToPhong.Server;
@@ -12,8 +14,9 @@ await RunAsync(args);
 static async Task RunAsync(string[] args)
 {
     bool sendSmtp4DevSample = args.Length == 1 && args[0] == "--smtp4dev-sample";
-    if (args.Length > 0 && !sendSmtp4DevSample)
-        throw new ArgumentException("The only supported option is --smtp4dev-sample.");
+    bool sendQueuedOtpToSmtp4Dev = args.Length == 1 && args[0] == "--smtp4dev-otp-queue";
+    if (args.Length > 0 && !sendSmtp4DevSample && !sendQueuedOtpToSmtp4Dev)
+        throw new ArgumentException("Supported options are --smtp4dev-sample and --smtp4dev-otp-queue.");
 
     VerifyAccountInputValidation();
     VerifyClientEliminationDoesNotDeclareWinner();
@@ -110,6 +113,8 @@ static async Task RunAsync(string[] args)
 
     if (sendSmtp4DevSample)
         await SendSmtp4DevSampleAsync();
+    if (sendQueuedOtpToSmtp4Dev)
+        await SendQueuedOtpToSmtp4DevAsync();
 }
 
 static void VerifyAccountInputValidation()
@@ -256,6 +261,42 @@ static async Task SendSmtp4DevSampleAsync()
 
     Console.WriteLine("PASS: synthetic Vietnamese email with attachment was accepted by local smtp4dev.");
     Console.WriteLine("PASS: ProtocolLogger.RedactSecrets was enabled; trace stayed in memory and no SMTP credentials were used.");
+}
+
+static async Task SendQueuedOtpToSmtp4DevAsync()
+{
+    Environment.SetEnvironmentVariable("DANTOPHONG_SMTP_MODE", "smtp4dev");
+    Environment.SetEnvironmentVariable("DANTOPHONG_SMTP_HOST", "127.0.0.1");
+    Environment.SetEnvironmentVariable("DANTOPHONG_SMTP_PORT", "2525");
+
+    bool delivered = false;
+    var queue = new EmailVerificationQueue(
+        capacity: 1,
+        sendCode: async (job, token) =>
+        {
+            await EmailVerificationService.SendCodeAsync(
+                job.Email, job.Code, job.PasswordReset, token);
+            delivered = true;
+        },
+        retryDelay: TimeSpan.Zero);
+    if (!queue.TryReserve(out EmailVerificationQueue.Reservation? reservation) ||
+        reservation is null)
+        throw new InvalidOperationException("The email queue did not reserve available capacity.");
+
+    using (reservation)
+        reservation.Enqueue(
+            "queue-worker-test@example.invalid",
+            RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString(CultureInfo.InvariantCulture),
+            passwordReset: false);
+
+    queue.Complete();
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    await queue.RunAsync(timeout.Token);
+    if (!delivered)
+        throw new InvalidOperationException("The queued OTP email was not accepted by smtp4dev.");
+
+    Console.WriteLine("PASS: bounded OTP email worker delivered synthetic content to loopback smtp4dev.");
+    Console.WriteLine("PASS: no SMTP credentials or external recipient were used.");
 }
 
 static async Task ExpectAsync<TException>(Func<Task> action, string testName)

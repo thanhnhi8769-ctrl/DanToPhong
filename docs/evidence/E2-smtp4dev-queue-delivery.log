@@ -1,0 +1,14 @@
+Test ID: E2 (supplemental queue-delivery observation)
+Date: 2026-11-27 17:14 +07:00
+Scope: Bounded OTP queue worker using EmailVerificationService and local smtp4dev only.
+Result: PARTIAL
+Observed: The worker delivered synthetic registration-code content to smtp4dev on loopback; the smtp4dev inbox API listed the fixed test recipient. No SMTP credentials or external recipient were used. The synthetic code and message body were not recorded.
+Commands:
+  dotnet build .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore '-p:BaseOutputPath=bin\verify-email-queue\'
+  dotnet .\UI\DanToPhong.Protocol.Smoke\bin\verify-email-queue\Release\net10.0\DanToPhong.Protocol.Smoke.dll --smtp4dev-otp-queue
+  GET http://127.0.0.1:5000/api/messages (checked only for the fixed test-recipient marker)
+Output:
+  PASS: bounded OTP email worker delivered synthetic content to loopback smtp4dev.
+  PASS: no SMTP credentials or external recipient were used.
+Remaining: E2 outage recovery after SMTP remains unavailable was not tested. This does not verify Gmail/TLS/AUTH or the registration UI. TC04 code entry (correct/incorrect/expired/attempt limit) remains unverified and PARTIAL.
+Redaction: No credential, OTP value, message body, account data, or non-loopback endpoint recorded.

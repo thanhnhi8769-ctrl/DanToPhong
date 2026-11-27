@@ -16,6 +16,7 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | TC10 | 10–50 client, slow sender, abort và malformed traffic tới server thật | PARTIAL — 50 PING ẩn danh đồng thời, frame phân mảnh, disconnect, JSON lỗi và length quá lớn đều bị xử lý đúng trên loopback; chưa có tải authenticated/gameplay hoặc Clumsy | [TC10-loopback-framing-test.log](TC10-loopback-framing-test.log) |
 | TC11 | TCP 3-way handshake và FIN tới cổng 9000 | PASS — SYN/SYN-ACK và FIN/FIN-ACK quan sát được trên Npcap Loopback | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log); [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng) |
 | TC12 | TLS handshake/cipher và so sánh plaintext/TLS bằng Wireshark | PASS — TLS 1.3 ServerHello/cipher và plaintext probe đối chiếu trong trace đã rà payload | [TC06-TC11-TC12-loopback-capture.log](TC06-TC11-TC12-loopback-capture.log); [TC11-TC12-loopback-test.pcapng](TC11-TC12-loopback-test.pcapng) |
+| E2 | SMTP worker giao email OTP qua queue bounded | PARTIAL — worker đã giao nội dung tổng hợp vào smtp4dev loopback; chưa kiểm thử outage recovery, Gmail/TLS hoặc nhập OTP trên GUI | [E2-smtp4dev-queue-delivery.log](E2-smtp4dev-queue-delivery.log) |
 | E3 | SMTP sample tiếng Việt có attachment và ProtocolLogger redacted | PARTIAL — sample gửi vào smtp4dev loopback; trace ở memory, RedactSecrets bật. AUTH redaction và Gmail/TLS không được kiểm chứng | [E3-smtp-sample.log](E3-smtp-sample.log) |
 
 ### Chương 3 — kiểm thử 8 bước

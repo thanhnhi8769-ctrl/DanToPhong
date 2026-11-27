@@ -252,7 +252,7 @@ Server trước đây dùng `System.Net.Mail.SmtpClient` cố định `smtp.gmai
 
 Đặt địa chỉ sender và App Password trong secret store/service environment. Không ghi giá trị vào `.env.example`, source, `server.json`, Unity, tài liệu hay log. Sau khi cập nhật, restart service và xác nhận mail thực tế đến đúng inbox.
 
-**Trạng thái kiểm thử:** TC09 smoke in-memory xác nhận queue bounded và retry khi giả lập SMTP 451/550, sau đó gửi thành công. E3 sample mới được smtp4dev loopback chấp nhận kèm attachment; ProtocolLogger.RedactSecrets bật nhưng chỉ dùng với dữ liệu tổng hợp và trace memory-only. Chưa xác minh worker OTP mới hoặc outage recovery với SMTP thật. Queue chỉ tồn tại trong bộ nhớ; crash/restart có thể làm mất job đã nhận. Khi dừng sạch, server drain tối đa 20 giây rồi log nếu còn job chưa giao. ProtocolLogger không redacts email/body và không được bật cho OTP production.
+**Trạng thái kiểm thử:** TC09 smoke in-memory xác nhận queue bounded và retry khi giả lập SMTP 451/550, sau đó gửi thành công. Smoke bổ sung xác nhận worker OTP dùng EmailVerificationService giao nội dung tổng hợp tới smtp4dev loopback; inbox API nhận diện được test recipient. Chưa kiểm thử outage recovery sau khi SMTP trở lại, Gmail/TLS/AUTH hoặc nhập OTP trên GUI. E3 sample được smtp4dev nhận kèm attachment; ProtocolLogger.RedactSecrets bật với dữ liệu tổng hợp và trace memory-only. Queue chỉ tồn tại trong bộ nhớ; crash/restart có thể làm mất job đã nhận. Khi dừng sạch, server drain tối đa 20 giây rồi log nếu còn job chưa giao. ProtocolLogger không redacts email/body và không được bật cho OTP production.
 
 ## 6. Gameplay và đồng bộ xe
 
