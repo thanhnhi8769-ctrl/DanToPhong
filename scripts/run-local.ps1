@@ -12,6 +12,7 @@ $names = @(
     'DANTOPHONG_DB_CONNECTION',
     'DANTOPHONG_PORT',
     'DANTOPHONG_USE_TLS',
+    'DANTOPHONG_LISTEN_ADDRESS',
     'DANTOPHONG_CERT_PATH',
     'DANTOPHONG_CERT_PASSWORD',
     'DANTOPHONG_SECONDARY_PORT'
@@ -51,6 +52,7 @@ try {
     $env:DANTOPHONG_DB_CONNECTION = $connectionBuilder.ConnectionString
     $env:DANTOPHONG_PORT = '19000'
     $env:DANTOPHONG_USE_TLS = 'true'
+    $env:DANTOPHONG_LISTEN_ADDRESS = '127.0.0.1'
     $listeners = Get-NetTCPConnection -State Listen -LocalPort 19000 -ErrorAction SilentlyContinue
     if ($listeners) { throw 'BLOCKED: test port 19000 is occupied; no listener was stopped.' }
     if ($EnableSecondaryListener) {

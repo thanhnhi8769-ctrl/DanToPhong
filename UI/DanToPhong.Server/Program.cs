@@ -83,6 +83,17 @@ namespace DanToPhong.Server
             throw new InvalidOperationException("DANTOPHONG_USE_TLS must be 'true' or 'false'.");
         }
 
+        private static IPAddress ReadListenAddress()
+        {
+            string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_LISTEN_ADDRESS");
+            if (string.IsNullOrWhiteSpace(raw))
+                return UseTls ? IPAddress.Any : IPAddress.Loopback;
+            if (!IPAddress.TryParse(raw.Trim(), out IPAddress? address) ||
+                (!UseTls && !IPAddress.IsLoopback(address)))
+                throw new InvalidOperationException("DANTOPHONG_LISTEN_ADDRESS must be an IP address; plaintext mode is restricted to loopback.");
+            return address;
+        }
+
         // Giá phía server là nguồn duy nhất; không nhận loại vật phẩm/giá do client tự đặt.
         // Giá xe theo index trong VehicleCatalog. Thêm xe mới vào catalog thì thêm giá vào đây.
         private static readonly int[] ScooterPrices =
@@ -122,7 +133,7 @@ namespace DanToPhong.Server
                 throw;
             }
 
-            IPAddress listenAddress = UseTls ? IPAddress.Any : IPAddress.Loopback;
+            IPAddress listenAddress = ReadListenAddress();
             var listener = new TcpListener(listenAddress, Port);
             TcpListener? secondaryListener = null;
             listener.Start();

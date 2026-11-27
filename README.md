@@ -71,6 +71,8 @@ a 64-hex SHA-256 leaf-certificate thumbprint in `server.json` as
 host; update the pin in a coordinated certificate rotation. Set TLS off only
 explicitly for an isolated test using dummy data. Client endpoint template:
 `deploy/client/server.json.example`.
+TLS listens on all interfaces by default; `DANTOPHONG_LISTEN_ADDRESS` can bind
+to a specific IP. Plaintext mode is always loopback-only.
 
 ### Start the server locally
 

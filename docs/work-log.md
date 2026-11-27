@@ -197,6 +197,20 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Validate source changes and core smoke | Server Release build passed with 0 warnings; Launcher Release build passed with 6 pre-existing generated Designer nullable warnings; protocol smoke passed, including forged `UserId`/`TargetId` elimination isolation and certificate pin validation. | `dotnet build` Server/Launcher Release; `dotnet run` Protocol.Smoke |
 | Rebuild Unity with pinned TLS client code | Unity 6000.3.28f1 batch build reported Build Successful, exited 0, and had no compiler/build failure markers; this is packaging evidence, not gameplay or connection evidence. | `BuildWindowsPlayer.BuildWindows64Release`; [TC08 log](evidence/TC08-unity-build.log) |
 
+## 2026-11-27 - Verifying the local TLS run script
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Run `scripts/run-local.ps1` against local test services | Release build passed with 0 warnings; only `dtp-sql`/`dtp-smtp` were inspected; `DanToPhongDB_Test` initialized and connected; TLS listener opened on 0.0.0.0:19000 and printed client endpoint/pin without printing DB credentials. | `.\scripts\run-local.ps1`; inspect PID owning 19000 |
+| Stop the test Server | Stopped only the verified Server PID 45496 after confirming its command line; port 19000 was clear afterward. The command ended with -1 because the process was deliberately terminated; the build/startup had already succeeded. Two encrypted PFX test files remain outside the repository. | `Stop-Process -Id 45496`; `Get-NetTCPConnection -State Listen -LocalPort 19000` |
+
+## 2026-11-27 - Restricting local TLS test binding
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Bind the local runner to loopback | The first run exposed that the general TLS default binds all interfaces. Added optional `DANTOPHONG_LISTEN_ADDRESS`, made plaintext reject non-loopback binds, and set the local runner to `127.0.0.1`. | Server source and local runner update |
+| Rerun and stop the local Server | Build and test DB startup passed; log reported `127.0.0.1:19000` with TLS enabled. Stopped only verified PID 38020; `19000` was clear. | `.\scripts\run-local.ps1`; `Stop-Process -Id 38020`; port check |
+
 ## 2026-11-27 - Tightening secret/build ignore checks
 
 | Work | Result | Commands / checks |
