@@ -270,7 +270,8 @@ namespace DanToPhong.Server
                     try { session.Client.Dispose(); } catch { }
                     try { session.SendLock.Dispose(); } catch { }
                     session.Completion.TrySetResult(true);
-                    ActiveSessions.TryRemove(session.SessionId, out _);
+                    if (ActiveSessions.TryRemove(session.SessionId, out _))
+                        Console.WriteLine($"[{session.SessionId}] Session removed ({session.AuthenticatedUsername ?? "guest"}).");
                     ClientCapacity.Release();
                 }
             }

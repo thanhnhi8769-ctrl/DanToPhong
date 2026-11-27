@@ -156,3 +156,11 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 |---|---|---|
 | Make `NetworkClientService.Dispose` nonblocking | Dispose now cancels heartbeat and closes the socket without synchronously waiting. New requests are rejected; shared semaphore/cancellation resources are released asynchronously after tracked requests and heartbeat finish. | Source review of `SendAndReceiveAsync`, heartbeat timer, and client call sites |
 | Build Launcher | Release build passed with 0 errors and 6 existing nullable-context warnings in generated Designer files. Isolated output avoided the running server's locked Protocol DLL. | `dotnet build .\\UI\\UI.csproj -c Release --no-restore '-p:BaseOutputPath=bin\\verify-network-dispose\\'` |
+
+## 2026-11-27 - Running T2-T8 over real TCP protocol clients
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Add reproducible protocol harness | Added `tools/T2T8ProtocolTest` and a PowerShell runner. It starts isolated Server processes on loopback with explicitly enabled plaintext, creates random test accounts only in `DanToPhongDB_Test`, and removes them in cleanup. No password, token, or connection string is written to evidence. | `tools\\run-t2t8-protocol-test.ps1`; isolated build output `bin\\t2t8-protocol` |
+| Execute T2-T8 protocol checks | All T2-T8 assertions passed: two authenticated clients/session logs; PONG 3.3/0.9 ms; chat send/poll 6.3 ms; 20 exact ordered messages; Vietnamese round-trip; abrupt client reset with server session removal and peer event/snapshot; test server termination detected on both clients' command and stream sockets. | [T2-T8-protocol-console-20261127-173442.log](evidence/T2-T8-protocol-console-20261127-173442.log) |
+| Record evidence scope | Aggregate report status is PARTIAL because these are console/protocol checks only; Launcher/Unity GUI rendering and close-button interaction still require manual testing. This run does not replace TC05 TLS evidence. | Updated Chapter 3 report, requirements traceability, evidence index, and historical T1-T8 log |

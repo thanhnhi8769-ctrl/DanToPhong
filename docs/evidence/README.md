@@ -24,7 +24,9 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | Test | Kết quả | Bằng chứng |
 |---|---|---|
 | T1 | PASS — `netstat` thấy listener `127.0.0.1:9000`; chỉ xác nhận loopback. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
-| T2–T8 | BLOCKED — đã thử mở một lần qua Computer Use nhưng không có cửa sổ Launcher để tương tác; không gửi thao tác GUI hoặc suy diễn kết quả. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
+| T2–T8 | PARTIAL — PASS ở mức console/protocol TCP; kiểm thử Launcher/Unity GUI vẫn cần chạy tay. | [T2-T8-protocol-console-20261127-173442.log](T2-T8-protocol-console-20261127-173442.log); [lịch sử GUI blocker](T1-T8-chapter3-tests.log) |
+
+Harness chạy hai server test ngắn hạn trên loopback với plaintext bật tường minh, dùng tài khoản tạm trong `DanToPhongDB_Test` rồi xóa chúng. Kết quả không chứng minh TLS (TC05 có log riêng), GUI rendering hay thao tác nút đóng.
 
 ### Phân tích TC05
 

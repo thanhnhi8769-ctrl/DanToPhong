@@ -365,7 +365,9 @@ EIP/Security Group và không push Git.
 | Bước | Kết quả | Bằng chứng |
 |---|---|---|
 | T1 | PASS — `netstat -ano | findstr 9000` thấy `127.0.0.1:9000 LISTENING`; chỉ là loopback. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log) |
-| T2–T8 | BLOCKED — không có cửa sổ Launcher để tương tác; chưa gửi tin giữa hai client, đo dưới 1 giây, tắt client/server hay xác minh tiếng Việt. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log) |
+| T2–T8 | PARTIAL — console test đã PASS ở mức giao thức: hai client TCP đăng nhập, PONG/chat dưới 1 giây, 20 tin liên tiếp, tiếng Việt, peer-disconnect event và server shutdown. GUI thật vẫn cần chạy tay; chưa xác nhận thao tác/hiển thị trên Launcher hoặc Unity. | [T1-T8-chapter3-tests.log](docs/evidence/T1-T8-chapter3-tests.log), [log console có timestamp](docs/evidence/T2-T8-protocol-console-20261127-173442.log) |
+
+Console harness: chạy `.\tools\run-t2t8-protocol-test.ps1`. Harness khởi động server test ngắn hạn trên loopback với plaintext được bật tường minh, tạo hai account ngẫu nhiên trong `DanToPhongDB_Test`, rồi xóa chúng sau test. Đây là bằng chứng framing/protocol TCP, không thay thế kiểm thử GUI; TC05 là bằng chứng TLS riêng.
 
 Ảnh phải tránh hiển thị password, OTP, token, connection string, App Password, private key và dữ liệu cá nhân. Ghi thêm ngày/commit, Windows/Unity build, endpoint test, network condition và pass/fail; giữ log đã redact cùng ảnh. Không đánh dấu “Đạt” khi chỉ có ảnh UI tĩnh.
 

@@ -11,7 +11,13 @@ Follow-up observation: 2026-11-27 16:53:35 +07:00
 Command: Get-NetTCPConnection -LocalPort 9000 -State Listen
 Observed: 127.0.0.1:9000 LISTENING, PID 13472. This is a listener check, not proof that the process is running the latest build.
 
-T2-T8: BLOCKED — not run.
-Reason: One Computer Use launch of `LauncherRelease\UI.exe` returned success, but no targetable Launcher window appeared after two window inventories. No GUI action or client connection was submitted, no second instance was launched, and no client-to-client result is inferred from T1.
+T2-T8 GUI: BLOCKED — no targetable Launcher window appeared after one launch and two window inventories. No GUI action was submitted; GUI rendering and button behavior remain unverified.
+
+T2-T8 protocol console run: PASS (protocol-level only)
+Time: 2026-11-27 17:34:42-17:34:45 +07:00
+Command: `.\tools\run-t2t8-protocol-test.ps1`
+Evidence: [T2-T8-protocol-console-20261127-173442.log](T2-T8-protocol-console-20261127-173442.log)
+Observed: Two authenticated TCP clients connected and were logged by the server; PONG round trips were 3.3 ms and 0.9 ms; peer chat delivery was 6.3 ms; 20 consecutive messages and a Vietnamese message round-tripped exactly; an abrupt client-A socket reset caused server session removal and client B received `PLAYER_DISCONNECTED` plus `IsDisconnected=true`; terminating the test server caused both clients to detect loss on command and game-stream sockets. Temporary accounts were removed from `DanToPhongDB_Test`.
+Scope: The harness launched the current server build with explicitly enabled plaintext on loopback. This is not TLS evidence, GUI evidence, or a graceful-shutdown/UI rendering test. GUI steps still require manual execution.
 
 Redaction: No account data, endpoint outside loopback, or credentials recorded.
