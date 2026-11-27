@@ -225,6 +225,12 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Prevent real SMTP fallback in local runner | The runner now sets `DANTOPHONG_SMTP_MODE=smtp4dev`, loopback host/port, dummy sender, and blank process-scoped credentials; it refuses startup if `dtp-smtp` port 2525 is unreachable. The previous runner startup sent no email. | Source review; PowerShell AST parse |
 | Verify local dependencies | Loopback ports 2525 and 1433 were reachable; no container was started or stopped and no SMTP message was sent. | `Test-NetConnection 127.0.0.1 -Port 2525`; `Test-NetConnection 127.0.0.1 -Port 1433` |
 
+## 2026-11-27 - Preparing handoff documentation
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Write overnight report and morning checklist | Recorded current R/G/T/E and TC01-TC12/T1-T8 statuses, exact gameplay validation boundaries, local commit hashes, manual-only work, and safe reproduction steps. No unsupported PASS claims or personal data added. | Review evidence links and `git diff --check` |
+
 ## 2026-11-27 - Tightening secret/build ignore checks
 
 | Work | Result | Commands / checks |
