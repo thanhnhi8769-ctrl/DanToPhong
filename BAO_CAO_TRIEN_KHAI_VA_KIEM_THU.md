@@ -289,13 +289,13 @@ EIP/Security Group và không push Git.
 | Source OTP/config | Luồng 465/587 dùng chế độ TLS đúng; lỗi gửi có cleanup reservation; cooldown 60 giây tách với hạn OTP 10 phút; cấu hình port/TLS fail-fast. |
 | Build Server | Lượt này: `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore` thành công, 0 warning, 0 error. |
 | Build/Publish Launcher | Lượt này: `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore` thành công; còn 6 cảnh báo nullable (`CS8669`) trong file Designer sinh tự động. |
-| Build Unity | Unity Editor 6000.3.28f1 báo `Build Successful`; `Assembly-CSharp.dll` trong player được build mới, không thấy C# diagnostics. Hai GUI main menu đã mở; chưa thử kết nối/match. |
+| Build Unity | Unity Editor 6000.3.28f1 báo `Build Successful` cả ở cây làm việc và clone sạch commit `82b1f5f`; player và `Assembly-CSharp.dll` có mặt. Hai GUI main menu đã mở; chưa thử kết nối/match. [Clean-clone log](docs/evidence/TC08-clean-clone-build.log) |
 | Gameplay wire smoke | `GAME_EVENT` và `GAME_SNAPSHOT` được serialize thành frame riêng theo đúng thứ tự, với event ID, sequence và timestamp; chỉ kiểm tra in-memory, không phải live stream. |
 | Local runtime prerequisites | Không có SQL listener trên loopback:1433; thao tác start service local bị từ chối do quyền service; Docker daemon không chạy. `sqlcmd`, `SqlLocalDB`, `tshark`, Wireshark GUI và `clumsy` không có sẵn; DB-backed live server, TLS, OTP, limiter, load, impairment và DPI chưa chạy. |
 | Draw.io | Cả 4 tệp `.drawio` parse XML thành công. Không có Draw.io CLI/desktop executable cài sẵn nên PNG export BLOCKED; lệnh cài được xác định là `winget install --id JGraph.Draw --exact --source winget`, chưa thực hiện vì sẽ thay đổi phần mềm hệ thống. |
 | Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp. Runbook AWS đã được thực thi một lần sau khi người dùng duyệt start; resource cuối cùng đã dừng, không đổi EIP/Security Group. |
 | Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; `game` fallback có trong build. Windows x64 player vừa được build; scene/runtime flow chưa được chơi thử. |
-| Git hygiene | Base branch đã commit cleanup trước đó; các thay đổi TCP stream/tài liệu trong lượt này còn pending local commit. Chưa push. |
+| Git hygiene | TCP stream đã commit tại `82b1f5f`; clean-clone evidence/report/work-log được ghi trong commit local kế tiếp. Không push. |
 | Secret scan | Quét signature AWS key/private key và mẫu password cụ thể trong source/config/doc không có kết quả; không thay thế quét Git history/rotation. |
 
 ### Kịch bản cần chạy và chỗ chèn ảnh minh chứng
@@ -309,7 +309,7 @@ EIP/Security Group và không push Git.
 | TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh. | BLOCKED — log deployment cũ FAIL; local DB/runtime server không sẵn sàng để chạy bốn ca | [TC05-tls-plaintext.log](docs/evidence/TC05-tls-plaintext.log) |
 | TC06 | DPI so sánh plaintext/TLS bằng capture. | BLOCKED — server/TLS runtime và capture chưa chạy | Chưa có |
 | TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — server DB-backed chưa khởi động; retry code chưa được kiểm chứng live | Chưa có |
-| TC08 | Unity Windows x64 build. | PASS — Editor báo build thành công; hai GUI main menu cũng được mở nhưng không thử network | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log) |
+| TC08 | Unity Windows x64 build. | PASS — build current source và clean clone; hai GUI main menu cũng được mở nhưng không thử network | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log), [TC08-clean-clone-build.log](docs/evidence/TC08-clean-clone-build.log) |
 | TC09 | TCP framing và thứ tự event/snapshot. | PASS — smoke test in-memory gồm frame lỗi và wire order GAME_EVENT → GAME_SNAPSHOT | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
 | TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | BLOCKED — SQL Server/Docker runtime không khả dụng, chưa mở server thật | Chưa có |
 | TC11 | TCP 3-way handshake và FIN tới cổng 9000. | BLOCKED — chưa capture | Chưa có |
@@ -616,5 +616,6 @@ năng chịu tải production.
 - Bảng TC01–TC12 và trạng thái: [docs/evidence/README.md](docs/evidence/README.md).
 - Framing/event wire smoke: [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log).
 - Unity build: [TC08-unity-build.log](docs/evidence/TC08-unity-build.log).
+- Clean-clone Server/Launcher/Unity builds: [TC08-clean-clone-build.log](docs/evidence/TC08-clean-clone-build.log).
 - Hai GUI main menu, không phải trận mạng: [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log).
 - Tái hiện build/test: [README.md](README.md) và [docs/protocol.md](docs/protocol.md).

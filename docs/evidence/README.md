@@ -55,6 +55,10 @@ system software.
 
 Build bằng Unity Editor 6000.3.28f1 qua `BuildPipeline.BuildPlayer` với target Windows x64. Build hiện tại thành công sau khi gỡ plugin networking, sửa lỗi tên `Random` bị nhập nhằng và xóa trạng thái chỉ được ghi. Không còn cảnh báo C# trong lần build cuối; Unity vẫn ghi một số lỗi không fatal liên quan licensing/package HTTPS. Build thành công không chứng minh gameplay, kết nối server hay hành vi hai máy.
 
+Clone sạch commit `82b1f5f` cũng build Server Release, chạy protocol smoke,
+publish Launcher win-x64 và tạo Unity Windows x64 player thành công. Log đã
+redact: [TC08-clean-clone-build.log](TC08-clean-clone-build.log).
+
 ### Phase 4B — kiểm thử giao thức mạng
 
 Chạy kiểm thử framer local bằng lệnh trong [protocol.md](../protocol.md). Smoke

@@ -1,0 +1,12 @@
+Test ID: TC08 (clean-clone verification)
+Date: 2026-11-27
+Commit tested: 82b1f5f8a8e4437c4f87af140377b44324bcf15d
+Objective: Build the committed project from a fresh local clone using the README build steps.
+Environment: Windows x64; Unity Editor 6000.3.28f1; .NET 10 SDK.
+Server: Release build PASS, 0 warnings, 0 errors.
+Protocol smoke: PASS, including ordered GAME_EVENT then GAME_SNAPSHOT frames.
+Launcher: win-x64 publish PASS; 6 existing CS8669 warnings in generated Designer files.
+Unity: Windows x64 BuildPipeline.BuildPlayer PASS; log contained "Build Successful" and "Windows x64 player built".
+Artifacts: DanToPhong.exe and managed Assembly-CSharp.dll were present in the clean clone.
+Limit: This verifies clone/build only; it does not verify launch, scenes, SQL, TLS, OTP, or multiplayer gameplay.
+Redaction: Local paths, machine identifiers, license/session details, IP addresses, and credentials omitted.
