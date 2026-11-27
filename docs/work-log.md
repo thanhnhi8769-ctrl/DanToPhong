@@ -149,3 +149,10 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 |---|---|---|
 | Verify the real OTP worker with smtp4dev | The bounded queue called `EmailVerificationService`, smtp4dev accepted the synthetic test message, and the inbox API listed its fixed test recipient. No code/body or credentials were retained. TC04 GUI entry remains unverified; E2 remains PARTIAL because outage recovery and production SMTP are not tested. | Isolated Release build and `DanToPhong.Protocol.Smoke.dll --smtp4dev-otp-queue`; local `GET /api/messages`; [E2-smtp4dev-queue-delivery.log](evidence/E2-smtp4dev-queue-delivery.log) |
 | Avoid the active server output lock | The normal `dotnet run` attempt could not replace a Protocol DLL held by the already-running server PID 13472. Rebuilt and ran from project-local ignored `bin\\verify-email-queue` outputs without stopping the server. | `dotnet build ... '-p:BaseOutputPath=bin\\verify-email-queue\\'`; isolated smoke DLL |
+
+## 2026-11-27 - Removing synchronous heartbeat wait during client disposal
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Make `NetworkClientService.Dispose` nonblocking | Dispose now cancels heartbeat and closes the socket without synchronously waiting. New requests are rejected; shared semaphore/cancellation resources are released asynchronously after tracked requests and heartbeat finish. | Source review of `SendAndReceiveAsync`, heartbeat timer, and client call sites |
+| Build Launcher | Release build passed with 0 errors and 6 existing nullable-context warnings in generated Designer files. Isolated output avoided the running server's locked Protocol DLL. | `dotnet build .\\UI\\UI.csproj -c Release --no-restore '-p:BaseOutputPath=bin\\verify-network-dispose\\'` |

@@ -20,10 +20,14 @@ namespace UI.Services
         private readonly System.Threading.Timer _heartbeatTimer;
         private readonly object _heartbeatGate = new();
         private Task _heartbeatTask = Task.CompletedTask;
+        private readonly object _disposeGate = new();
+        private readonly TaskCompletionSource<bool> _requestsDrained =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _activeRequests;
 
         private TcpClient? _client;
         private Stream? _stream;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         // MỚI: launcher truyền cho game Unity
         public string Host => _host;
@@ -146,6 +150,7 @@ namespace UI.Services
 
         public async Task<bool> ConnectAsync(CancellationToken token = default)
         {
+            if (_disposed) return false;
             if (IsConnected) return true;
 
             try
@@ -173,6 +178,11 @@ namespace UI.Services
                     stream = ssl;
                 }
                 _stream = stream;
+                if (_disposed)
+                {
+                    DisconnectInternal(raiseEvent: false);
+                    return false;
+                }
 
                 ConnectionStatusChanged?.Invoke(true, _useTls ? "Connected (TLS)" : "Connected");
                 return true;
@@ -187,11 +197,24 @@ namespace UI.Services
 
         private async Task<ResponsePacket> SendAndReceiveAsync(RequestPacket request, CancellationToken token = default)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeout.CancelAfter(NetworkTimeout);
-            await _ioLock.WaitAsync(timeout.Token);
+            if (!TryStartRequest())
+            {
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.ServerError,
+                    Message = "Client is disposed."
+                };
+            }
+
+            bool lockAcquired = false;
             try
             {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(NetworkTimeout);
+                await _ioLock.WaitAsync(timeout.Token);
+                lockAcquired = true;
+
                 if (!IsConnected)
                 {
                     bool connected = await ConnectAsync(timeout.Token);
@@ -234,8 +257,33 @@ namespace UI.Services
             }
             finally
             {
-                _ioLock.Release();
+                if (lockAcquired)
+                    _ioLock.Release();
+                EndRequest();
             }
+        }
+
+        private bool TryStartRequest()
+        {
+            lock (_disposeGate)
+            {
+                if (_disposed) return false;
+                _activeRequests++;
+                return true;
+            }
+        }
+
+        private void EndRequest()
+        {
+            bool signalDrained;
+            lock (_disposeGate)
+            {
+                _activeRequests--;
+                signalDrained = _disposed && _activeRequests == 0;
+            }
+
+            if (signalDrained)
+                _requestsDrained.TrySetResult(true);
         }
 
         public async Task<ResponsePacket> LoginAsync(string username, string password, CancellationToken token = default)
@@ -421,17 +469,40 @@ namespace UI.Services
 
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
+            lock (_disposeGate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                if (_activeRequests == 0)
+                    _requestsDrained.TrySetResult(true);
+            }
+
             _heartbeatTimer.Dispose();
             _heartbeatCts.Cancel();
             DisconnectInternal(raiseEvent: false);
             Task heartbeatTask;
             lock (_heartbeatGate) heartbeatTask = _heartbeatTask;
-            try { heartbeatTask.GetAwaiter().GetResult(); }
-            catch (OperationCanceledException) { }
-            _ioLock.Dispose();
-            _heartbeatCts.Dispose();
+            _ = CompleteDisposalAsync(heartbeatTask);
+        }
+
+        private async Task CompleteDisposalAsync(Task heartbeatTask)
+        {
+            try
+            {
+                await Task.WhenAll(heartbeatTask, _requestsDrained.Task).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Network client shutdown cleanup failed: {ex.GetType().Name}");
+            }
+            finally
+            {
+                _ioLock.Dispose();
+                _heartbeatCts.Dispose();
+            }
         }
     }
 }
