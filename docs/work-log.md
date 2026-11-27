@@ -135,3 +135,10 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Work | Result | Commands / checks |
 |---|---|---|
 | Reconfirm T1 and retry Launcher availability | T1 listener remains on loopback `127.0.0.1:9000` (PID 13472); it may be an older process and is not treated as latest-build runtime evidence. A single Computer Use launch attempt produced no targetable Launcher window; T2-T8 remain BLOCKED and no UI/network actions were submitted. | `Get-NetTCPConnection -LocalPort 9000 -State Listen`; Computer Use `startApp` once and `listWindows()` twice |
+
+## 2026-11-27 - Aligning gameplay story and diagram with observed checks
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Clarify gameplay acceptance limits in the report | The story now lists the exact owner/input/tick/speed/gate checks and states that client timestamp freshness, fall/collision physics and live gameplay are unverified. | Source review of `TcpGameRoomRegistry`; report cross-check against the known-limitations section |
+| Correct the gameplay user-story diagram | Replaced the ambiguous "client elimination" label with the current self-forfeit-only and finish-gate winner behavior; exported and visually verified the matching PNG. | `draw.io.exe --export --format png --output .\\docs\\diagrams\\user-stories.png .\\docs\\diagrams\\user-stories.drawio` |
