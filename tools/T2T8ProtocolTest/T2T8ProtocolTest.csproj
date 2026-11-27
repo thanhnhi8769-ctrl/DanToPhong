@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\UI\DanToPhong.Protocol\DanToPhong.Protocol.csproj" />
+    <ProjectReference Include="..\..\UI\DanToPhong.Server\DanToPhong.Server.csproj" />
+  </ItemGroup>
+</Project>
