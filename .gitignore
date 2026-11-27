@@ -36,11 +36,19 @@
 .env
 .env.*
 !.env.example
+*.env
 **/server.env
 **/server.json
 **/*.pem
 **/*.pfx
 **/*.p12
+**/*.key
+**/*.crt
+**/*.cer
+**/*.der
+**/*.p8
+**/*.jks
+**/*.keystore
 **/secrets/
 
 # Only project-owned scenes are versioned; imported demos stay out of this project.

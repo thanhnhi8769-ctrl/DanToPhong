@@ -196,3 +196,11 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Protect local runner environment | `run-local.ps1` restores the process-scoped test DB password as well as other temporary variables; PowerShell syntax parse passed. | PowerShell AST parse of `scripts/run-local.ps1` |
 | Validate source changes and core smoke | Server Release build passed with 0 warnings; Launcher Release build passed with 6 pre-existing generated Designer nullable warnings; protocol smoke passed, including forged `UserId`/`TargetId` elimination isolation and certificate pin validation. | `dotnet build` Server/Launcher Release; `dotnet run` Protocol.Smoke |
 | Rebuild Unity with pinned TLS client code | Unity 6000.3.28f1 batch build reported Build Successful, exited 0, and had no compiler/build failure markers; this is packaging evidence, not gameplay or connection evidence. | `BuildWindowsPlayer.BuildWindows64Release`; [TC08 log](evidence/TC08-unity-build.log) |
+
+## 2026-11-27 - Tightening secret/build ignore checks
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Ignore local secret and certificate variants | Added common `.env`, private-key, certificate, and keystore suffixes without hiding the checked-in `.example` configuration files. | `git check-ignore --no-index` on synthetic paths |
+| Audit targeted C# source patterns | No `.Result`, blocking `.Wait()`, `DoEvents`, `Thread.Sleep`, BeginReceive, or EndReceive matches in Server/Protocol/Launcher source. SQL call sites were located, but a full query-by-query parameter audit was not repeated in this pass; prior R4 evidence remains PARTIAL. | `rg` searches in `UI/DanToPhong.Server`, `UI/DanToPhong.Protocol`, and `UI/UI` |
+| Verify architecture/ignore hygiene | `git grep -i photon` returned no matches; build/zip/secret ignore probes passed. No AWS commands or changes. | `git grep -ni photon`; `git check-ignore -v --no-index` |
