@@ -205,8 +205,16 @@ namespace DanToPhong.Server
                     {
                         session.SendLock.Release();
                     }
+
+                    if (response.Success &&
+                        string.Equals(request.Command?.Trim(), Commands.GameStream, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await StreamGameStateAsync(session, stream, token).ConfigureAwait(false);
+                        break;
+                    }
                 }
             }
+
             catch (OperationCanceledException)
             {
             }
@@ -240,6 +248,53 @@ namespace DanToPhong.Server
                     ActiveSessions.TryRemove(session.SessionId, out _);
                     ClientCapacity.Release();
                 }
+            }
+        }
+
+        private static async Task StreamGameStateAsync(ClientSession session, Stream stream, CancellationToken token)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return;
+
+            int userId = session.AuthenticatedUserId.Value;
+            long lastEventId = 0;
+            while (!token.IsCancellationRequested)
+            {
+                List<GameEventDto> events = TcpGameRoomRegistry.ReadEventsAfter(userId, ref lastEventId);
+                foreach (GameEventDto gameEvent in events)
+                {
+                    await session.SendLock.WaitAsync(token).ConfigureAwait(false);
+                    try
+                    {
+                        await MessageFramer.SendAsync(stream, new ResponsePacket
+                        {
+                            Success = true,
+                            Code = ErrorCodes.Ok,
+                            Command = Commands.GameEvent,
+                            GameEvent = gameEvent
+                        }, token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        session.SendLock.Release();
+                    }
+                }
+
+                ResponsePacket snapshot = TcpGameRoomRegistry.State(userId);
+                if (!snapshot.Success || !snapshot.IsRacing)
+                    return;
+
+                await session.SendLock.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    await MessageFramer.SendAsync(stream, snapshot, token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    session.SendLock.Release();
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(50), token).ConfigureAwait(false);
             }
         }
 
@@ -334,6 +389,7 @@ namespace DanToPhong.Server
                     Commands.GameRoomState => HandleGameRoomState(session),
                     Commands.StartGameRoom => HandleStartGameRoom(session, req),
                     Commands.GameInput => HandleGameInput(session, req),
+                    Commands.GameStream => HandleGameStream(session),
                     Commands.ChatSend => HandleChatSend(session, req),
                     Commands.ChatPoll => HandleChatPoll(session, req),
                     Commands.GameEvent => HandleGameEvent(session, req),
@@ -421,6 +477,30 @@ namespace DanToPhong.Server
             if (!session.AuthenticatedUserId.HasValue)
                 return Unauth();
             return TcpGameRoomRegistry.SubmitInput(session.AuthenticatedUserId.Value, request);
+        }
+
+        private static ResponsePacket HandleGameStream(ClientSession session)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+
+            ResponsePacket state = TcpGameRoomRegistry.State(session.AuthenticatedUserId.Value);
+            if (!state.Success || !state.IsRacing)
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.InvalidInput,
+                    Message = "Join a running game before subscribing to snapshots."
+                };
+
+            return new ResponsePacket
+            {
+                Success = true,
+                Code = ErrorCodes.Ok,
+                Command = Commands.GameStream,
+                RoomId = state.RoomId,
+                Message = "Snapshot stream started."
+            };
         }
 
         private static ResponsePacket HandleChatSend(ClientSession session, RequestPacket request)

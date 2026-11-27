@@ -11,11 +11,15 @@ Runtime/load-test claims are only made when backed by evidence in
 
 - Transport: TCP stream, default server port `9000`; clients can override the
   host and port through runtime configuration.
-- TLS wraps the TCP stream before application framing. Runtime configuration
-  must enable TLS on both ends and use a certificate trusted for the server
-  hostname. The plaintext setting is an explicit isolated-test option only.
-- Requests are processed sequentially per connection. Each request receives
-  one response; the current gameplay path does not use a server-push channel.
+- TLS wraps the TCP stream before application framing and is enabled by
+  default. The server fails closed if a valid certificate is unavailable;
+  clients validate the certificate chain and hostname. Plaintext is an
+  explicit isolated-test option only, and both ends must use matching
+  settings.
+- Application requests are processed sequentially per connection and receive
+  one response. Gameplay opens a second authenticated TCP connection with
+  `GAME_STREAM`; the server then sends separate ordered event frames and
+  timestamped snapshots at a nominal 20 Hz.
 - Server sessions use asynchronous I/O, a configured concurrent-session limit,
   per-session idle/read timeouts, and socket cleanup on EOF or error. Client
   timeout/heartbeat behavior is described in the deployment configuration and
@@ -83,8 +87,9 @@ validated server-side.
 | `ROOM_STATE` | Client → server | Returns current room summary and player state. |
 | `ROOM_START` | Host → server | Starts a room when the host has at least one other player. |
 | `GAME_INPUT` | Client → server | Sends input, sequence/tick, timestamp and initial spawn position. |
-| `GAME_SNAPSHOT` | Server → requesting client | Returned as the response to a room-state/input request; includes initialized players. It is not pushed/broadcast asynchronously. |
-| `GAME_EVENT` | Client → server | Accepts sequential checkpoint and finish event requests; spatial validation is not implemented. |
+| `GAME_STREAM` | Client → server | Authenticates a dedicated connection and subscribes it to ordered room events and snapshots. |
+| `GAME_SNAPSHOT` | Server → subscribed clients | Pushed at a nominal 20 Hz over each client's dedicated TCP stream; includes initialized players and server sequence/timestamp. |
+| `GAME_EVENT` | Client → server; server → subscribed clients | Accepts checkpoint/finish requests. Accepted room events are sent as separate ordered TCP frames to subscribed members. Spatial validation is not implemented. |
 | `CHAT_SEND`, `CHAT_POLL` | Client ↔ server | Stores bounded in-memory room chat and returns messages after an ID; delivery is polling, not push. |
 
 Server state is serialized under an in-process lock and room membership is
@@ -93,26 +98,31 @@ Disconnect cleanup removes a player from the room.
 
 ## 5. Gameplay synchronization currently implemented
 
-The Unity client samples controls and sends `GAME_INPUT` at a target 15–20 Hz.
-The server advances a simplified kinematic model on a nominal 20 Hz step, clamps
-input, and returns a snapshot in that same request/response exchange. Snapshot
-sequence and server timestamp are included. Unity buffers up to eight samples
-and renders remote players approximately 100 ms behind server time.
+The Unity client samples controls and sends `GAME_INPUT` at a target 15–20 Hz
+over its authenticated command connection. It opens a second TLS/TCP connection,
+validates the session token, and subscribes with `GAME_STREAM`. The server
+advances a simplified kinematic model on a nominal 20 Hz step, clamps input,
+and pushes timestamped `GAME_SNAPSHOT` frames to subscribed room members.
+Accepted room events are separate TCP frames with monotonic event IDs; TCP
+preserves event/snapshot order on each stream. Unity buffers up to eight
+snapshots, discards the oldest when full, rejects stale player sequences, and
+renders remote players approximately 100 ms behind server time.
 
 Important limits:
 
-- This is request/response polling, not a server broadcast. Each client sees
-  the room snapshot only when it receives its own response.
-- There is no per-client outbound snapshot queue, so stale-snapshot coalescing
-  has not been implemented. The client sends no next request until the prior
-  response completes, which bounds its own outstanding requests but reduces
-  update rate under latency.
+- Snapshot delivery is server-pushed over a dedicated per-client TCP stream;
+  server room and match state are still process-local.
+- The client drops the oldest buffered snapshot when its eight-sample queue is
+  full. TCP stream backpressure can still delay delivery; there is no server
+  broadcast fan-out queue or measured latency/load bound.
 - The server simulation is simplified kinematics, not the Unity track
   collision/vehicle physics. It does not validate client spawn against track
   geometry, and it does not authoritatively verify that a checkpoint was
   physically crossed.
-- Finish/checkpoint state is held in memory; winner state is not pushed to
-  every room member. Reconnect does not restore prior membership.
+- Finish/checkpoint state and the bounded recent event history are held in
+  memory. The stream retries while the primary authenticated session remains
+  alive; losing all sessions or restarting the server does not restore room
+  membership.
 - Spectating, authoritative rewards/coins/scoreboard, and full match lifecycle
   are incomplete. Solo remains local Unity gameplay.
 - Unity holds the last sample when it has no later sample; bounded
@@ -162,20 +172,22 @@ sequenceDiagram
     S-->>B: Room summary
     A->>S: ROOM_START
     S-->>A: Started response
-    loop Target 15–20 requests/s per client
+    loop Target 15–20 input requests/s per client
         A->>S: GAME_INPUT(sequence, timestamp, controls)
         S->>S: Simulate room and build snapshot
         S-->>A: GAME_SNAPSHOT
         B->>S: GAME_INPUT(sequence, timestamp, controls)
         S->>S: Simulate room and build snapshot
         S-->>B: GAME_SNAPSHOT
+        S-->>A: GAME_EVENT / GAME_SNAPSHOT over subscribed stream
+        S-->>B: GAME_EVENT / GAME_SNAPSHOT over subscribed stream
         A->>A: Buffer/interpolate received player samples
         B->>B: Buffer/interpolate received player samples
     end
 ```
 
-This diagram shows the implemented request/response path. It does not imply
-server-pushed broadcast or authoritative Unity physics.
+The server-push path is implemented in source; it does not imply
+track-aware authoritative Unity physics or a live multiplayer test pass.
 
 ### Disconnect and cleanup
 
@@ -191,11 +203,10 @@ sequenceDiagram
 
 ## 8. Future transport direction (not implemented)
 
-The current transport remains TCP for all implemented network features. A
-future state channel could negotiate a separate datagram transport over the
-authenticated TCP session, with monotonic sequence numbers, timestamps,
-message authentication, replay protection, and fallback to TCP. No datagram
-transport, HMAC state channel, or fallback implementation exists in this
+The current transport remains TCP for all implemented network features. Any
+future transport proposal is deferred until after the 2026-12-12 project
+cutoff and would require a separate design, threat review, and measurements.
+No UDP/datagram code, HMAC state channel, or transport fallback exists in this
 project now.
 
 ## 9. Verification and capture guidance

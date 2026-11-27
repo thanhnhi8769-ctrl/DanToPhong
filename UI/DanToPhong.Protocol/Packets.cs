@@ -88,6 +88,7 @@ namespace DanToPhong.Protocol
         public long ServerTimestampMs { get; set; }
         public List<GamePlayerSnapshotDto>? GamePlayers { get; set; }
         public List<RoomChatMessageDto>? ChatMessages { get; set; }
+        public GameEventDto? GameEvent { get; set; }
     }
 
     public sealed class UserInfoDto
@@ -167,6 +168,16 @@ namespace DanToPhong.Protocol
         public float VelocityX { get; set; }
         public float VelocityY { get; set; }
         public float VelocityZ { get; set; }
+        public long ServerTimestampMs { get; set; }
+    }
+
+    public sealed class GameEventDto
+    {
+        public long EventId { get; set; }
+        public string Type { get; set; } = string.Empty;
+        public int UserId { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public int CheckpointIndex { get; set; }
         public long ServerTimestampMs { get; set; }
     }
 

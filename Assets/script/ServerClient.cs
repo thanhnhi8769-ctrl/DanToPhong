@@ -35,6 +35,12 @@ public class Req
     public float velocityX, velocityY, velocityZ;
     public long serverTimestampMs;
 }
+[Serializable] public class GameEventDto
+{
+    public long eventId, serverTimestampMs;
+    public string type, username;
+    public int userId, checkpointIndex;
+}
 [Serializable] public class RoomChatMessageDto
 {
     public long messageId, serverTimestampMs;
@@ -53,6 +59,7 @@ public class Req
     public List<InviteDto> invites;
     public List<LbEntry> leaderboard;
     public List<GamePlayerDto> gamePlayers;
+    public GameEventDto gameEvent;
     public List<RoomChatMessageDto> chatMessages;
 }
 

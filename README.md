@@ -21,17 +21,18 @@ WinForms Launcher ── TCP/TLS 9000 ── .NET Server ── SQL Server / RDS
         └── launches Unity
 
 Unity Solo: local physics
-Unity multiplayer prototype: TCP/TLS 9000 request/response
+Unity multiplayer: TCP/TLS 9000 input requests + dedicated event/snapshot stream
 ```
 
 The TCP framing is a 4-byte big-endian length followed by UTF-8 JSON. The
 Launcher/server protocol supports account, OTP and application data. A partial
-room/gameplay path implements room membership, input requests, simplified
-server-side kinematics and per-request snapshots. It does **not** yet provide
-asynchronous room-wide broadcast, track-aware authoritative physics, verified
-checkpoint crossings, spectator/reconnect support, or authoritative rewards.
-Do not treat multiplayer as release-ready until those gaps are closed and
-two-client tests pass. See [docs/protocol.md](docs/protocol.md) and
+room/gameplay path implements room membership, 15–20 Hz input requests,
+simplified server-side kinematics, and an authenticated TCP stream for ordered
+events and nominal 20 Hz snapshots. It does **not** yet provide track-aware
+authoritative physics, verified checkpoint crossings, spectator/durable
+reconnect support, or authoritative rewards. Do not treat multiplayer as
+release-ready until those gaps are closed and live two-client tests pass. See
+[docs/protocol.md](docs/protocol.md) and
 [docs/requirements-checklist.md](docs/requirements-checklist.md).
 
 ## Local prerequisites and configuration
@@ -73,11 +74,11 @@ dotnet run --project .\UI\UI\UI.csproj
 ### Publish the Windows Launcher
 
 ```powershell
-dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o D:\DanToPhong\LauncherRelease
-Copy-Item .\deploy\client\server.json.example D:\DanToPhong\LauncherRelease\server.json
+dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o .\LauncherRelease
+Copy-Item .\deploy\client\server.json.example .\LauncherRelease\server.json
 ```
 
-Set the endpoint in the untracked `server.json`. A framework-dependent build
+Set the endpoint in the untracked `LauncherRelease\server.json`. A framework-dependent build
 requires the matching .NET Desktop Runtime on the client PC.
 
 ### Build Unity

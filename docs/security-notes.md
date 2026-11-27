@@ -30,9 +30,10 @@
 - Cooldown gửi OTP 60 giây gắn với khóa định danh username/email; chưa có
   quota gửi theo IP/toàn hệ thống. Cần theo dõi chi phí/abuse SMTP và bổ sung
   giới hạn phân tán trước khi mở rộng ra nhiều instance.
-- Room/invite/game registry lưu trong RAM. Gameplay snapshot hiện trả về theo
-  request TCP, chưa có room-wide push. Kinematics phía server còn đơn giản;
-  chưa xác thực va chạm đường đua hoặc checkpoint theo vị trí.
+- Room/invite/game registry lưu trong RAM. Gameplay dùng kết nối TCP riêng để
+  server push snapshot và event có thứ tự; client giữ tối đa 8 snapshot và bỏ
+  mẫu cũ nhất khi đầy. Kinematics phía server còn đơn giản; chưa xác thực va
+  chạm đường đua hoặc checkpoint theo vị trí.
 
 ## TLS fail-closed
 
@@ -61,6 +62,7 @@ thương lượng bật TLS: bật lệch cấu hình sẽ khiến handshake/fra
 | OTP đúng/sai/hết hạn/5 lần thử và cooldown | Logic có trong code/SQL; SMTP/DB runtime test chưa chạy |
 | Brute-force login theo account+IP, lock/unlock qua restart | SQL limiter đã thêm; cần chạy script runtime với DB local |
 | TLS handshake, certificate sai, plaintext bị từ chối, DPI | Default fail-closed đã thêm; ca runtime còn BLOCKED |
+| Gameplay push stream, event ordering, snapshot queue | Đã thêm trong source; smoke test wire-format có, chưa chạy live server |
 | Gameplay authority, kiểm chứng checkpoint theo geometry, spectator, resume | Chưa hoàn thiện/kiểm thử |
 
 Không lưu password, OTP, token, private key, connection string hoặc packet
@@ -68,7 +70,7 @@ capture chứa dữ liệu nhạy cảm vào repo. Chỉ capture bằng tài kho
 giả, loại endpoint cá nhân và kiểm tra file trước khi thêm vào
 `docs/evidence/`.
 
-Không có thư viện mạng bên thứ ba trong cây mã nguồn. Đường TCP gameplay hiện
-chưa đạt mức hoàn chỉnh: request/response không broadcast, mô phỏng chuyển động
-còn đơn giản và chưa có reconnect/resume hoặc kiểm chứng vật lý đường đua. Đây
-là giới hạn chức năng đã biết, không phải PASS.
+Không có thư viện mạng bên thứ ba trong cây mã nguồn. Đường TCP gameplay đã có
+server-push stream nhưng mô phỏng chuyển động còn đơn giản, spectator và
+reconnect bền vững chưa có, và chưa kiểm chứng vật lý đường đua. Đây là giới
+hạn chức năng đã biết, không phải PASS.

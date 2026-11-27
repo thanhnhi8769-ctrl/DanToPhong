@@ -50,8 +50,44 @@ static async Task RunAsync()
         () => MessageFramer.SendAsync(frames, new SmokePacket { Command = new string('x', 64 * 1024) }),
         "oversized outgoing payload");
 
+    using var gameplayFrames = new MemoryStream();
+    await MessageFramer.SendAsync(gameplayFrames, new ResponsePacket
+    {
+        Success = true,
+        Command = Commands.GameEvent,
+        GameEvent = new GameEventDto
+        {
+            EventId = 7,
+            Type = "FINISH",
+            UserId = 2,
+            Username = "racer2",
+            ServerTimestampMs = 123456
+        }
+    });
+    await MessageFramer.SendAsync(gameplayFrames, new ResponsePacket
+    {
+        Success = true,
+        Command = Commands.GameSnapshot,
+        ServerTick = 42,
+        ServerTimestampMs = 123457
+    });
+    gameplayFrames.Position = 0;
+    ResponsePacket orderedEvent = await MessageFramer.ReceiveAsync<ResponsePacket>(gameplayFrames)
+        ?? throw new InvalidOperationException("The ordered game event was not decoded.");
+    ResponsePacket followingSnapshot = await MessageFramer.ReceiveAsync<ResponsePacket>(gameplayFrames)
+        ?? throw new InvalidOperationException("The snapshot after the game event was not decoded.");
+    GameEventDto? eventPayload = orderedEvent.GameEvent;
+    if (orderedEvent.Command != Commands.GameEvent ||
+        eventPayload == null ||
+        eventPayload.EventId != 7 ||
+        followingSnapshot.Command != Commands.GameSnapshot ||
+        followingSnapshot.ServerTick != 42 ||
+        eventPayload.ServerTimestampMs >= followingSnapshot.ServerTimestampMs)
+        throw new InvalidOperationException("Game events and snapshots did not preserve their ordered wire format.");
+
     Console.WriteLine("PASS: fragmented reads and coalesced frames preserve order.");
     Console.WriteLine("PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.");
+    Console.WriteLine("PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.");
 }
 
 static async Task ExpectAsync<TException>(Func<Task> action, string testName)

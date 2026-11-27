@@ -37,6 +37,7 @@
         public const string GameRoomState = "ROOM_STATE";
         public const string StartGameRoom = "ROOM_START";
         public const string GameInput = "GAME_INPUT";
+        public const string GameStream = "GAME_STREAM";
         public const string GameSnapshot = "GAME_SNAPSHOT";
         public const string ChatSend = "CHAT_SEND";
         public const string ChatPoll = "CHAT_POLL";

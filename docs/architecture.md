@@ -5,8 +5,12 @@
 ```mermaid
 flowchart LR
     L[WinForms Launcher] <-->|TCP 9000 / TLS| S[DanToPhong .NET Server]
-    G1[Unity Client A] <-->|TCP 9000 / TLS| S
-    G2[Unity Client B] <-->|TCP 9000 / TLS| S
+    G1[Unity Client A] -->|TLS TCP 9000 command + GAME_INPUT| S
+    G1 -->|TLS TCP 9000 GAME_STREAM| S
+    S -->|GAME_EVENT / GAME_SNAPSHOT| G1
+    G2[Unity Client B] -->|TLS TCP 9000 command + GAME_INPUT| S
+    G2 -->|TLS TCP 9000 GAME_STREAM| S
+    S -->|GAME_EVENT / GAME_SNAPSHOT| G2
     S <-->|SQL Server / TDS 1433| DB[(SQL Server or RDS)]
     S -->|SMTP TLS 465 or STARTTLS 587| M[SMTP provider]
     G1 -. local physics .-> Solo[Solo mode]
@@ -14,14 +18,16 @@ flowchart LR
 
 **Primary network stack: custom TCP developed by the team. No third-party
 networking library is used.** TCP 9000 carries account/OTP/data operations and
-the current room/gameplay prototype. TLS is configured around the TCP stream.
+the current room/gameplay prototype. TLS is enabled by default; the server
+fails closed when its certificate configuration is missing or invalid.
 The Unity solo mode remains local.
 
-The room/gameplay implementation is an incomplete request/response prototype:
-the client submits input and receives a room snapshot in that same response.
-The server does not asynchronously broadcast snapshots. Server-side movement is
-simplified kinematics, not the Unity track physics; collision/checkpoint
-geometry, robust match lifecycle, spectator mode, reconnect/resume, and
+The room/gameplay path sends input through the authenticated request/response
+connection and uses a second authenticated TCP connection for ordered
+`GAME_EVENT` messages and server-pushed snapshots at a nominal 20 Hz. Unity
+keeps a bounded snapshot queue and interpolates remote players. Server-side
+movement remains simplified kinematics, not the Unity track physics;
+collision/checkpoint geometry, spectator mode, durable reconnect/resume, and
 authoritative rewards remain incomplete. See [protocol.md](protocol.md) for
 message-level behavior and limitations.
 
@@ -47,11 +53,13 @@ message-level behavior and limitations.
 2. Launcher starts Unity with user/mode/endpoint arguments and the token in
    the child process environment.
 3. Unity validates the token with the server and loads account data.
-4. Solo mode enters local vehicle gameplay. The multiplayer prototype creates
-   or joins a server-side in-memory room, starts with at least two players,
-   then exchanges input and snapshots over TCP request/response.
-5. On disconnect, the server cleans up the session and removes the player
-   from room membership. Match resume is not implemented.
+4. Solo mode enters local vehicle gameplay. Multiplayer creates or joins a
+   server-side in-memory room, starts with at least two players, sends input
+   over TCP request/response, and receives ordered events and snapshots over a
+   separately authenticated TCP stream.
+5. On disconnect, the stream retries while the primary authenticated session
+   remains alive. Losing all sessions removes room membership; durable match
+   resume is not implemented.
 
 ## State transport and future direction
 

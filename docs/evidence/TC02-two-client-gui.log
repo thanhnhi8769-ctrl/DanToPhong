@@ -1,0 +1,8 @@
+Test ID: TC02 (GUI launch sub-check only)
+Date: 2026-11-27
+Objective: Open two independent Unity Windows x64 client windows at the same time.
+Build: BuildGameRelease/DanToPhong.exe
+Observed: Two separate DanToPhong windows displayed the game's main menu simultaneously.
+Result: GUI launch sub-check PASS; full TC02 remains BLOCKED.
+Limit: No account login, room creation/join, gameplay input, snapshot exchange, or second-network client was available. This is not evidence of multiplayer synchronization.
+Redaction: No credentials, account contact data, or network endpoint recorded.

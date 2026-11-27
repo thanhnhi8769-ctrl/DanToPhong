@@ -4,7 +4,7 @@
 
 | Work | Result | Commands / checks |
 |---|---|---|
-| Remove third-party networking assets and serialized references | Removed `Assets/Photon`, its meta file, four scene components, the scooter prefab component, scripting defines, and stale ignored generated project files. `git grep` and scene-ID scans found no remaining references. | `git grep -ni -e photon -e pun_2`; Unity asset GUID/fileID scans |
+| Remove third-party networking assets and serialized references | Removed bundled networking assets, four scene components, the scooter prefab component, scripting defines, and stale ignored generated project files. Tracked-source and scene-ID scans found no remaining references. | Tracked-source search; Unity asset GUID/fileID scans |
 | Align documentation/configuration | Updated protocol, architecture, requirements checklist, report, README, evidence status, diagrams and client example. Recorded gameplay as incomplete where server broadcast/track authority/reconnect are absent. | Draw.io XML parse; client example JSON parse |
 | Fix Unity compilation issues and unused state | Qualified `UnityEngine.Random`; removed write-only game-result flags and obsolete host-client comment. | Unity Editor build |
 | Restrict local test harnesses | TCP load/malformed-frame and login-lockout scripts reject non-loopback hosts before connecting; both guard tests passed without network access. | Script inspection; loopback guard tests |
@@ -14,3 +14,24 @@
 
 Two-client gameplay, TLS runtime cases, SMTP/DB runtime, load, DPI, packet capture,
 and Internet tests remain unverified; see `docs/evidence/README.md`.
+
+## 2026-11-27 — Final report and diagram alignment
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Complete deployment and verification report | Updated the report for the dedicated TCP gameplay stream, token environment handoff, bounded client snapshot queue, current build evidence, AWS cost caveats, blocked TC statuses, owner-fill placeholders, tool-assistance placeholder, assignment crosswalk, and appendix. No unsupported runtime PASS was added. | Local Markdown link validation; PowerShell parser on all four report snippets |
+| Align protocol and diagrams | Corrected TLS-default/fail-closed and gameplay-push descriptions across architecture/protocol/checklist and three Draw.io diagrams. All four Draw.io files parse as XML. No Draw.io executable was installed; PNG export remains BLOCKED. | XML parse of `docs/diagrams/*.drawio`; `winget search --id JGraph.Draw --exact --source winget` |
+| Reverify .NET deliverables | Server Release build passed with 0 warnings/errors; protocol smoke passed including event-before-snapshot wire order; Launcher win-x64 publish passed. The generated `BuildLauncherRelease` directory was removed because it was not ignored; README now uses the existing ignored `LauncherRelease` output path. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore`; `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore`; `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore -o .\LauncherRelease` |
+| Record local blockers and safe next actions | SQL Server service start is permission-blocked; Docker engine is unavailable. Runtime TLS/OTP/limiter/gameplay/load/DPI tests remain BLOCKED. Documented the admin action and test-only smtp4dev setup; did not change system configuration, install Draw.io, or run AWS commands. | `Get-Service`; `docker info`; loopback TCP/1433 probe; `Start-Service MSSQL$SQLNEW` denied |
+
+No AWS mutation, Git push, or Git identity/configuration change was performed.
+
+## 2026-11-27 — Server-pushed TCP gameplay stream
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Add a dedicated gameplay state stream | Added authenticated `GAME_STREAM` on a second TCP connection. The server pushes timestamped snapshots at a nominal 20 Hz and sends accepted game events as separate ordered TCP frames. Unity keeps at most eight snapshots, drops the oldest when full, rejects stale player sequences, interpolates, and retries the stream while its authenticated session remains available. | Server Release build; Unity Windows x64 build; source review |
+| Extend protocol smoke coverage | Added a serialized `GAME_EVENT` then `GAME_SNAPSHOT` framing check, including event ID, server sequence, timestamps, and frame order. | `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore` |
+| Rebuild Windows artifacts | Server Release succeeded with 0 warnings/errors. Launcher win-x64 publish succeeded with 6 existing generated-Designer `CS8669` warnings. Unity 6000.3.28f1 reported `Build Successful`; latest `Assembly-CSharp.dll` was rebuilt with no C# diagnostics. Two game windows were observed simultaneously at the main menu; no match was started. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore`; `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore`; Unity `BuildWindowsPlayer.BuildWindows64Release`; GUI observation |
+| Check local runtime prerequisites | SQL Server services are installed but starting the selected local instance was denied by service permissions; Docker CLI cannot reach a running engine. No local SQL endpoint was available on loopback:1433. Consequently database-backed login/TLS/OTP, live gameplay, load, packet capture, and DPI remain BLOCKED. No AWS commands or Git push were run. | `Start-Service MSSQL$SQLNEW` (service access denied); `docker info`; loopback TCP probe |
+| Keep evidence claims bounded | Recorded GUI-only evidence separately from full TC02; updated TC09 for the new protocol frame contract. No PASS was assigned to tests requiring a live server. | `docs/evidence/TC02-two-client-gui.log`; `docs/evidence/TC09-framing-smoke.log`; `docs/evidence/README.md` |

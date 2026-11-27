@@ -16,6 +16,7 @@
 3. [Kiến trúc và triển khai AWS](#3-kiến-trúc-và-triển-khai-aws)
    3.1. [EC2, Elastic IP và RDS](#31-ec2-elastic-ip-và-rds)
    3.2. [Tự khởi động Server](#32-tự-khởi-động-server)
+   3.3. [Chi phí và free tier](#33-chi-phí-và-free-tier)
 4. [Client GUI, các Form và phiên đăng nhập](#4-client-gui-các-form-và-phiên-đăng-nhập)
 5. [Xác thực OTP và gửi email](#5-xác-thực-otp-và-gửi-email)
 6. [Gameplay và đồng bộ xe](#6-gameplay-và-đồng-bộ-xe)
@@ -27,25 +28,27 @@
 12. [Phân công công việc và liên lạc](#12-phân-công-công-việc-và-liên-lạc)
 13. [Runbook bật/tắt AWS, test Internet và Git](#13-runbook-bậttắt-aws-test-internet-và-git)
 14. [Hạn chế và kết luận phát hành](#14-hạn-chế-và-kết-luận-phát-hành)
+15. [Đối chiếu đề bài](#15-đối-chiếu-đề-bài)
+16. [Phụ lục](#16-phụ-lục)
 
 ## 1. Tổng quan hệ thống
 
 ### 1.1. Kiến trúc
 
 ```text
-WinForms Launcher ── TCP/9000 ── DanToPhong.Server ── SQL Server / RDS
+WinForms Launcher ── TCP/TLS/9000 ── DanToPhong.Server ── SQL Server / RDS
         │                                   └── Gmail SMTP (OTP)
         └── mở Unity, chuyển tài khoản/token/endpoint/mode
 
 Unity Solo: vật lý local
-Unity multiplayer prototype ── TCP/9000 request/response ── Server
+Unity multiplayer: TCP/TLS input requests + authenticated event/snapshot stream
 ```
 
 Launcher/server dùng frame TCP 4-byte big-endian và JSON. TCP Server quản lý
-tài khoản, OTP, inventory và một prototype phòng/game. Prototype trả snapshot
-trong response của từng request; chưa có server push/broadcast tới cả phòng.
-Room/game state vẫn đặt trong RAM và simulation chưa thay thế physics/va chạm
-đường đua của Unity.
+tài khoản, OTP, inventory và prototype phòng/game. Client gửi input qua kết
+nối request/response; một kết nối TCP thứ hai xác thực token rồi nhận event
+riêng có thứ tự và snapshot server-push danh nghĩa 20 Hz. Room/game state vẫn
+đặt trong RAM và simulation chưa thay thế physics/va chạm đường đua của Unity.
 
 ### 1.2. Kết quả tổng hợp
 
@@ -55,10 +58,10 @@ Room/game state vẫn đặt trong RAM và simulation chưa thay thế physics/v
 | SMTP/OTP | **Đã sửa** | Hỗ trợ Gmail implicit TLS 465 và STARTTLS 587; lỗi gửi không còn khóa gửi lại bằng cooldown giả. Server build thành công. |
 | Cấu hình Launcher/Server | **Đã sửa** | JSON host/port/TLS đọc không phân biệt hoa-thường; TLS được chuyển tiếp từ Launcher sang Unity; env port sai giờ báo lỗi thay vì âm thầm fallback. |
 | Điều khiển/va chạm xe | **Đã rà soát** | Có ga, phanh/lùi, rẽ, nhảy, chống kẹt, bám đường và hồi sinh; chưa test vật lý bằng build chạy. |
-| Multiplayer state | **Một phần** | Unity gửi input qua TCP; server trả snapshot theo request và client nội suy. Không có broadcast, track-aware authoritative physics hay kiểm thử hai máy. |
+| Multiplayer state | **Một phần** | Unity gửi input 15–20 Hz; server push snapshot danh nghĩa 20 Hz và event có thứ tự trên TCP; client có queue tối đa 8 mẫu và nội suy. Chưa có track-aware physics, spectator, durable resume hay test trận hai client. |
 | Scene mặc định `game` | **Đã sửa** | Scene có dùng làm fallback nhưng thiếu Build Settings; đã thêm vào danh sách build. |
 | Git hygiene | **Đã sửa** | Cho phép các project .NET và scene thuộc `Assets/scene` được version; tiếp tục loại build/cache/demo scenes. |
-| AWS Internet-ready | **Chưa sẵn sàng** | Sau lần smoke test được chủ tài khoản duyệt, EC2 và RDS đã dừng lại. EIP hiện hữu vẫn gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
+| AWS Internet-ready | **Chưa sẵn sàng** | Lần đọc/truy vấn AWS được ghi trước đây báo EC2 và RDS đã dừng sau smoke test. EIP khi đó gắn ENI mô tả `RDSNetworkInterface`, không phải EC2; lượt hiện tại không đọc lại trạng thái AWS và không allocate/associate EIP hay sửa Security Group. TCP 9000 và phản hồi giao thức đã được kiểm tra từ một máy; chưa test hai client/gameplay. |
 | Production readiness | **Chưa xác nhận** | Chưa xác minh TLS/SMTP/DB runtime, hai client Internet, hoặc tải thực tế. |
 
 ## 2. Network stack tự phát triển và đặc tả giao thức
@@ -66,19 +69,20 @@ Room/game state vẫn đặt trong RAM và simulation chưa thay thế physics/v
 Ứng dụng C# tự triển khai transport trên `TcpClient`/`TcpListener`, bộ đóng
 gói `MessageFramer` và packet DTO dùng chung trong `DanToPhong.Protocol`;
 không dùng HTTP/REST hoặc thư viện mạng bên thứ ba cho luồng client-server.
-Multiplayer hiện dùng một prototype TCP request/response chưa hoàn chỉnh.
+Gameplay dùng TCP request/response cho input và một kết nối TCP riêng cho
+snapshot/event push; đây vẫn là prototype chưa hoàn chỉnh.
 
 ### 2.1. Kết nối, frame và JSON
 
 | Thuộc tính | Đặc tả hiện thực |
 |---|---|
 | Vận chuyển | TCP stream; client kết nối tới hostname/IP cấu hình và cổng mặc định `9000` (`DANTOPHONG_PORT` có thể override; giá trị sai bị từ chối). |
-| TLS | Tùy chọn ở cả hai đầu; khi bật, TLS 1.2/1.3 bọc toàn bộ stream TCP trước khi đọc frame. Cấu hình phải bật đồng thời; client xác thực certificate theo hostname được kết nối. |
+| TLS | Bật mặc định ở Server/Launcher/Unity; Server từ chối khởi động nếu không có certificate hợp lệ. TLS 1.2/1.3 bọc từng stream TCP; client xác thực chain và hostname theo cấu hình. Plaintext chỉ dành cho thử nghiệm cô lập có chủ đích. |
 | Frame | 4 byte đầu là số nguyên độ dài **big-endian**, theo sau là đúng số byte payload. TCP không giữ ranh giới bản tin nên reader phải đọc đủ header/body. |
 | Payload | UTF-8 JSON, tên thuộc tính camelCase; deserialize không phân biệt hoa/thường. |
 | Kích thước | `1..65,536` byte cho mỗi payload; frame rỗng, quá giới hạn hoặc bị cắt giữa chừng bị từ chối/đóng kết nối. |
-| Request/response | Mỗi kết nối xử lý tuần tự từng request frame và gửi một response frame tương ứng; client dùng semaphore để không trộn request/response trên cùng stream. |
-| Timeout | Client kết nối/giao dịch tối đa 12 giây; server bắt tay TLS tối đa 10 giây và đóng kết nối không có frame trong 2 phút. |
+| Request/response và gameplay push | Kết nối lệnh xử lý tuần tự một request/response. Gameplay mở thêm kết nối đã xác thực bằng `GAME_STREAM`; server gửi từng `GAME_EVENT` riêng và snapshot timestamped danh nghĩa mỗi 50 ms. |
+| Timeout | Launcher giao dịch tối đa 12 giây; Unity dùng timeout 8 giây cho request/gameplay stream; Server bắt tay TLS tối đa 10 giây và idle-read timeout 75 giây. |
 
 Khung truyền:
 
@@ -105,6 +109,11 @@ Các trường `RequestPacket` là tùy chọn trừ `command`; từng lệnh ch
 
 Các lệnh còn lại được định nghĩa trong `DanToPhong.Protocol.Commands`: `CAPNHATXU`, `VAOPHONG`, `DOIAVATAR`, `LAYKHO`, `MUAHANG`, `TRANGBI`, `CHONMAP`, `TAIAVATAR`, `LAYAVATAR`, `GUIDANHGIA`, `LAYDANHGIA`, `BANGXEPHANG`, `CAPNHATPHONG`, `XOAPHONG`, `DSPHONG`, `MOIBAN`, `LAYLOIMOI`, `LAYTRANGTHAI`. Mã phản hồi chính: `OK`, `ERR_INVALID_INPUT`, `ERR_AUTH_FAILED`, `ERR_UNAUTHORIZED`, `ERR_INSUFFICIENT_COINS`, `ERR_SERVER_ERROR`.
 
+Lệnh gameplay gồm `ROOM_CREATE`, `ROOM_JOIN`, `ROOM_START`, `GAME_INPUT`,
+`GAME_STREAM`, `GAME_SNAPSHOT` và `GAME_EVENT`. Snapshot có sequence và
+`serverTimestampMs`; event riêng có `eventId` tăng dần trong room, type, user
+và timestamp. Unity giữ tối đa 8 snapshot, bỏ snapshot cũ nhất khi queue đầy.
+
 Ví dụ minh họa, không chứa thông tin xác thực thật:
 
 ```json
@@ -119,6 +128,12 @@ Server accept TCP liên tục; mỗi socket tạo `ClientSession` và tác vụ 
 **Giới hạn cần ghi nhận:** có giới hạn session cấu hình ở accept layer nhưng chưa có
 load test 10–50 client. Không tuyên bố chịu tải lớn/production scale trước khi có
 kiểm thử tải, quota và giám sát tài nguyên.
+
+Launcher và Unity phát `PING` mỗi 20 giây khi có phiên đăng nhập; client/server
+cũng bật TCP keep-alive. Server idle-read timeout là 75 giây. Login limiter
+dùng cặp username/IP, tối đa 5 lần trong cửa sổ 15 phút rồi khóa 15 phút; key
+được hash trước khi lưu SQL. Code đã có nhưng heartbeat/limiter chưa được
+kiểm thử với DB/server runtime trong lượt này.
 
 ## 3. Kiến trúc và triển khai AWS
 
@@ -148,22 +163,33 @@ Unit mẫu [dantophong.service](deploy/aws/dantophong.service) dùng `systemd`, 
 
 Khi triển khai: publish `linux-x64`, cài .NET 10 runtime, chép app vào `/opt/dantophong`, tạo `/etc/dantophong/server.env` từ mẫu bằng secret store, đặt quyền chỉ root đọc, chép unit vào `/etc/systemd/system/`, rồi chạy `systemctl daemon-reload`, `enable --now`, kiểm tra `systemctl status` và `journalctl`. Service không thể chạy đúng cho tới khi DB/SMTP/TLS env được điền hợp lệ.
 
+### 3.3. Chi phí và free tier
+
+| Hạng mục | Kết quả hiện có | Ghi chú |
+|---|---|---|
+| EC2/RDS | Lần đọc AWS được ghi trước đây báo cả hai đã dừng sau test; lượt hiện tại không truy vấn AWS. | Không khẳng định trạng thái hiện tại hoặc chi phí thực tế nếu chưa làm Bước 0 read-only. |
+| Free tier | Chưa xác minh hạn mức/tài khoản và usage trong Billing. | Không coi dịch vụ là miễn phí chỉ vì workload ngắn; cần owner kiểm tra Billing/Free Tier. |
+| EIP/public IPv4 | EIP lịch sử vẫn gắn ENI RDS. | Có thể phát sinh phí; không release, chuyển hoặc associate trong đợt này. |
+| Chi phí kiểm thử | Không có số liệu Billing/Cost Explorer trong bằng chứng. | `[ĐIỀN: chi phí thực tế sau khi kiểm tra Billing]`; không tự ước lượng. |
+
 ## 4. Client GUI, các Form và phiên đăng nhập
 
 - **Đăng ký:** client kiểm tra username/email/password/confirm và yêu cầu OTP trước khi gửi registration request. OTP gắn với email/username và được kiểm tra tại Server.
 - **Đăng nhập:** gửi username/password qua TCP, nhận token và mở form chính. Token không được ghi vào file nhớ tài khoản.
 - **Quên mật khẩu:** xác nhận username/email, nhận OTP, đặt password mới và xử lý cooldown gửi lại.
 - **Form chính/phòng:** gọi Server để đọc user/room/invite và thao tác nghiệp vụ; GameLauncher kiểm tra exe/token/endpoint trước khi chạy Unity.
-- **Truyền phiên:** Launcher truyền username, token, host, port, TLS flag, mode và room ID tới Unity bằng process arguments. Unity `Boot` xác thực token, tải thông tin user rồi chuyển tới menu/select/lobby. Token không phải password nhưng vẫn là bearer credential; cần bảo vệ máy client và thời hạn/thu hồi token.
+- **Truyền phiên:** Launcher truyền username, host, port, TLS flag, mode và room ID bằng process arguments; token chuyển qua environment của tiến trình Unity, không nằm trong command line. Unity `Boot` xác thực token, tải thông tin user rồi chuyển tới menu/select/lobby.
 - **Sửa cấu hình:** `NetworkClientService` trước đây chỉ tìm `host`/`port` phân biệt hoa-thường trong JSON nên không đọc được file Release dùng `Host`/`Port`; nay đọc không phân biệt hoa-thường và lấy cả `useTls`. TLS flag từ cấu hình hiện được truyền tiếp sang game.
-- **Fail-fast cấu hình:** Server mặc định TLS off nếu env không khai báo; giá trị `DANTOPHONG_USE_TLS` khác true/false hoặc port server/client không hợp lệ sẽ báo lỗi cấu hình, không âm thầm chạy port/plaintext khác dự kiến.
-- **Điểm chưa xác nhận:** không chạy tương tác trực tiếp trên Desktop, DPI scaling, client-server thật hoặc kiểm thử crash/thoát game end-to-end trong lượt này. Cần xác nhận các thao tác tạo/join/rời phòng và quay về Launcher trên Windows.
+- **Fail-fast cấu hình:** TLS mặc định bật; thiếu certificate hợp lệ làm Server dừng trước khi mở listener. Giá trị `DANTOPHONG_USE_TLS` khác true/false hoặc port không hợp lệ sẽ báo lỗi, không âm thầm fallback.
+- **Điểm chưa xác nhận:** hai Unity GUI đã mở đồng thời tới main menu; chưa login, tạo/join phòng hay chạy trận vì local SQL Server không khởi động được. DPI, crash/thoát game và client-server end-to-end còn cần test.
 
 ### Kiến trúc GUI và yêu cầu tối thiểu hai client
 
 Client desktop là WinForms C# chạy độc lập trên Windows; các Form gồm Login, Register, Forgot/Reset Password và màn hình chính có chức năng tài khoản/phòng. Có thể chạy hai tiến trình/client độc lập trên hai máy Windows khác mạng, cùng trỏ tới endpoint public; không dùng chung token giữa client. Một máy có thể dùng để smoke test hai instance, nhưng kiểm thử Internet cần ít nhất hai máy/mạng ngoài EC2 (ví dụ hai kết nối Internet độc lập hoặc một máy qua hotspot).
 
-**Ảnh GUI chưa được chụp trong lượt này.** Chỗ gắn ảnh cho Login/Register/OTP, hai client và gameplay được tạo trong Chương 9.
+Đã ghi nhận hai cửa sổ Unity cùng hiển thị main menu trong
+[TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log). Đây chỉ là
+kiểm tra GUI launch; TC02 đầy đủ vẫn BLOCKED vì chưa login/đồng bộ qua server.
 
 ## 5. Xác thực OTP và gửi email
 
@@ -197,13 +223,18 @@ Server trước đây dùng `System.Net.Mail.SmtpClient` cố định `smtp.gmai
 
 ### Multiplayer
 
-`TcpGameplaySync` gửi input qua TCP khoảng 15–20 request/giây và nhận snapshot
-trong response; server dùng kinematics đơn giản, còn client buffer tối đa 8
-sample và nội suy với độ trễ mục tiêu khoảng 100 ms. Đây chưa phải broadcast:
-mỗi client nhận snapshot riêng sau request của mình. Server chưa mô phỏng
-collision/đường đua, chưa kiểm tra checkpoint theo vị trí, không có outbound
-coalescing queue hoặc reconnect/resume. Vì vậy không xem đây là gameplay
-authoritative hoàn chỉnh.
+`TcpGameplaySync` gửi input qua TCP khoảng 15–20 request/giây. Một kết nối TCP
+riêng xác thực session token bằng `XACTHUCTOKEN`, đăng ký `GAME_STREAM`, rồi
+nhận snapshot server-push danh nghĩa 20 Hz. Event quan trọng được gửi thành
+frame riêng có `eventId`; TCP giữ thứ tự event/snapshot trên stream. Unity giữ
+tối đa 8 snapshot, bỏ mẫu cũ nhất khi đầy, loại sequence cũ và nội suy với độ
+trễ mục tiêu khoảng 100 ms. Stream có thử kết nối lại khi primary session còn
+sống; mất mọi session hoặc restart Server không phục hồi membership.
+
+Server chỉ mô phỏng kinematics đơn giản; chưa xác thực collision/đường đua
+hoặc checkpoint theo vị trí, chưa có spectate và chưa có durable reconnect.
+Vì vậy đây chưa phải gameplay authoritative hoàn chỉnh, dù snapshot đã được
+push trên TCP.
 
 **Đánh giá:** logic có guard cho xe owner/remote, timeout room, missing scene và respawn. Không thể kết luận chống kẹt/văng/bay lạ hoặc đồng bộ Internet đạt ngưỡng chất lượng nếu chưa chạy build thật trên đường đua và hai client có latency/jitter. Cần kiểm tra phanh khi rẽ gấp, va tường, qua khe nối, rơi nước, respawn gần xe khác và rời mạng giữa trận.
 
@@ -227,76 +258,79 @@ nó yêu cầu token hợp lệ rồi định tuyến `single` đến SelectScen
 Multiplayer room/start path đã nối TCP ở mức prototype, nhưng runtime và toàn
 bộ chuyển cảnh chưa được xác minh.
 
-**Cần kiểm tra bằng Unity:** scene asset serialize được, reference prefab/camera/input còn hợp lệ, `game` xuất hiện trong build mới, và chuyển scene liên tục không giữ `Time.timeScale` bằng 0. Chưa chạy Unity Editor/build end-to-end trên cây TCP hiện tại.
+**Cần kiểm tra bằng Unity:** scene asset serialize được, reference prefab/camera/input còn hợp lệ, `game` xuất hiện trong build mới, và chuyển scene liên tục không giữ `Time.timeScale` bằng 0. Windows x64 player đã build thành công trên cây TCP hiện tại; chưa chơi scene hoặc xác minh kết nối server.
 
 ## 8. Bảo mật và quản lý cấu hình
 
 - Không ghi DB, SMTP, certificate secret hoặc private key thật trong repo. File env mẫu chỉ chứa placeholder; file vận hành phải ở SSM/secret store hoặc path hạn chế quyền.
 - Client server config không nên chứa credential bí mật. Host/port/TLS là cấu hình public; sau khi có EIP thật cần cập nhật config release.
-- TLS đã có tùy chọn hai đầu nhưng phải bật đồng bộ và dùng chứng chỉ hợp lệ cho host client kết nối. Không dùng TLS `false` cho tài khoản thật qua Internet: TCP plaintext có thể lộ mật khẩu/token.
-- RDS hiện `PubliclyAccessible=true` dù Security Group giới hạn inbound; ưu tiên chuyển sang private-only khi được duyệt. DB account nên có quyền tối thiểu cần thiết. SMTP sender cần App Password riêng và rotation nếu từng bị commit/ghi log.
+- TLS bật mặc định ở cả hai đầu và Server fail-closed nếu certificate không hợp lệ; client kiểm tra chain/hostname. Không dùng TLS `false` cho tài khoản thật qua Internet: TCP plaintext có thể lộ mật khẩu/token.
+- Snapshot AWS được ghi trong lần kiểm tra trước báo RDS `PubliclyAccessible=true` dù Security Group giới hạn inbound; ưu tiên chuyển sang private-only khi được duyệt. Trạng thái chưa được đọc lại trong lượt này. DB account nên có quyền tối thiểu cần thiết. SMTP sender cần App Password riêng và rotation nếu từng bị commit/ghi log.
 - `.gitignore` trước đây bỏ qua toàn bộ `.unity` nên scene chính không xuất hiện trong clone; đồng thời bỏ qua `.csproj` Launcher/Server. Nay chỉ mở lại scene `Assets/scene/*.unity` và project `.csproj` bên `UI`, còn scene demo package/cache/build vẫn bỏ qua.
 - Cần `git status --short` trước khi push và kiểm tra history nếu secret từng commit. `.gitignore` không xóa secret đã nằm trong commit cũ.
-- Kiểm tra mới phát hiện 268 file trong `bin/obj` và hai solution Unity `.slnx` đã bị track từ trước. Đã bỏ chúng khỏi index (file local được giữ), thêm ignore `*.slnx`; trước push cần xác minh index diff chỉ là xóa artifacts và các source/tài liệu dự kiến.
+- Cleanup lịch sử đã gỡ artifacts `bin/obj` và Unity `.slnx` khỏi index; các file local được giữ và có ignore tương ứng. Kiểm tra lại diff trước khi phát hành.
 
 ## 9. Kịch bản, kết quả và ảnh minh chứng
 
-### Bằng chứng lịch sử đang có trong repo
+### Bằng chứng lịch sử và lượt kiểm tra hiện tại
 
-Các mục dưới đây phản ánh lần kiểm tra trước được ghi nhận trong repo, không
-phải thao tác AWS/build đã thực hiện ở lượt cập nhật tài liệu này. Lượt này
-không bật/tắt AWS, đổi EIP/Security Group, hoặc push Git.
+Các dòng AWS mô tả kết quả lịch sử đã có trong repo, không phải trạng thái AWS
+được đọc lại trong lượt này. Lượt hiện tại không chạy AWS CLI, không đổi
+EIP/Security Group và không push Git.
 
 | Kiểm tra | Kết quả |
 |---|---|
 | Đọc profile AWS `dantophong` / EC2 / RDS | Ban đầu cả hai `stopped`; theo xác nhận của chủ tài khoản đã start RDS rồi EC2; cuối cùng đã stop EC2 trước RDS và xác nhận cả hai `stopped`. |
 | Elastic IP và ingress | EIP `eipalloc-025f80fc38d372273` vẫn gắn ENI mô tả `RDSNetworkInterface`, không phải EC2. Không associate/disassociate/allocate EIP. Security Group EC2 TCP/9000 chỉ cho một IPv4 `/32`; không mở rộng rule. |
 | Smoke test một máy | EC2 health checks `ok`; `Test-NetConnection` tới TCP 9000 thành công; probe frame JSON nhận `ERR_INVALID_INPUT` như phản hồi ứng dụng. EIP không đổi. |
-| Hai client và gameplay | Chưa thực hiện được trong phiên này: chỉ kiểm tra từ một máy; chưa có ảnh UI/gameplay hoặc bằng chứng hai máy. Không coi TCP probe là test đăng nhập, lobby hay trận đua. |
+| Hai client và gameplay | Hai Unity GUI mở đồng thời tới main menu; log [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log). Chưa login, tạo/join phòng hay chạy trận; không coi đây là test đồng bộ. |
 | Tắt AWS sau test | Đã dừng EC2 trước RDS; AWS xác nhận cuối cùng cả hai `stopped`. AWS CLI không có waiter `rds db-instance-stopped`; dùng vòng lặp truy vấn trạng thái trong Chương 13.3. |
 | Kiểm tra IP cũ trong Release config | AWS trả `InvalidAddress.NotFound`; endpoint cũ không phải EIP có thể xác nhận. |
 | Source OTP/config | Luồng 465/587 dùng chế độ TLS đúng; lỗi gửi có cleanup reservation; cooldown 60 giây tách với hạn OTP 10 phút; cấu hình port/TLS fail-fast. |
 | Build Server | Lượt này: `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore` thành công, 0 warning, 0 error. |
-| Build/Publish Launcher | Lượt này: `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore -o D:\DanToPhong\LauncherRelease` thành công; còn 6 cảnh báo nullable (`CS8669`) trong file Designer sinh tự động. |
-| Build Unity | Lượt này: Unity Editor 6000.3.28f1 build Windows x64 thành công sau khi gỡ plugin và dọn state chỉ ghi; không còn cảnh báo C# ở lần build cuối. Unity có log lỗi không fatal về licensing/package HTTPS. Chưa launch player hoặc test gameplay. |
+| Build/Publish Launcher | Lượt này: `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false --no-restore` thành công; còn 6 cảnh báo nullable (`CS8669`) trong file Designer sinh tự động. |
+| Build Unity | Unity Editor 6000.3.28f1 báo `Build Successful`; `Assembly-CSharp.dll` trong player được build mới, không thấy C# diagnostics. Hai GUI main menu đã mở; chưa thử kết nối/match. |
+| Gameplay wire smoke | `GAME_EVENT` và `GAME_SNAPSHOT` được serialize thành frame riêng theo đúng thứ tự, với event ID, sequence và timestamp; chỉ kiểm tra in-memory, không phải live stream. |
+| Local runtime prerequisites | Không có SQL listener trên loopback:1433; thao tác start service local bị từ chối do quyền service; Docker daemon không chạy. `sqlcmd`, `SqlLocalDB`, `tshark`, Wireshark GUI và `clumsy` không có sẵn; DB-backed live server, TLS, OTP, limiter, load, impairment và DPI chưa chạy. |
+| Draw.io | Cả 4 tệp `.drawio` parse XML thành công. Không có Draw.io CLI/desktop executable cài sẵn nên PNG export BLOCKED; lệnh cài được xác định là `winget install --id JGraph.Draw --exact --source winget`, chưa thực hiện vì sẽ thay đổi phần mềm hệ thống. |
 | Tài liệu lệnh | PowerShell parser xác nhận cả 4 code blocks trong báo cáo không có lỗi cú pháp. Runbook AWS đã được thực thi một lần sau khi người dùng duyệt start; resource cuối cùng đã dừng, không đổi EIP/Security Group. |
 | Unity Build Settings | `boot` đứng đầu; các scene gameplay có trong build list; `game` fallback có trong build. Windows x64 player vừa được build; scene/runtime flow chưa được chơi thử. |
-| Git hygiene | `.gitignore` bỏ qua output; 268 file `bin/obj` và hai `.slnx` đã được gỡ khỏi index. Các thay đổi đã commit cục bộ; chưa push. |
+| Git hygiene | Base branch đã commit cleanup trước đó; các thay đổi TCP stream/tài liệu trong lượt này còn pending local commit. Chưa push. |
 | Secret scan | Quét signature AWS key/private key và mẫu password cụ thể trong source/config/doc không có kết quả; không thay thế quét Git history/rotation. |
 
 ### Kịch bản cần chạy và chỗ chèn ảnh minh chứng
 
-| ID | Thao tác và tiêu chí đạt | Trạng thái | Ảnh minh chứng (chưa chụp) |
+| ID | Thao tác và tiêu chí đạt | Trạng thái | Ảnh/log chứng cứ |
 |---|---|---|---|
 | TC01 | Reachability TCP/9000 từ một máy. | PASS lịch sử — chỉ xác nhận cổng, không xác nhận nghiệp vụ | [TC01-tcp-reachability.log](docs/evidence/TC01-tcp-reachability.log) |
-| TC02 | Hai máy khác mạng đăng nhập, vào phòng, đồng bộ. | BLOCKED — chưa có bằng chứng hai máy | Chưa có |
-| TC03 | Hai client dùng TCP tạo/vào phòng và nhận snapshot. | BLOCKED — chưa chạy Unity client/hai máy | Chưa có |
-| TC04 | OTP SMTP gửi/nhận, mã đúng/sai/hết hạn. | BLOCKED — runtime SMTP chưa cấu hình | Chưa có |
-| TC05 | TLS handshake và plaintext fail-closed. | BLOCKED — log deployment cũ FAIL; source hiện tại chưa retest | [TC05-tls-plaintext.log](docs/evidence/TC05-tls-plaintext.log) |
-| TC06 | DPI so sánh plaintext/TLS bằng capture. | BLOCKED — chưa capture | Chưa có |
-| TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — chưa chạy runtime | Chưa có |
-| TC08 | Unity Windows x64 build và launch. | PASS — build hiện tại; launch và gameplay chưa test | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log) |
-| TC09 | TCP framing: split/coalesced, EOF, length sai, truncated. | PASS lịch sử — smoke test in-memory | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
-| TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | BLOCKED — chưa chạy server thực | Chưa có |
+| TC02 | Hai máy khác mạng đăng nhập, vào phòng, đồng bộ. | BLOCKED — chỉ có hai GUI main menu, chưa có login/server hay máy mạng thứ hai | [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log) |
+| TC03 | Hai client dùng TCP tạo/vào phòng và nhận snapshot. | BLOCKED — không có SQL Server runtime và server gameplay live | Chưa có |
+| TC04 | OTP SMTP gửi/nhận, mã đúng/sai/hết hạn. | BLOCKED — không có DB runtime hoặc SMTP giả đang chạy | Chưa có |
+| TC05 | TLS+TLS, TLS+plaintext, certificate sai, plaintext tường minh. | BLOCKED — log deployment cũ FAIL; local DB/runtime server không sẵn sàng để chạy bốn ca | [TC05-tls-plaintext.log](docs/evidence/TC05-tls-plaintext.log) |
+| TC06 | DPI so sánh plaintext/TLS bằng capture. | BLOCKED — server/TLS runtime và capture chưa chạy | Chưa có |
+| TC07 | Mất mạng, reconnect và restart Server. | BLOCKED — server DB-backed chưa khởi động; retry code chưa được kiểm chứng live | Chưa có |
+| TC08 | Unity Windows x64 build. | PASS — Editor báo build thành công; hai GUI main menu cũng được mở nhưng không thử network | [TC08-unity-build.log](docs/evidence/TC08-unity-build.log) |
+| TC09 | TCP framing và thứ tự event/snapshot. | PASS — smoke test in-memory gồm frame lỗi và wire order GAME_EVENT → GAME_SNAPSHOT | [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log) |
+| TC10 | 10–50 client, slow sender, abort, malformed/oversized frames. | BLOCKED — SQL Server/Docker runtime không khả dụng, chưa mở server thật | Chưa có |
 | TC11 | TCP 3-way handshake và FIN tới cổng 9000. | BLOCKED — chưa capture | Chưa có |
-| TC12 | TLS handshake/cipher và so sánh payload. | BLOCKED — chưa có TLS capture | Chưa có |
+| TC12 | TLS handshake/cipher và so sánh payload. | BLOCKED — TC05 chưa chạy; chưa có TLS server/capture | Chưa có |
 
 Ảnh phải tránh hiển thị password, OTP, token, connection string, App Password, private key và dữ liệu cá nhân. Ghi thêm ngày/commit, Windows/Unity build, endpoint test, network condition và pass/fail; giữ log đã redact cùng ảnh. Không đánh dấu “Đạt” khi chỉ có ảnh UI tĩnh.
 
 ## 10. Hướng dẫn clone, build và sử dụng
 
 1. Clone repo, cài .NET 10 SDK/Desktop Runtime; cài Unity đúng `ProjectVersion.txt` nếu cần build game.
-2. Quản trị viên điền secret server trong AWS SSM/service environment, hoàn tất EIP và TLS; không yêu cầu bạn bè cài DB.
-3. Dùng bản publish đã tạo tại `D:\DanToPhong\LauncherRelease`, hoặc build lại Launcher:
+2. Với local runtime, cần quyền chạy SQL Server/LocalDB, cấu hình schema, SMTP giả và certificate test ngoài repo; chưa thể tái hiện E2E trên máy hiện tại do SQL service không khởi động được.
+3. Với deployment AWS, chỉ sau khi owner duyệt mới cấu hình secret/TLS và làm theo runbook; không mở ingress rộng.
+4. Build Launcher vào thư mục trong repo:
 
    ```powershell
-   dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o D:\DanToPhong\LauncherRelease
-   Copy-Item .\deploy\client\server.json.example D:\DanToPhong\LauncherRelease\server.json
+   dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o .\LauncherRelease
+   Copy-Item .\deploy\client\server.json.example .\LauncherRelease\server.json
    ```
 
-4. Đặt `host` của file `server.json` thành EIP/DNS đã provision; giữ `port: 9000`; chỉ để `useTls: true` khi Server có cùng TLS certificate/config.
-5. Đưa Unity build cạnh Launcher trong `Game\` (hoặc theo đường dẫn `BuildGame36` được Launcher dò); đăng nhập rồi chọn Solo/Multiplayer.
-6. Người chơi khác tải cùng bản Launcher + Unity build, không cần sửa code; cấu hình endpoint public chỉ cần thay một lần khi EIP được provision và đóng gói cùng release.
+5. Đặt host/port/TLS trong file `server.json` không commit; chỉ dùng dữ liệu giả với plaintext.
+6. Build Unity Windows x64 qua Unity Editor `BuildWindowsPlayer.BuildWindows64Release`; mở hai instance chỉ xác nhận GUI. Chỉ tuyên bố gameplay sau khi server/DB/TLS và hai client đã chạy thật.
 
 Chi tiết lệnh AWS/systemd và biến môi trường có trong [README](README.md#aws-deployment-notes).
 
@@ -307,7 +341,7 @@ Chi tiết lệnh AWS/systemd và biến môi trường có trong [README](READM
 | Người chơi mới | Là người chơi, tôi muốn đăng ký bằng email và OTP để tạo tài khoản. | OTP đúng, chưa hết hạn, dùng một lần; code sai/expired bị từ chối. |
 | Người chơi | Là người chơi, tôi muốn đăng nhập và mở game bằng phiên an toàn. | Login phát token; Unity xác thực token; logout/expiry thu hồi quyền. |
 | Người chơi | Là người chơi, tôi muốn vào Solo hoặc tạo/join phòng với bạn. | Solo chuyển đúng scene; hai client Internet cùng vào room và đồng bộ scene. |
-| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input được gửi qua TCP; snapshot được nội suy ở client. Việc đồng bộ hiện một phần, chưa có room-wide push hay track-authoritative physics. |
+| Người chơi | Là người chơi, tôi muốn điều khiển xe và nhìn thấy đối thủ. | Input gửi qua TCP; server đẩy event/snapshot có thứ tự và client nội suy. Chưa có track-authoritative physics hoặc test trận live. |
 | Quản trị viên | Là quản trị viên, tôi muốn Server tự lên sau reboot và lưu dữ liệu trong DB. | systemd active, SQL Server/RDS reachable, log không lộ secret. |
 
 ### Flow đăng ký/login và vào game
@@ -329,9 +363,11 @@ flowchart TD
     K --> L{Mode}
     L -->|Solo| M[SelectScene -> Race -> Finish/Reset]
     L -->|Multiplayer| N[TCP ROOM_CREATE / ROOM_JOIN / ROOM_START]
-    N --> O[TCP GAME_INPUT / GAME_SNAPSHOT request-response]
-    M --> P[Menu/Thoát]
-    O --> P
+    N --> O[GAME_INPUT over TCP command connection]
+    O --> P[GAME_STREAM over second authenticated TCP connection]
+    P --> Q[Ordered GAME_EVENT and timestamped GAME_SNAPSHOT]
+    M --> R[Menu/Thoát]
+    Q --> R
 ```
 
 ### Flow một lượt request client-server
@@ -339,15 +375,22 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant C as WinForms Client
+    participant U as Unity client
     participant S as TCP Server :9000
+    participant G as Gameplay TCP stream
     participant D as SQL Server/RDS
-    participant M as Gmail SMTP
-    C->>S: TLS (tùy cấu hình) + [length BE][JSON RequestPacket]
+    participant M as SMTP provider
+    C->>S: TLS (bật mặc định) + [length BE][JSON RequestPacket]
     S->>D: Xử lý lệnh, xác thực / lưu dữ liệu
     opt Request OTP
       S->>M: SMTP implicit TLS 465 hoặc STARTTLS 587
     end
     S-->>C: [length BE][JSON ResponsePacket]
+    U->>S: GAME_INPUT over authenticated command connection
+    U->>G: XACTHUCTOKEN + GAME_STREAM
+    loop Snapshot nominally 20 Hz
+      G-->>U: Ordered GAME_EVENT / GAME_SNAPSHOT frames
+    end
 ```
 
 ## 12. Phân công công việc và liên lạc
@@ -356,12 +399,12 @@ Thông tin nhóm chưa có trong repository/session; các ô sau **cố ý để
 
 | Thành viên | MSSV | Vai trò/phần việc thực hiện | Tỷ lệ đóng góp | Xác nhận |
 |---|---|---|---:|---|
-| `[Nhóm trưởng - điền họ tên]` | `[MSSV]` | Tích hợp, kiến trúc, AWS/release, tổng hợp báo cáo (điều chỉnh theo thực tế) | `[__%]` | `[Ký/xác nhận]` |
-| `[Thành viên 2]` | `[MSSV]` | WinForms/đăng ký-đăng nhập/OTP (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
-| `[Thành viên 3]` | `[MSSV]` | Server/CSDL/network protocol (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
-| `[Thành viên 4]` | `[MSSV]` | Unity gameplay/scene/TCP game prototype (điền theo phân công thực tế) | `[__%]` | `[Ký/xác nhận]` |
+| `[ĐIỀN: họ tên nhóm trưởng]` | `[ĐIỀN: MSSV]` | `[ĐIỀN: phần việc thực tế]` | `[ĐIỀN: tỷ lệ]` | `[ĐIỀN: xác nhận]` |
+| `[ĐIỀN: họ tên thành viên]` | `[ĐIỀN: MSSV]` | `[ĐIỀN: phần việc thực tế]` | `[ĐIỀN: tỷ lệ]` | `[ĐIỀN: xác nhận]` |
+| `[ĐIỀN: họ tên thành viên]` | `[ĐIỀN: MSSV]` | `[ĐIỀN: phần việc thực tế]` | `[ĐIỀN: tỷ lệ]` | `[ĐIỀN: xác nhận]` |
+| `[ĐIỀN: họ tên thành viên]` | `[ĐIỀN: MSSV]` | `[ĐIỀN: phần việc thực tế]` | `[ĐIỀN: tỷ lệ]` | `[ĐIỀN: xác nhận]` |
 
-**Liên lạc nhóm trưởng:** Họ tên `[điền]`; email `[điền email học tập]`; điện thoại `[điền nếu cần]`. Không đặt thông tin liên lạc cá nhân lên Git public nếu chưa được đồng ý; có thể điền trong bản nộp riêng.
+**Liên lạc nhóm trưởng:** Họ tên `[ĐIỀN: ...]`; email `[ĐIỀN: ...]`; điện thoại `[ĐIỀN: ...]`. Không đặt thông tin liên lạc cá nhân lên Git public nếu chưa được đồng ý; có thể điền trong bản nộp riêng.
 
 ## 13. Runbook bật/tắt AWS, test Internet và Git
 
@@ -535,10 +578,43 @@ git push
 
 ## 14. Hạn chế và kết luận phát hành
 
-**Chưa thể xác nhận “clone về dùng ngay”:** smoke test một máy đã xác nhận listener TCP/9000 và phản hồi giao thức; EC2/RDS sau đó đã được dừng. EIP hiện có vẫn gắn ENI `RDSNetworkInterface`, EC2 hiện không có EIP và public IP tự cấp chỉ tạm thời. Security Group TCP/9000 chỉ cho một IPv4 `/32`; RDS vẫn `PubliclyAccessible=true`; TLS chưa được xác minh/bật. Chưa test hai client, đăng nhập, OTP thật, Unity gameplay hoặc lưu ảnh minh chứng. Trước khi phát hành, cần xác nhận endpoint ổn định, giới hạn ingress phù hợp, bật TLS, kiểm thử end-to-end và chỉ ghi kết quả có bằng chứng thực tế.
+**Chưa thể xác nhận “clone về dùng ngay”:** build Server/Launcher/Unity và
+protocol smoke test đã chạy; hai Unity GUI chỉ tới main menu. Local SQL runtime
+không khởi động được do quyền service và Docker engine không hoạt động, nên
+chưa chạy live Server, TLS/OTP, login limiter, gameplay, load hay DPI. Các
+trạng thái AWS/EIP nêu trong báo cáo là bằng chứng lịch sử, chưa được đọc lại
+trong lượt này. Không có AWS mutation hoặc Git push.
 
-Ngoài ra cần chạy gameplay thật và test hai client. TCP game prototype còn
-request/response, mô phỏng kinematics đơn giản, không có room-wide push, track
-collision authority, verified checkpoint crossing hoặc reconnect/resume.
-Phần thưởng/điểm đua chưa được xác nhận phía Server. Báo cáo không chứng nhận
-độ ổn định hoặc khả năng chịu tải production.
+Gameplay hiện có input TCP request/response, server-pushed snapshot/event
+stream, client queue giới hạn và interpolation. Còn thiếu track-aware
+collision/checkpoint authority, spectate, durable reconnect, OTP runtime,
+multi-client test và tải đo thật. Báo cáo không xác nhận độ ổn định hoặc khả
+năng chịu tải production.
+
+## 15. Đối chiếu đề bài
+
+| Yêu cầu | Trạng thái | Bằng chứng/giới hạn |
+|---|---|---|
+| Client có GUI; ít nhất hai client | PARTIAL | Hai Unity GUI main menu mở đồng thời; chưa login hoặc chạy trận. [TC02 log](docs/evidence/TC02-two-client-gui.log) |
+| Server và database | SOURCE IMPLEMENTED; RUNTIME BLOCKED | Server C# Release build đạt; SQL Server chưa chạy được trên máy kiểm thử. |
+| Network stack nhóm tự viết | SOURCE IMPLEMENTED | Framing/protocol TCP/TLS tự viết; không có UDP hoặc thư viện networking bên thứ ba trong source. |
+| Port và cấu trúc message | DOCUMENTED | TCP 9000, length-prefix BE, JSON, `GAME_STREAM`, event/snapshot, giới hạn ở [protocol](docs/protocol.md). |
+| Đa kết nối | SOURCE IMPLEMENTED; LOAD BLOCKED | Async accept và giới hạn session 128; TC10 chưa chạy. |
+| OTP, login limiter, brute-force | SOURCE IMPLEMENTED; E2E BLOCKED | Có SQL limiter theo account+IP và OTP logic; cần DB/SMTP giả để xác minh thực. |
+| Đồng bộ game, event và interpolation | SOURCE IMPLEMENTED; LIVE TEST BLOCKED | Smoke wire test TC09; chưa có trận live, track-aware authority hay spectate/resume. |
+| Internet/TLS/DPI | BLOCKED | TC05/TC06/TC12 chưa chạy với server/certificate thực. |
+| Tài liệu, sơ đồ và bằng chứng | PARTIAL | Tài liệu/evidence cập nhật, XML 4 sơ đồ hợp lệ; PNG Draw.io và DPI captures chưa có (CLI chưa cài). |
+
+## 16. Phụ lục
+
+### Công cụ hỗ trợ
+
+`[ĐIỀN: công cụ hỗ trợ đã sử dụng và phạm vi hỗ trợ; nhóm tự khai báo]`
+
+### Tệp bằng chứng và tái hiện
+
+- Bảng TC01–TC12 và trạng thái: [docs/evidence/README.md](docs/evidence/README.md).
+- Framing/event wire smoke: [TC09-framing-smoke.log](docs/evidence/TC09-framing-smoke.log).
+- Unity build: [TC08-unity-build.log](docs/evidence/TC08-unity-build.log).
+- Hai GUI main menu, không phải trận mạng: [TC02-two-client-gui.log](docs/evidence/TC02-two-client-gui.log).
+- Tái hiện build/test: [README.md](README.md) và [docs/protocol.md](docs/protocol.md).

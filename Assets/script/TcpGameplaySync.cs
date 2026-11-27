@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 
 public sealed class TcpGameplaySync : MonoBehaviour
@@ -16,6 +17,9 @@ public sealed class TcpGameplaySync : MonoBehaviour
     private float nextWarningTime;
     private int clientTick;
     private bool finishEventRaised;
+    private bool streamReady;
+    private bool streamStarting;
+    private float nextStreamAttempt;
 
     public static event Action<string> GameFinished;
 
@@ -49,6 +53,21 @@ public sealed class TcpGameplaySync : MonoBehaviour
         {
             if (ServerClient.Ready)
             {
+                if (!streamReady && !streamStarting && Time.unscaledTime >= nextStreamAttempt)
+                {
+                    streamStarting = true;
+                    Task startTask = stateChannel.StartReceivingAsync();
+                    yield return new WaitUntil(() => startTask.IsCompleted);
+                    streamStarting = false;
+                    if (startTask.Status == TaskStatus.RanToCompletion)
+                        streamReady = true;
+                    else
+                    {
+                        nextStreamAttempt = Time.unscaledTime + 5f;
+                        Debug.LogWarning("[TCP gameplay] Snapshot subscription failed; retrying.");
+                    }
+                }
+
                 scooter controls = localCar.GetComponent<scooter>();
                 Vector3 position = localCar.transform.position;
                 Resp response = null;
@@ -87,10 +106,7 @@ public sealed class TcpGameplaySync : MonoBehaviour
     private void ApplySnapshot(Resp response)
     {
         if (response.gameFinished && !finishEventRaised)
-        {
-            finishEventRaised = true;
-            GameFinished?.Invoke(response.winnerUsername ?? string.Empty);
-        }
+            RaiseGameFinished(response.winnerUsername);
         if (response.gamePlayers == null)
             return;
 
@@ -179,6 +195,11 @@ public sealed class TcpGameplaySync : MonoBehaviour
 
     private void Update()
     {
+        while (stateChannel.TryDequeueEvent(out Resp gameEvent))
+            ApplyGameEvent(gameEvent);
+        while (stateChannel.TryDequeueSnapshot(out Resp snapshot))
+            ApplySnapshot(snapshot);
+
         long renderTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() -
                           (long)(InterpolationDelaySeconds * 1000f);
         List<int> remove = null;
@@ -208,6 +229,26 @@ public sealed class TcpGameplaySync : MonoBehaviour
             foreach (int id in remove)
                 replicas.Remove(id);
         }
+    }
+
+    private void ApplyGameEvent(Resp response)
+    {
+        if (response.gameEvent != null &&
+            string.Equals(response.gameEvent.type, "FINISH", StringComparison.OrdinalIgnoreCase))
+            RaiseGameFinished(response.gameEvent.username);
+    }
+
+    private void RaiseGameFinished(string username)
+    {
+        if (finishEventRaised)
+            return;
+        finishEventRaised = true;
+        GameFinished?.Invoke(username ?? string.Empty);
+    }
+
+    private void OnDestroy()
+    {
+        stateChannel.Close();
     }
 
     private static void ApplyInterpolatedPose(PlayerReplica replica, long renderTime)

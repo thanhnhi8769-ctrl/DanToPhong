@@ -33,6 +33,7 @@ namespace DanToPhong.Server
                 var room = new GameRoom(code, userId, username, maxPlayers, SanitizeMap(request.MapName));
                 Rooms.Add(code, room);
                 Membership[userId] = code;
+                RecordEvent(room, "ROOM_CREATED", userId, username, 0);
                 return ToResponse(room, userId, "Room created.");
             }
         }
@@ -53,6 +54,7 @@ namespace DanToPhong.Server
                 RemoveUserInternal(userId);
                 room.Players.Add(userId, new GamePlayer(userId, username, room.NextSpawnIndex++));
                 Membership[userId] = room.Code;
+                RecordEvent(room, "PLAYER_JOINED", userId, username, 0);
                 return ToResponse(room, userId, "Joined room.");
             }
         }
@@ -83,6 +85,7 @@ namespace DanToPhong.Server
                     room.MapName = request.MapName.Trim();
                 room.IsRacing = true;
                 room.LastSimulationAt = DateTime.UtcNow;
+                RecordEvent(room, "RACE_STARTED", userId, room.Players[userId].Username, 0);
                 return ToResponse(room, userId, "Game started.");
             }
         }
@@ -166,6 +169,7 @@ namespace DanToPhong.Server
 
                     player.TotalCheckpoints = total;
                     player.NextCheckpoint = checkpoint;
+                    RecordEvent(room, "CHECKPOINT", userId, player.Username, checkpoint);
                     return ToResponse(room, userId, "Checkpoint accepted.");
                 }
 
@@ -175,6 +179,7 @@ namespace DanToPhong.Server
                         return Failure("Required checkpoints have not been completed.");
                     room.WinnerUserId = userId;
                     room.WinnerUsername = player.Username;
+                    RecordEvent(room, "FINISH", userId, player.Username, 0);
                     return ToResponse(room, userId, "Finish recorded.");
                 }
 
@@ -219,6 +224,40 @@ namespace DanToPhong.Server
         {
             lock (Gate)
                 RemoveUserInternal(userId);
+        }
+
+        public static List<GameEventDto> ReadEventsAfter(int userId, ref long lastEventId)
+        {
+            lock (Gate)
+            {
+                if (!TryGetMemberRoom(userId, out GameRoom? room))
+                    return new List<GameEventDto>();
+
+                long eventCursor = lastEventId;
+                List<GameEventDto> events = room.Events
+                    .Where(gameEvent => gameEvent.EventId > eventCursor)
+                    .ToList();
+                if (events.Count > 0)
+                    lastEventId = events[events.Count - 1].EventId;
+                else if (room.Events.Count > 0 && lastEventId < room.Events[0].EventId - 1)
+                    lastEventId = room.Events[0].EventId - 1;
+                return events;
+            }
+        }
+
+        private static void RecordEvent(GameRoom room, string type, int userId, string username, int checkpointIndex)
+        {
+            room.Events.Add(new GameEventDto
+            {
+                EventId = ++room.NextEventId,
+                Type = type,
+                UserId = userId,
+                Username = username,
+                CheckpointIndex = checkpointIndex,
+                ServerTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+            if (room.Events.Count > 128)
+                room.Events.RemoveRange(0, room.Events.Count - 128);
         }
 
         private static ResponsePacket ChatResponse(GameRoom room, long afterMessageId)
@@ -409,6 +448,8 @@ namespace DanToPhong.Server
             public bool IsRacing { get; set; }
             public long ServerTick { get; set; }
             public DateTime LastSimulationAt { get; set; } = DateTime.UtcNow;
+            public long NextEventId { get; set; }
+            public List<GameEventDto> Events { get; } = new();
         }
 
         private sealed class GamePlayer
