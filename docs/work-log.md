@@ -123,3 +123,9 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Close the TCP connection in `Main_FormClosing` | The form now unsubscribes its status handler and synchronously closes the network stream/socket before finishing shutdown. The outer application owner still disposes the service after `Application.Run` returns. | Source review of `Main_FormClosing` and `NetworkClientService.Disconnect` |
 | Verify the Launcher build | Build succeeded with 0 errors and 6 existing nullable-context warnings in generated Designer files. | `dotnet build .\UI\UI\UI.csproj -c Release --no-restore -p:OutDir=.\UI\UI\obj\verify-r3g\` |
 | Record remaining R3g limitation | The service `Dispose` method still waits synchronously for its heartbeat task after closing the socket; no claim is made that full async shutdown is complete. | `.Result`/`.Wait()` search plus review of `GetAwaiter().GetResult()` in service disposal |
+
+## 2026-11-27 - Keeping per-client server I/O asynchronous
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Remove unnecessary thread-pool scheduling around client I/O | The accept loop now invokes `HandleClientAsync` directly; asynchronous socket/TLS waits yield without consuming a dedicated `Task.Run` scheduling step. Per-session completion, catch/finally cleanup and capacity release are unchanged. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore -p:OutDir=.\UI\DanToPhong.Server\obj\verify-r3\`; targeted review of the accept loop |

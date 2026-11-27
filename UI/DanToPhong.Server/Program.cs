@@ -142,7 +142,7 @@ namespace DanToPhong.Server
                     ActiveSessions[session.SessionId] = session;
 
                     Console.WriteLine($"[{session.SessionId}] Connected from {remote}");
-                    _ = Task.Run(() => HandleClientAsync(session, repo, state, serverCertificate, emailQueue, cts.Token));
+                    _ = HandleClientAsync(session, repo, state, serverCertificate, emailQueue, cts.Token);
                 }
             }
             catch (OperationCanceledException)
