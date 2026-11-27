@@ -129,3 +129,9 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Work | Result | Commands / checks |
 |---|---|---|
 | Remove unnecessary thread-pool scheduling around client I/O | The accept loop now invokes `HandleClientAsync` directly; asynchronous socket/TLS waits yield without consuming a dedicated `Task.Run` scheduling step. Per-session completion, catch/finally cleanup and capacity release are unchanged. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release --no-restore -p:OutDir=.\UI\DanToPhong.Server\obj\verify-r3\`; targeted review of the accept loop |
+
+## 2026-11-27 - Chapter 3 GUI checks follow-up
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Reconfirm T1 and retry Launcher availability | T1 listener remains on loopback `127.0.0.1:9000` (PID 13472); it may be an older process and is not treated as latest-build runtime evidence. A single Computer Use launch attempt produced no targetable Launcher window; T2-T8 remain BLOCKED and no UI/network actions were submitted. | `Get-NetTCPConnection -LocalPort 9000 -State Listen`; Computer Use `startApp` once and `listWindows()` twice |

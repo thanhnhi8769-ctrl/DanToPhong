@@ -23,7 +23,7 @@ Ngày chạy: 2026-11-27. Chỉ lưu kết quả đã loại endpoint/IP và th�
 | Test | Kết quả | Bằng chứng |
 |---|---|---|
 | T1 | PASS — `netstat` thấy listener `127.0.0.1:9000`; chỉ xác nhận loopback. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
-| T2–T8 | BLOCKED — không có cửa sổ Launcher để tương tác; không chạy lại ứng dụng hoặc suy diễn kết quả. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
+| T2–T8 | BLOCKED — đã thử mở một lần qua Computer Use nhưng không có cửa sổ Launcher để tương tác; không gửi thao tác GUI hoặc suy diễn kết quả. | [T1-T8-chapter3-tests.log](T1-T8-chapter3-tests.log) |
 
 ### Phân tích TC05
 

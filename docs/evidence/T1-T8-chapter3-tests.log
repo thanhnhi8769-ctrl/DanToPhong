@@ -7,7 +7,11 @@ Command: netstat -ano | findstr 9000
 Observed: TCP 127.0.0.1:9000 LISTENING, PID 13472.
 Scope: Confirms a local loopback listener only; does not establish public-interface reachability.
 
+Follow-up observation: 2026-11-27 16:53:35 +07:00
+Command: Get-NetTCPConnection -LocalPort 9000 -State Listen
+Observed: 127.0.0.1:9000 LISTENING, PID 13472. This is a listener check, not proof that the process is running the latest build.
+
 T2-T8: BLOCKED — not run.
-Reason: The required Launcher client window is not available for interaction in this session. No client was launched a second time, no GUI actions were submitted, and no client-to-client result is inferred from T1.
+Reason: One Computer Use launch of `LauncherRelease\UI.exe` returned success, but no targetable Launcher window appeared after two window inventories. No GUI action or client connection was submitted, no second instance was launched, and no client-to-client result is inferred from T1.
 
 Redaction: No account data, endpoint outside loopback, or credentials recorded.
