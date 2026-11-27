@@ -100,14 +100,28 @@ tracked source tree or in ignored build directories. Run two independent
 instances only for a test environment with a configured server and separate
 test accounts.
 
-### Protocol smoke test
+### Protocol and SMTP smoke tests
 
 ```powershell
 dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release
 ```
 
-This checks framing behavior in memory; it is not evidence of TLS, database,
-SMTP, Internet connectivity, multiplayer correctness or load capacity.
+The default run checks framing, the in-memory game mailbox, account boundaries,
+and bounded email-queue retries using a simulated sender. It does not prove
+SMTP delivery, TLS, database, Internet connectivity, multiplayer correctness,
+or load capacity.
+
+An optional sample sends a synthetic Vietnamese message with a text attachment
+to the fixed loopback smtp4dev endpoint:
+
+```powershell
+dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release -- --smtp4dev-sample
+```
+
+This sends only to `smtp-sample@example.invalid` on `127.0.0.1:2525`, uses no
+SMTP credentials, and keeps the `ProtocolLogger` trace in memory.
+`RedactSecrets` covers authentication secrets only, not message content; the
+logger must not be used with real OTP or personal data.
 
 ## AWS deployment notes
 

@@ -1,12 +1,20 @@
 using System.Buffers.Binary;
+using System.Text;
 using DanToPhong.Protocol;
 using DanToPhong.Server;
+using MailKit;
 using MailKit.Net.Smtp;
+using MailKit.Security;
+using MimeKit;
 
-await RunAsync();
+await RunAsync(args);
 
-static async Task RunAsync()
+static async Task RunAsync(string[] args)
 {
+    bool sendSmtp4DevSample = args.Length == 1 && args[0] == "--smtp4dev-sample";
+    if (args.Length > 0 && !sendSmtp4DevSample)
+        throw new ArgumentException("The only supported option is --smtp4dev-sample.");
+
     VerifyAccountInputValidation();
     await VerifyGameClientMailboxAsync();
     await VerifyEmailQueueAsync();
@@ -97,6 +105,9 @@ static async Task RunAsync()
     Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
     Console.WriteLine("PASS: shared account validation accepts the email limit and rejects overlong email/password values.");
     Console.WriteLine("PASS: bounded OTP email worker retries SMTP 4xx/5xx responses.");
+
+    if (sendSmtp4DevSample)
+        await SendSmtp4DevSampleAsync();
 }
 
 static void VerifyAccountInputValidation()
@@ -163,6 +174,50 @@ static async Task VerifyEmailQueueAsync()
     await queue.RunAsync(CancellationToken.None);
     if (attempts != 3)
         throw new InvalidOperationException($"Expected retries for SMTP 4xx/5xx responses; observed {attempts} send attempts.");
+}
+
+static async Task SendSmtp4DevSampleAsync()
+{
+    using var protocolTrace = new MemoryStream();
+    using var logger = new ProtocolLogger(protocolTrace, leaveOpen: true)
+    {
+        RedactSecrets = true
+    };
+    using var client = new SmtpClient(logger)
+    {
+        Timeout = 10000
+    };
+
+    var message = new MimeMessage();
+    message.From.Add(new MailboxAddress("DanToPhong SMTP sample", "test@dantophong.invalid"));
+    message.To.Add(new MailboxAddress("SMTP Sample", "smtp-sample@example.invalid"));
+    message.Subject = "SMTP sample: Vietnamese text and attachment";
+
+    using var attachmentContent = new MemoryStream(Encoding.UTF8.GetBytes("Tệp đính kèm mẫu cho kiểm thử SMTP.\n"));
+    var attachment = new MimePart("text", "plain")
+    {
+        Content = new MimeContent(attachmentContent),
+        ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+        ContentTransferEncoding = ContentEncoding.Base64,
+        FileName = "tep-mau.txt"
+    };
+    message.Body = new Multipart("mixed")
+    {
+        new TextPart("plain") { Text = "Xin chào, đây là email mẫu kiểm thử SMTP của DanToPhong." },
+        attachment
+    };
+
+    await client.ConnectAsync("127.0.0.1", 2525, SecureSocketOptions.None);
+    await client.SendAsync(FormatOptions.Default, new SmtpSendRequest(message), CancellationToken.None);
+    await client.DisconnectAsync(true);
+
+    string trace = Encoding.UTF8.GetString(protocolTrace.ToArray());
+    if (!logger.RedactSecrets ||
+        !trace.Contains("Content-Disposition: attachment", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("The sample SMTP trace did not confirm redacted logging and attachment serialization.");
+
+    Console.WriteLine("PASS: synthetic Vietnamese email with attachment was accepted by local smtp4dev.");
+    Console.WriteLine("PASS: ProtocolLogger.RedactSecrets was enabled; trace stayed in memory and no SMTP credentials were used.");
 }
 
 static async Task ExpectAsync<TException>(Func<Task> action, string testName)

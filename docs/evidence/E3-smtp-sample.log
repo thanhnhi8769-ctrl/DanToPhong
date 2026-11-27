@@ -1,0 +1,11 @@
+Test ID: E3
+Date: 2026-11-27
+Scope: One synthetic Vietnamese email with an in-memory text attachment sent only to loopback smtp4dev; no production account or OTP used.
+Result: PARTIAL
+Checks: SMTP send accepted by smtp4dev; attachment MIME header observed in an in-memory MailKit ProtocolLogger trace; ProtocolLogger.RedactSecrets enabled; no SMTP credentials or external recipient used.
+Command: dotnet .\UI\DanToPhong.Protocol.Smoke\obj\verify-email\DanToPhong.Protocol.Smoke.dll --smtp4dev-sample
+Observed output:
+PASS: synthetic Vietnamese email with attachment was accepted by local smtp4dev.
+PASS: ProtocolLogger.RedactSecrets was enabled; trace stayed in memory and no SMTP credentials were used.
+Limit: No AUTH exchange occurred, so credential redaction was not exercised against a real SMTP authentication secret. ProtocolLogger.RedactSecrets does not redact message bodies; the logger was used only with synthetic test content and its trace was not persisted. This does not verify Gmail/TLS delivery or production OTP delivery.
+Redaction: No host/IP, account data, OTP, or credentials recorded.
