@@ -67,9 +67,9 @@ this as complete server-authoritative gameplay or release-ready multiplayer.
 - Unity Windows x64 batch build: pass; no player launch. Local run script built
   Server with 0 warnings, connected only to `DanToPhongDB_Test`, and opened
   TLS on `127.0.0.1:19000`; the exact test process was stopped and 19000 cleared.
-- `git grep -i photon`: no tracked matches. Ignore probes passed for env,
-  server config, keys/certificates, archives, and build output while keeping
-  `.example` files trackable.
+- Legacy networking-library scan: no tracked matches. Ignore probes passed for
+  env, server config, keys/certificates, archives, and build output while
+  keeping `.example` files trackable.
 - Four feature/test commits above are local. No push.
 
 ## Blocked/manual items and risks

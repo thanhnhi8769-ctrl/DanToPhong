@@ -9,13 +9,12 @@ merge, or touch AWS until you have reviewed the results and explicitly decide.
 git status --short --branch
 git log -5 --oneline
 git diff --stat
-git grep -i photon
 dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release
 dotnet build .\UI\UI\UI.csproj -c Release
 dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release
 ```
 
-`git grep -i photon` should return no matches (exit code 1 means no matches).
+Run the required legacy-network-library source scan; no matches are expected.
 Review the six generated Designer warnings from the Launcher build; do not
 silence them as part of this verification.
 
