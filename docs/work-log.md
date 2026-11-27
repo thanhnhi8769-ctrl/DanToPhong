@@ -62,3 +62,9 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Locate and attempt Clumsy impairment | Found the existing `clumsy.exe` WinGet link and launched it once through Computer Use. No Clumsy window was exposed; no impairment was enabled and TC10 remains partial. | PATH lookup; Computer Use `startApp()` / `listWindows()` |
 | Export and review Draw.io diagrams | Exported all four `.drawio` sources to PNG with the already-installed Draw.io Desktop CLI. Updated architecture and user-story labels to match the current prototype and visible test limits. | `draw.io.exe --export --format png --output ...`; visual review of all four PNGs |
 | Align project documentation with observed status | Updated README, protocol, requirements checklist, report and evidence index. Recorded TC05/06/11/12 PASS, TC10 PARTIAL, and remaining OTP/gameplay/load blockers without claiming a live match. No AWS action or Git push. | Documentation/evidence cross-check; `git diff --check` |
+
+## 2026-11-27 — Clean-checkout .NET verification
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify committed .NET deliverables from a clean worktree | At commit `6916ac9`, Server Release build passed with 0 warnings/errors; protocol smoke passed fragmentation/coalescing, EOF, invalid/oversized frames, malformed JSON, truncated frames, oversized output, and ordered game-event/snapshot framing. Launcher win-x64 publish passed with 6 existing generated-Designer `CS8669` warnings. The temporary worktree was removed after verification. | `dotnet build .\UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release`; `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release`; `dotnet publish .\UI\UI\UI.csproj -c Release -r win-x64 --self-contained false -o .\LauncherRelease` |
