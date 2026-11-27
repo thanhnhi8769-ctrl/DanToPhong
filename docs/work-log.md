@@ -81,3 +81,4 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 | Work | Result | Commands / checks |
 |---|---|---|
 | Create requirements traceability matrix | Added `docs/requirements-traceability.md` for P0/P1/P2 criteria, source locations, evidence and explicit gaps. Test and report requirements remain partial or unverified where live evidence is absent. | Markdown relative-link validation; cross-check against `docs/evidence/README.md` and current source findings |
+| Audit core R4 protections | Confirmed username/password validation exists on both launcher and server paths; user text schema is NVARCHAR and Username has a database UNIQUE constraint; PBKDF2 uses random salt and fixed-time comparison. SQL-command searches found no interpolated SQL; remaining CHAR/VARCHAR columns hold hashes or machine command IDs. No database state was changed in this audit. | Targeted source review; `rg` checks over server `.cs` files |
