@@ -30,6 +30,9 @@ owner approval.
   root and the `ubuntu` service account; never make the private key world-readable.
 - Use a stable DNS hostname where possible. EC2 public IPv4/DNS can change after
   stop/start; a certificate issued for the old address will not match a new one.
+- Deployment listens on TLS TCP `9000` and authenticated movement UDP `9000`.
+  Restrict both to approved tester IPv4 `/32` sources. Keep RDS TCP `1433`
+  private to the Server Security Group; never authorize `0.0.0.0/0` or `::/0`.
 - Prepare sanitized test accounts, smtp4dev/SMTP configuration if permitted,
   a rollback plan, a shutdown time, and a second client on a different network.
 
@@ -71,7 +74,7 @@ changing the host package configuration. Confirm the AMI before using it.
 3. Configure `/etc/dantophong/server.env` on EC2 using the approved secret
    mechanism. Start from `deploy/aws/server.env.example`; replace every
    placeholder, use the private RDS endpoint/database, set TLS true and port
-   9000, and do not add a secondary listener. Keep it root-only.
+   9000,    UDP 9000, and do not add a secondary listener. Keep it root-only.
 4. Once the final DNS name or current EC2 IP is known, run on EC2:
 
    ```bash
@@ -79,9 +82,10 @@ sudo bash /tmp/dtp-deploy/setup-ec2.sh --certificate-host "YOUR_STABLE_DNS_NAME_
    ```
 
    The script checks the Linux .NET 10 runtime, database configuration,
-   certificate SAN/validity, and published DLL; creates a self-signed PFX
+   TCP/UDP ports, certificate SAN/validity, and published DLL; creates a self-signed PFX
    outside Git if needed; prints the SHA-256 thumbprint; installs/enables the
-   systemd unit; restarts the service; and verifies `systemctl` plus TCP 9000.
+   systemd unit; restarts the service; and verifies `systemctl`, TCP 9000 and
+   UDP 9000.
    It refuses to replace an existing mismatched/expired certificate unless
    `--rotate-certificate` is explicitly supplied. The unit uses
    `Restart=always`, `WantedBy=multi-user.target`, and
@@ -97,26 +101,28 @@ the current tester's SSH key path locally; do not put it in the repository.
 .\scripts\aws-test-helper.ps1 -Action Status
 ```
 
-Before using `Start`, in the Security Group allow TCP 9000 only from each
-approved tester's current public IPv4 as a separate `/32` ingress source. For
-TC02 with two networks, authorize both exact `/32` addresses. Never use
-`0.0.0.0/0` or `::/0`; do not expose 1433. RDS ingress should accept 1433 only
-from the Server's Security Group/private path. The helper does not create,
-edit, or remove rules.
+For a one-command start, the helper can add only TCP 9000 and UDP 9000 `/32`
+rules to a Security Group attached to the target EC2 (never one attached to
+RDS). Provide each tester's current public IPv4; the exact-confirmation prompt
+includes the SG, source addresses, and ports. Without
+`-TemporaryGameIngress`, it does not change rules. RDS ingress must accept
+1433 only from the Server's Security Group/private path. It refuses to add
+rules if it detects broad public ingress on the checked ports.
 
 Then start and verify:
 
 ```powershell
-.\scripts\aws-test-helper.ps1 -Action Start -RdsInstanceId 'REPLACE_WITH_RDS_ID' -Ec2InstanceId 'REPLACE_WITH_EC2_ID' -ClientHostName 'YOUR_STABLE_DNS_NAME' -SshKeyPath 'C:\path\outside\repo\to\ssh-key.pem'
+.\scripts\aws-test-helper.ps1 -Action Start -RdsInstanceId 'REPLACE_WITH_RDS_ID' -Ec2InstanceId 'REPLACE_WITH_EC2_ID' -ClientHostName 'YOUR_STABLE_DNS_NAME' -SshKeyPath 'C:\path\outside\repo\to\ssh-key.pem' -TemporaryGameIngress -SecurityGroupId 'EC2_SECURITY_GROUP_ID' -SourceIPv4 @('TESTER_A_PUBLIC_IPV4','TESTER_B_PUBLIC_IPV4')
 ```
 
 The helper asks for an exact confirmation, waits for RDS `available` before
 starting EC2, waits for EC2 `running` and passing health checks, checks over
-SSH that `dantophong` is active/enabled and TCP 9000 listens, then tests TCP
-9000 from the current client network. It never changes Security Groups,
-Elastic IPs, DNS, or database configuration. Waits are bounded to 30 minutes
-by default. Use `-Region`/`-Profile` only when those are the approved current
-values.
+SSH that `dantophong` is active/enabled with TCP 9000 and UDP 9000 listeners,
+then optionally adds the supplied exact `/32` rules and checks TCP reachability
+from the current client network. It never edits RDS rules, Elastic IPs, DNS, or
+database configuration. UDP reachability still requires a real game-client
+test. Waits are bounded to 30 minutes by default. Use `-Region`/`-Profile` only
+when those are the approved current values.
 
 1. Ensure both clients use the same stable DNS name in `server.json`. If using
    an IP, it must be the current EC2 address and present as an IP SAN. If the
@@ -138,13 +144,14 @@ values.
 
 ## Shut down
 
-1. Remove the temporary TCP `9000` `/32` ingress rules and verify they are
-   absent; never change the RDS-associated EIP.
+1. Never change the RDS-associated EIP. If `Start` added temporary rules, pass
+   the same SG and `/32` list to `Stop` so it removes only those exact rules.
 2. After owner approval, run the helper below. It requires exact confirmation,
-   stops EC2 and waits for `stopped`, then stops RDS and waits for `stopped`:
+   stops EC2 and waits for `stopped`, removes those exact game `/32` rules, then
+   stops RDS and waits for `stopped`:
 
    ```powershell
-.\scripts\aws-test-helper.ps1 -Action Stop -RdsInstanceId 'REPLACE_WITH_RDS_ID' -Ec2InstanceId 'REPLACE_WITH_EC2_ID'
+.\scripts\aws-test-helper.ps1 -Action Stop -RdsInstanceId 'REPLACE_WITH_RDS_ID' -Ec2InstanceId 'REPLACE_WITH_EC2_ID' -TemporaryGameIngress -SecurityGroupId 'EC2_SECURITY_GROUP_ID' -SourceIPv4 @('TESTER_A_PUBLIC_IPV4','TESTER_B_PUBLIC_IPV4')
    ```
 
 3. Run `-Action Status` and record final states, elapsed runtime, any charges

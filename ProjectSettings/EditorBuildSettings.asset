@@ -21,17 +21,14 @@ EditorBuildSettings:
     path: Assets/scene/ShopScene.unity
     guid: 2b11698fcc20a2c4485028dff20d1dc6
   - enabled: 1
-    path: Assets/scene/game 1.unity
+    path: Assets/scene/game1.unity
     guid: 7c1c6ec83c599a046b746c316100e8a9
   - enabled: 1
-    path: Assets/scene/game 2.unity
+    path: Assets/scene/game2.unity
     guid: af8c5660569dda149acbe07e6f06ecff
   - enabled: 1
-    path: Assets/scene/game 3.unity
+    path: Assets/scene/game3.unity
     guid: c94c365f572ef684783fe861b6c81ac9
-  - enabled: 1
-    path: Assets/scene/game.unity
-    guid: 99c9720ab356a0642a771bea13969a05
   m_configObjects:
     com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

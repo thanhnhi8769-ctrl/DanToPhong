@@ -19,23 +19,45 @@ namespace DanToPhong.Server
     internal static class Program
     {
         private static readonly int Port = ReadPort();
+        private static readonly int UdpPort = ReadUdpPort();
         private static readonly int? SecondaryPort = ReadSecondaryPort();
         private static readonly bool UseTls = ReadUseTls();
         private const int MaxCoinsDeltaPerRequest = 5000;
+        private const int SoloWinRewardCoins = 10;
+        private static readonly TimeSpan SoloMatchMinimumDuration = TimeSpan.FromSeconds(10);
         private static readonly string ConnectionString = Environment.GetEnvironmentVariable("DANTOPHONG_DB_CONNECTION") ?? string.Empty;
 
         private static readonly Regex UsernameRegex = new(@"^[a-zA-Z0-9_]{3,20}$", RegexOptions.Compiled);
         private static readonly Regex CategoryRegex = new(@"^[A-Za-z_]{1,30}$", RegexOptions.Compiled);
         private static readonly Regex RoomCodeRegex = new(@"^[A-Za-z0-9]{3,12}$", RegexOptions.Compiled);
         private static readonly Regex TargetRegex = new(@"^[A-Za-z0-9_]{1,20}$", RegexOptions.Compiled);
-        private static readonly Regex MapRegex = new(@"^[A-Za-z0-9_ \-]{1,50}$", RegexOptions.Compiled);
 
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ClientSession> ActiveSessions = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SoloMatchTicket> SoloMatchTickets = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, Guid> ActiveSoloMatchByUser = new();
+        private static readonly object SoloMatchGate = new();
+        private static UdpGameTransport? GameUdpTransport;
         private const int MaxConcurrentClients = 128;
         private static readonly SemaphoreSlim ClientCapacity = new(MaxConcurrentClients, MaxConcurrentClients);
         private const int MaxLoginAttemptsPerWindow = 5;
         private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
         private static readonly TimeSpan LoginLockDuration = TimeSpan.FromMinutes(15);
+
+        private sealed class SoloMatchTicket
+        {
+            public SoloMatchTicket(int userId, string mapName, DateTime startedAt)
+            {
+                UserId = userId;
+                MapName = mapName;
+                StartedAt = startedAt;
+            }
+
+            public int UserId { get; }
+            public string MapName { get; }
+            public DateTime StartedAt { get; }
+            public int State;
+            public bool Won;
+        }
 
         private static X509Certificate2 LoadServerCertificate()
         {
@@ -70,6 +92,16 @@ namespace DanToPhong.Server
                 return null;
             if (!int.TryParse(raw.Trim(), out int port) || port is < 1 or > 65535 || port == Port)
                 throw new InvalidOperationException("DANTOPHONG_SECONDARY_PORT must be a valid port different from DANTOPHONG_PORT.");
+            return port;
+        }
+
+        private static int ReadUdpPort()
+        {
+            string? raw = Environment.GetEnvironmentVariable("DANTOPHONG_UDP_PORT");
+            if (string.IsNullOrWhiteSpace(raw))
+                return 9000;
+            if (!int.TryParse(raw.Trim(), out int port) || port is < 1 or > 65535)
+                throw new InvalidOperationException("DANTOPHONG_UDP_PORT must be an integer between 1 and 65535.");
             return port;
         }
 
@@ -136,6 +168,7 @@ namespace DanToPhong.Server
             IPAddress listenAddress = ReadListenAddress();
             var listener = new TcpListener(listenAddress, Port);
             TcpListener? secondaryListener = null;
+            UdpGameTransport? udpTransport = null;
             listener.Start();
             try
             {
@@ -144,14 +177,21 @@ namespace DanToPhong.Server
                     secondaryListener = new TcpListener(listenAddress, SecondaryPort.Value);
                     secondaryListener.Start();
                 }
+                udpTransport = new UdpGameTransport(
+                    listenAddress,
+                    UdpPort,
+                    (userId, cancellationToken) => AwardWinnerIfNeededAsync(userId, repo, cancellationToken));
+                GameUdpTransport = udpTransport;
             }
             catch
             {
                 listener.Stop();
                 secondaryListener?.Stop();
+                udpTransport?.Dispose();
                 throw;
             }
             Console.WriteLine($"[TCP] Server listening on {listenAddress}:{Port}; TLS={(UseTls ? "enabled" : "disabled")}.");
+            Console.WriteLine($"[UDP] Authenticated movement listener on {listenAddress}:{UdpPort}.");
             if (SecondaryPort.HasValue)
                 Console.WriteLine($"[TCP] Secondary listener enabled on {listenAddress}:{SecondaryPort.Value}; TLS={(UseTls ? "enabled" : "disabled")}.");
             var emailQueue = new EmailVerificationQueue();
@@ -161,18 +201,19 @@ namespace DanToPhong.Server
             try
             {
                 Task primaryAccept = AcceptClientsAsync(listener, repo, state, serverCertificate, emailQueue, cts.Token);
-                if (secondaryListener == null)
-                {
-                    await primaryAccept.ConfigureAwait(false);
-                }
-                else
-                {
-                    Task secondaryAccept = AcceptClientsAsync(secondaryListener, repo, state, serverCertificate, emailQueue, cts.Token);
-                    Task firstCompletedAccept = await Task.WhenAny(primaryAccept, secondaryAccept).ConfigureAwait(false);
-                    await firstCompletedAccept.ConfigureAwait(false);
-                    if (!cts.IsCancellationRequested)
-                        throw new InvalidOperationException("A TCP listener accept loop stopped unexpectedly.");
-                }
+                Task udpReceive = udpTransport!.RunAsync(cts.Token);
+                Task[] listenerTasks = secondaryListener == null
+                    ? new[] { primaryAccept, udpReceive }
+                    : new[]
+                    {
+                        primaryAccept,
+                        AcceptClientsAsync(secondaryListener, repo, state, serverCertificate, emailQueue, cts.Token),
+                        udpReceive
+                    };
+                Task firstCompleted = await Task.WhenAny(listenerTasks).ConfigureAwait(false);
+                await firstCompleted.ConfigureAwait(false);
+                if (!cts.IsCancellationRequested)
+                    throw new InvalidOperationException("A network listener loop stopped unexpectedly.");
             }
             catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
@@ -182,12 +223,14 @@ namespace DanToPhong.Server
                 cts.Cancel();
                 listener.Stop();
                 secondaryListener?.Stop();
+                udpTransport?.Dispose();
                 ClientSession[] sessions = ActiveSessions.Values.ToArray();
                 foreach (ClientSession active in sessions)
                 {
                     try { active.Client.Dispose(); } catch { }
                 }
                 await Task.WhenAll(sessions.Select(session => session.Completion.Task)).ConfigureAwait(false);
+                GameUdpTransport = null;
                 emailQueue.Complete();
                 using var drainTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 try
@@ -333,6 +376,7 @@ namespace DanToPhong.Server
                     try { session.Client.Close(); } catch { }
                     try { session.Client.Dispose(); } catch { }
                     try { session.SendLock.Dispose(); } catch { }
+                    GameUdpTransport?.RemoveSession(session);
                     session.Completion.TrySetResult(true);
                     if (ActiveSessions.TryRemove(session.SessionId, out _))
                         Console.WriteLine($"[{session.SessionId}] Session removed ({session.AuthenticatedUsername ?? "guest"}).");
@@ -492,6 +536,7 @@ namespace DanToPhong.Server
                     Commands.GetInfo => await HandleGetInfoAsync(session, repo, token).ConfigureAwait(false),
                     Commands.Logout => await HandleLogoutAsync(session, state, token).ConfigureAwait(false),
                     Commands.ResetPassword => await HandleResetPasswordAsync(req, repo, state, token).ConfigureAwait(false),
+                    Commands.UpdateAccountSettings => await HandleUpdateAccountSettingsAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.RequestResetCode => await HandleRequestResetCodeAsync(req, repo, state, emailQueue, token).ConfigureAwait(false),
                     Commands.RequestRegistrationCode => await HandleRequestRegistrationCodeAsync(req, repo, state, emailQueue, token).ConfigureAwait(false),
                     Commands.JoinRoom => await HandleJoinRoomAsync(session, req, repo, token).ConfigureAwait(false),
@@ -502,7 +547,7 @@ namespace DanToPhong.Server
                     Commands.Equip => await HandleEquipAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.SetMap => await HandleSetMapAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.UploadAvatar => await HandleUploadAvatarAsync(session, req, repo, token).ConfigureAwait(false),
-                    Commands.GetAvatar => await HandleGetAvatarAsync(session, repo, token).ConfigureAwait(false),
+                    Commands.GetAvatar => await HandleGetAvatarAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.SubmitReview => await HandleSubmitReviewAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.GetReviews => await HandleGetReviewsAsync(session, repo, token).ConfigureAwait(false),
                     Commands.Leaderboard => await HandleLeaderboardAsync(session, repo, token).ConfigureAwait(false),
@@ -515,10 +560,15 @@ namespace DanToPhong.Server
                     Commands.CreateGameRoom => HandleCreateGameRoom(session, req),
                     Commands.JoinGameRoom => HandleJoinGameRoom(session, req),
                     Commands.LeaveGameRoom => HandleLeaveGameRoom(session),
+                    Commands.ReturnToLobby => HandleReturnToLobby(session),
                     Commands.GameRoomState => HandleGameRoomState(session),
                     Commands.StartGameRoom => HandleStartGameRoom(session, req),
+                    Commands.ReportRoomScene => HandleReportRoomScene(session, req),
+                    Commands.StartSoloMatch => HandleStartSoloMatch(session, req),
+                    Commands.FinishSoloMatch => await HandleFinishSoloMatchAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.GameInput => await HandleGameInputAsync(session, req, repo, token).ConfigureAwait(false),
                     Commands.GameStream => HandleGameStream(session),
+                    Commands.GameUdpBind => HandleGameUdpBind(session),
                     Commands.GameSpectate => HandleGameSpectate(session, req),
                     Commands.GameReconnect => HandleGameReconnect(session, req),
                     Commands.ChatSend => HandleChatSend(session, req),
@@ -566,7 +616,7 @@ namespace DanToPhong.Server
         {
             if (!session.AuthenticatedUserId.HasValue || string.IsNullOrWhiteSpace(session.AuthenticatedUsername))
                 return Unauth();
-            if (!string.IsNullOrWhiteSpace(request.MapName) && !MapRegex.IsMatch(request.MapName.Trim()))
+            if (!string.IsNullOrWhiteSpace(request.MapName) && !MapNames.IsAllowed(request.MapName.Trim()))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid map name." };
             return TcpGameRoomRegistry.Create(session.AuthenticatedUserId.Value, session.AuthenticatedUsername, request);
         }
@@ -587,6 +637,13 @@ namespace DanToPhong.Server
             return TcpGameRoomRegistry.Leave(session.AuthenticatedUserId.Value);
         }
 
+        private static ResponsePacket HandleReturnToLobby(ClientSession session)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.ReturnToLobby(session.AuthenticatedUserId.Value);
+        }
+
         private static ResponsePacket HandleGameRoomState(ClientSession session)
         {
             if (!session.AuthenticatedUserId.HasValue)
@@ -598,9 +655,126 @@ namespace DanToPhong.Server
         {
             if (!session.AuthenticatedUserId.HasValue)
                 return Unauth();
-            if (!string.IsNullOrWhiteSpace(request.MapName) && !MapRegex.IsMatch(request.MapName.Trim()))
+            if (!string.IsNullOrWhiteSpace(request.MapName) && !MapNames.IsAllowed(request.MapName.Trim()))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid map name." };
             return TcpGameRoomRegistry.Start(session.AuthenticatedUserId.Value, request);
+        }
+
+        private static ResponsePacket HandleReportRoomScene(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            return TcpGameRoomRegistry.ReportScene(
+                session.AuthenticatedUserId.Value,
+                request.SceneName,
+                request.IsReady ?? false);
+        }
+
+        private static ResponsePacket HandleStartSoloMatch(ClientSession session, RequestPacket request)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+
+            string requestedMap = (request.MapName ?? string.Empty).Trim();
+            if (!MapNames.IsAllowed(requestedMap))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Selected solo track is unavailable." };
+            string mapName = MapNames.Normalize(requestedMap);
+            if (!RaceTrackCatalog.TryGet(mapName, out _))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Selected solo track is unavailable." };
+
+            int userId = session.AuthenticatedUserId.Value;
+            DateTime now = DateTime.UtcNow;
+            lock (SoloMatchGate)
+            {
+                if (ActiveSoloMatchByUser.TryGetValue(userId, out Guid existingId) &&
+                    SoloMatchTickets.TryGetValue(existingId, out SoloMatchTicket? existing) &&
+                    now - existing.StartedAt < TimeSpan.FromHours(2))
+                {
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "A solo match is already active for this account." };
+                }
+
+                if (ActiveSoloMatchByUser.TryGetValue(userId, out existingId))
+                {
+                    ActiveSoloMatchByUser.TryRemove(userId, out _);
+                    SoloMatchTickets.TryRemove(existingId, out _);
+                }
+
+                foreach (Guid expiredId in SoloMatchTickets
+                    .Where(entry => now - entry.Value.StartedAt > TimeSpan.FromHours(24))
+                    .Select(entry => entry.Key)
+                    .ToArray())
+                    SoloMatchTickets.TryRemove(expiredId, out _);
+
+                Guid matchId = Guid.NewGuid();
+                SoloMatchTickets[matchId] = new SoloMatchTicket(userId, mapName, now);
+                ActiveSoloMatchByUser[userId] = matchId;
+                return new ResponsePacket
+                {
+                    Success = true,
+                    Code = ErrorCodes.Ok,
+                    Message = "Solo match started.",
+                    MatchId = matchId.ToString("N"),
+                    MapName = mapName
+                };
+            }
+        }
+
+        private static async Task<ResponsePacket> HandleFinishSoloMatchAsync(
+            ClientSession session,
+            RequestPacket request,
+            NguoiDungRepository repo,
+            CancellationToken token)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+            if (!Guid.TryParseExact(request.MatchId, "N", out Guid matchId) ||
+                !SoloMatchTickets.TryGetValue(matchId, out SoloMatchTicket? match))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Solo match ticket is invalid or expired." };
+            if (match.UserId != session.AuthenticatedUserId.Value)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.Unauthorized, Message = "Solo match ticket belongs to another account." };
+            if (!string.IsNullOrWhiteSpace(request.MapName) &&
+                !string.Equals(match.MapName, request.MapName.Trim(), StringComparison.OrdinalIgnoreCase))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Solo match track does not match its ticket." };
+
+            string outcome = (request.GameEventType ?? string.Empty).Trim().ToUpperInvariant();
+            if (outcome == "LOSE")
+            {
+                int lostState = Interlocked.CompareExchange(ref match.State, 2, 0);
+                if (lostState == 1)
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Solo match result is being processed." };
+                if (lostState == 0)
+                    match.Won = false;
+                ActiveSoloMatchByUser.TryRemove(match.UserId, out _);
+                return await InvResp(session, repo, token, true, ErrorCodes.Ok, "Solo match result recorded.").ConfigureAwait(false);
+            }
+            if (outcome != "WIN")
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid solo match result." };
+            if (DateTime.UtcNow - match.StartedAt < SoloMatchMinimumDuration)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "The solo match has not run long enough to qualify for a reward." };
+
+            int state = Interlocked.CompareExchange(ref match.State, 1, 0);
+            if (state == 2)
+            {
+                if (!match.Won)
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "This solo match was already recorded as a loss." };
+                return await InvResp(session, repo, token, true, ErrorCodes.Ok, "Solo match reward was already applied.").ConfigureAwait(false);
+            }
+            if (state == 1)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Solo match reward is being processed." };
+
+            try
+            {
+                await repo.AwardRaceWinnerAsync(matchId, match.UserId, SoloWinRewardCoins, token).ConfigureAwait(false);
+                match.Won = true;
+                Volatile.Write(ref match.State, 2);
+                ActiveSoloMatchByUser.TryRemove(match.UserId, out _);
+                return await InvResp(session, repo, token, true, ErrorCodes.Ok, $"Solo win reward: {SoloWinRewardCoins} coins.").ConfigureAwait(false);
+            }
+            catch
+            {
+                Volatile.Write(ref match.State, 0);
+                throw;
+            }
         }
 
         private static async Task<ResponsePacket> HandleGameInputAsync(
@@ -615,6 +789,8 @@ namespace DanToPhong.Server
             int userId = session.AuthenticatedUserId.Value;
             ResponsePacket response = TcpGameRoomRegistry.SubmitInput(userId, request);
             await AwardWinnerIfNeededAsync(userId, repo, token).ConfigureAwait(false);
+            if (response.GameFinished && response.WinnerUserId == userId)
+                response.Inventory = await repo.LayKhoAsync(userId, token).ConfigureAwait(false);
             return response;
         }
 
@@ -658,6 +834,14 @@ namespace DanToPhong.Server
             };
         }
 
+        private static ResponsePacket HandleGameUdpBind(ClientSession session)
+        {
+            UdpGameTransport? transport = GameUdpTransport;
+            if (transport == null)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "UDP movement transport is unavailable." };
+            return transport.Bind(session);
+        }
+
         private static ResponsePacket HandleChatSend(ClientSession session, RequestPacket request)
         {
             if (!session.AuthenticatedUserId.HasValue)
@@ -684,6 +868,8 @@ namespace DanToPhong.Server
             int userId = session.AuthenticatedUserId.Value;
             ResponsePacket response = TcpGameRoomRegistry.SubmitEvent(userId, request);
             await AwardWinnerIfNeededAsync(userId, repo, token).ConfigureAwait(false);
+            if (response.GameFinished && response.WinnerUserId == userId)
+                response.Inventory = await repo.LayKhoAsync(userId, token).ConfigureAwait(false);
             return response;
         }
 
@@ -925,7 +1111,14 @@ namespace DanToPhong.Server
             if (!UsernameRegex.IsMatch(username) || !AccountInputValidation.IsValidEmail(email))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid username or email." };
 
-            const string responseMessage = "If the account matches, a code will be sent shortly.";
+            UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
+            if (user == null)
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Username does not exist." };
+            if (string.IsNullOrWhiteSpace(user.Email))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "No email address is registered for this username." };
+            if (!string.Equals(user.Email.Trim(), email, StringComparison.OrdinalIgnoreCase))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Email does not match this username." };
+
             if (!emailQueue.TryReserve(out EmailVerificationQueue.Reservation? reservation) || reservation is null)
                 return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Verification service is busy. Please try again shortly." };
 
@@ -933,28 +1126,21 @@ namespace DanToPhong.Server
             {
                 string key = $"reset|{username}|{email.ToLowerInvariant()}";
                 if (!await state.TryReserveVerificationAsync(key, DateTime.UtcNow.AddSeconds(60), token).ConfigureAwait(false))
-                    return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+                    return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "A verification code was requested recently. Please check your email or wait before requesting another." };
 
-                UserInfoDto? user = await repo.LayThongTinAsync(username, token).ConfigureAwait(false);
-                if (user != null && !string.IsNullOrWhiteSpace(user.Email) &&
-                    string.Equals(user.Email.Trim(), email, StringComparison.OrdinalIgnoreCase))
+                string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
+                try
                 {
-                    string code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
-                    try
-                    {
-                        await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
-                        reservation.Enqueue(email, code, passwordReset: true);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine("[OTP] Reset code queue failed: " + ex.Message);
-                        await CancelVerificationAsync(state, key).ConfigureAwait(false);
-                        return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not prepare the verification email. Please try again later." };
-                    }
+                    await state.SaveVerificationCodeAsync(key, code, DateTime.UtcNow.AddMinutes(10), token).ConfigureAwait(false);
+                    reservation.Enqueue(email, code, passwordReset: true);
                 }
-
-                // Same response for unknown usernames/emails to avoid exposing account membership.
-                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = responseMessage };
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[OTP] Reset code queue failed: " + ex.Message);
+                    await CancelVerificationAsync(state, key).ConfigureAwait(false);
+                    return new ResponsePacket { Success = false, Code = ErrorCodes.ServerError, Message = "Could not prepare the verification email. Please try again later." };
+                }
+                return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "Verification code queued for the registered email address." };
             }
         }
 
@@ -1073,10 +1259,10 @@ namespace DanToPhong.Server
             if (!session.AuthenticatedUserId.HasValue) return Unauth();
 
             string map = (req.MapName ?? "").Trim();
-            if (!MapRegex.IsMatch(map))
+            if (!MapNames.IsAllowed(map))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid map." };
 
-            await repo.DatMapAsync(session.AuthenticatedUserId.Value, map, token).ConfigureAwait(false);
+            await repo.DatMapAsync(session.AuthenticatedUserId.Value, MapNames.Normalize(map), token).ConfigureAwait(false);
             return await InvResp(session, repo, token, true, ErrorCodes.Ok, "Map saved.").ConfigureAwait(false);
         }
 
@@ -1136,7 +1322,7 @@ namespace DanToPhong.Server
 
             string code = (req.RoomId ?? "").Trim();
             int cur = req.PlayerCount ?? 0, max = req.MaxPlayers ?? 0;
-            if (!RoomCodeRegex.IsMatch(code) || cur < 0 || cur > 16 || max < 1 || max > 16)
+            if (!RoomCodeRegex.IsMatch(code) || cur < 0 || cur > 4 || max < 1 || max > 4)
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid room." };
 
             int uid = session.AuthenticatedUserId.Value;
@@ -1163,7 +1349,12 @@ namespace DanToPhong.Server
         private static ResponsePacket HandleListRooms(ClientSession session)
         {
             if (!session.AuthenticatedUserId.HasValue) return Unauth();
-            return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "OK", Rooms = RoomRegistry.List() };
+            List<RoomDto> rooms = RoomRegistry.List()
+                .Concat(TcpGameRoomRegistry.ListRooms())
+                .GroupBy(room => room.Code, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            return new ResponsePacket { Success = true, Code = ErrorCodes.Ok, Message = "OK", Rooms = rooms };
         }
 
         private static async Task<ResponsePacket> HandleInviteAsync(
@@ -1176,14 +1367,13 @@ namespace DanToPhong.Server
             if (!TargetRegex.IsMatch(key) || !RoomCodeRegex.IsMatch(code))
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Invalid player ID or room." };
 
-            if (!RoomRegistry.Exists(code))
-                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Room is not registered yet. Try again in a few seconds." };
-
             UserInfoDto? target = await repo.TimNguoiChoiAsync(key, token).ConfigureAwait(false);
             if (target == null)
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Player not found." };
             if (target.UserId == session.AuthenticatedUserId.Value)
                 return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "You cannot invite yourself." };
+            if (!TcpGameRoomRegistry.CanInvite(session.AuthenticatedUserId.Value, target.UserId, code))
+                return new ResponsePacket { Success = false, Code = ErrorCodes.InvalidInput, Message = "Room is not accepting invitations or is already full." };
 
             UserInfoDto? me = await repo.LayThongTinTheoIdAsync(session.AuthenticatedUserId.Value, token).ConfigureAwait(false);
             string from = me == null ? "Someone" : string.IsNullOrEmpty(me.RacerId) ? me.Username : $"{me.Username} #{me.RacerId}";
@@ -1235,6 +1425,18 @@ namespace DanToPhong.Server
         {
             if (!session.AuthenticatedUserId.HasValue) return Unauth();
 
+            string currentPassword = req.CurrentPassword ?? string.Empty;
+            if (string.IsNullOrEmpty(currentPassword) ||
+                !await repo.KiemTraMatKhauHienTaiAsync(session.AuthenticatedUserId.Value, currentPassword, token).ConfigureAwait(false))
+            {
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = string.IsNullOrEmpty(currentPassword) ? ErrorCodes.InvalidInput : ErrorCodes.AuthFailed,
+                    Message = string.IsNullOrEmpty(currentPassword) ? "Enter your current password before changing the avatar." : "Current password is incorrect."
+                };
+            }
+
             byte[] data;
             try { data = Convert.FromBase64String(req.AvatarBase64 ?? ""); }
             catch (FormatException)
@@ -1260,12 +1462,25 @@ namespace DanToPhong.Server
 
         private static async Task<ResponsePacket> HandleGetAvatarAsync(
             ClientSession session,
+            RequestPacket request,
             NguoiDungRepository repo,
             CancellationToken token)
         {
             if (!session.AuthenticatedUserId.HasValue) return Unauth();
 
-            byte[]? data = await repo.LayAvatarDuLieuAsync(session.AuthenticatedUserId.Value, token).ConfigureAwait(false);
+            int requesterId = session.AuthenticatedUserId.Value;
+            int targetId = request.UserId ?? requesterId;
+            if (targetId != requesterId && !TcpGameRoomRegistry.AreRoommates(requesterId, targetId))
+            {
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.Unauthorized,
+                    Message = "Player avatars are available only to members of the same room."
+                };
+            }
+
+            byte[]? data = await repo.LayAvatarDuLieuAsync(targetId, token).ConfigureAwait(false);
             return new ResponsePacket
             {
                 Success = true,
@@ -1391,6 +1606,88 @@ namespace DanToPhong.Server
                 }
             }
             return new ResponsePacket { Success = result.Success, Code = result.Code, Message = result.Message };
+        }
+
+        private static async Task<ResponsePacket> HandleUpdateAccountSettingsAsync(
+            ClientSession session,
+            RequestPacket req,
+            NguoiDungRepository repo,
+            CancellationToken token)
+        {
+            if (!session.AuthenticatedUserId.HasValue)
+                return Unauth();
+
+            string currentPassword = req.CurrentPassword ?? string.Empty;
+            string newPassword = req.NewPassword ?? string.Empty;
+            string? email = req.Email?.Trim();
+            bool updatePassword = !string.IsNullOrEmpty(newPassword);
+            bool updateEmail = email != null;
+
+            if (string.IsNullOrEmpty(currentPassword) ||
+                currentPassword.Length > AccountInputValidation.MaxPasswordLength ||
+                (updatePassword && !AccountInputValidation.IsValidPassword(newPassword)) ||
+                (updateEmail && !AccountInputValidation.IsValidEmail(email!)) ||
+                (!updatePassword && !updateEmail))
+            {
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.InvalidInput,
+                    Message = "Enter your current password and at least one valid account change."
+                };
+            }
+
+            if (updatePassword && string.Equals(newPassword, currentPassword, StringComparison.Ordinal))
+            {
+                return new ResponsePacket
+                {
+                    Success = false,
+                    Code = ErrorCodes.InvalidInput,
+                    Message = "New password must be different from the current password."
+                };
+            }
+
+            string? replacementToken = updatePassword
+                ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+                : null;
+            DateTime? replacementTokenExpiresAt = replacementToken == null
+                ? null
+                : DateTime.UtcNow.AddHours(6);
+
+            var result = await repo.CapNhatCaiDatAsync(
+                session.AuthenticatedUserId.Value,
+                currentPassword,
+                updatePassword ? newPassword : null,
+                email,
+                replacementToken,
+                replacementTokenExpiresAt,
+                token).ConfigureAwait(false);
+            if (!result.Success)
+                return new ResponsePacket { Success = false, Code = result.Code, Message = result.Message };
+
+            if (replacementToken != null)
+            {
+                session.AuthToken = replacementToken;
+                foreach (ClientSession active in ActiveSessions.Values
+                    .Where(active => active != session && active.AuthenticatedUserId == session.AuthenticatedUserId))
+                {
+                    active.AuthenticatedUserId = null;
+                    active.AuthenticatedUsername = null;
+                    active.AuthToken = null;
+                    try { active.Client.Close(); }
+                    catch (SocketException) { }
+                    catch (ObjectDisposedException) { }
+                }
+            }
+
+            return new ResponsePacket
+            {
+                Success = true,
+                Code = ErrorCodes.Ok,
+                Message = result.Message,
+                User = result.User,
+                Token = replacementToken
+            };
         }
 
     }

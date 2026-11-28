@@ -22,8 +22,11 @@ static async Task RunAsync(string[] args)
         throw new ArgumentException("Supported options are --smtp4dev-sample and --smtp4dev-otp-queue.");
 
     VerifyAccountInputValidation();
+    VerifyMapAllowlist();
     VerifyCertificatePinValidation();
     VerifyClientEliminationDoesNotDeclareWinner();
+    VerifyRoomCapacityAndReadiness();
+    VerifyRoomReturnToLobbyAndLeaveEvents();
     await VerifyGameClientMailboxAsync();
     await VerifyEmailQueueAsync();
 
@@ -111,6 +114,8 @@ static async Task RunAsync(string[] args)
     Console.WriteLine("PASS: clean EOF, invalid/oversized length, malformed JSON, truncated frame, and oversized output are handled.");
     Console.WriteLine("PASS: ordered game-event and timestamped snapshot frames preserve the TCP wire order.");
     Console.WriteLine("PASS: forged UserId/TargetId with ELIMINATE affects only the caller; opponent state and winner remain unchanged.");
+    Console.WriteLine("PASS: rooms are capped at four players and the server blocks START until every player reports the lobby scene.");
+    Console.WriteLine("PASS: room return preserves membership until everyone returns; reset, readiness, roster, and leave events are synchronized.");
     Console.WriteLine("PASS: per-client mailbox waits for important events and drops stale snapshots.");
     Console.WriteLine("PASS: shared account validation accepts the email limit and rejects overlong email/password values.");
     Console.WriteLine("PASS: SHA-256 certificate pinning accepts the exact self-signed certificate and rejects a wrong pin, hostname mismatch, and malformed pin.");
@@ -134,6 +139,17 @@ static void VerifyAccountInputValidation()
         !AccountInputValidation.IsValidPassword(maxLengthPassword) ||
         AccountInputValidation.IsValidPassword(maxLengthPassword + "2"))
         throw new InvalidOperationException("Account input length or format validation is inconsistent.");
+}
+
+static void VerifyMapAllowlist()
+{
+    if (!MapNames.IsAllowed(MapNames.Game1) ||
+        !MapNames.IsAllowed(MapNames.Game2) ||
+        !MapNames.IsAllowed(MapNames.Game3) ||
+        MapNames.IsAllowed("game") ||
+        MapNames.IsAllowed("game 2") ||
+        MapNames.IsAllowed("custom"))
+        throw new InvalidOperationException("The server map allowlist does not match the three supported race scenes.");
 }
 
 static void VerifyCertificatePinValidation()
@@ -169,14 +185,16 @@ static void VerifyClientEliminationDoesNotDeclareWinner()
     const int hostUserId = 900001;
     const int guestUserId = 900002;
     ResponsePacket created = TcpGameRoomRegistry.Create(hostUserId, "smoke-host",
-        new RequestPacket { MapName = "game 1", MaxPlayers = 2 });
+        new RequestPacket { MapName = "game1", MaxPlayers = 2 });
     if (!created.Success || string.IsNullOrWhiteSpace(created.RoomId))
         throw new InvalidOperationException("The gameplay smoke room could not be created.");
 
     try
     {
         if (!TcpGameRoomRegistry.Join(guestUserId, "smoke-guest", created.RoomId).Success ||
-            !TcpGameRoomRegistry.Start(hostUserId, new RequestPacket { MapName = "game 1" }).Success)
+            !TcpGameRoomRegistry.ReportScene(hostUserId, "LobbyScene").Success ||
+            !TcpGameRoomRegistry.ReportScene(guestUserId, "LobbyScene").Success ||
+            !TcpGameRoomRegistry.Start(hostUserId, new RequestPacket { MapName = "game1" }).Success)
             throw new InvalidOperationException("The gameplay smoke room could not be started.");
 
         ResponsePacket elimination = TcpGameRoomRegistry.SubmitEvent(hostUserId,
@@ -197,6 +215,110 @@ static void VerifyClientEliminationDoesNotDeclareWinner()
     {
         TcpGameRoomRegistry.Leave(hostUserId);
         TcpGameRoomRegistry.Leave(guestUserId);
+    }
+}
+
+static void VerifyRoomCapacityAndReadiness()
+{
+    const int hostId = 901001;
+    const int guestOneId = 901002;
+    const int guestTwoId = 901003;
+    const int guestThreeId = 901004;
+    const int extraGuestId = 901005;
+    ResponsePacket created = TcpGameRoomRegistry.Create(hostId, "capacity-host",
+        new RequestPacket { MapName = "game1", MaxPlayers = 6 });
+    if (!created.Success || created.MaxPlayers != 4 || created.CanStart)
+        throw new InvalidOperationException("The server did not cap a room at four players.");
+
+    try
+    {
+        string roomCode = created.RoomId!;
+        if (!TcpGameRoomRegistry.ReportScene(hostId, "LobbyScene").Success ||
+            TcpGameRoomRegistry.Start(hostId, new RequestPacket()).Success)
+            throw new InvalidOperationException("The server allowed a race to start without enough ready players.");
+
+        if (!TcpGameRoomRegistry.Join(guestOneId, "capacity-guest-1", roomCode).Success ||
+            !TcpGameRoomRegistry.Join(guestTwoId, "capacity-guest-2", roomCode).Success ||
+            !TcpGameRoomRegistry.Join(guestThreeId, "capacity-guest-3", roomCode).Success ||
+            TcpGameRoomRegistry.Join(extraGuestId, "capacity-guest-4", roomCode).Success ||
+            TcpGameRoomRegistry.CanInvite(hostId, extraGuestId, roomCode))
+            throw new InvalidOperationException("The room accepted more than four players or invitations after reaching capacity.");
+
+        foreach (int userId in new[] { hostId, guestOneId, guestTwoId, guestThreeId })
+        {
+            if (!TcpGameRoomRegistry.ReportScene(userId, "LobbyScene").Success)
+                throw new InvalidOperationException("The server rejected a valid lobby scene report.");
+        }
+
+        ResponsePacket ready = TcpGameRoomRegistry.State(hostId);
+        if (!ready.CanStart || ready.ReadyPlayerCount != 4 || ready.UnreadyPlayerCount != 0 ||
+            !TcpGameRoomRegistry.Start(hostId, new RequestPacket { MapName = "game1" }).Success)
+            throw new InvalidOperationException("All ready players were not allowed to start the race.");
+    }
+    finally
+    {
+        TcpGameRoomRegistry.Leave(hostId);
+        TcpGameRoomRegistry.Leave(guestOneId);
+        TcpGameRoomRegistry.Leave(guestTwoId);
+        TcpGameRoomRegistry.Leave(guestThreeId);
+        TcpGameRoomRegistry.Leave(extraGuestId);
+    }
+}
+
+static void VerifyRoomReturnToLobbyAndLeaveEvents()
+{
+    if (TcpGameRoomRegistry.WinnerRewardCoins != 50)
+        throw new InvalidOperationException("The multiplayer winner reward must be exactly 50 coins.");
+
+    const int hostId = 902001;
+    const int guestId = 902002;
+    ResponsePacket created = TcpGameRoomRegistry.Create(hostId, "roundtrip-host",
+        new RequestPacket { MapName = "game1", MaxPlayers = 2 });
+    if (!created.Success || string.IsNullOrWhiteSpace(created.RoomId))
+        throw new InvalidOperationException("The room round-trip smoke room could not be created.");
+
+    try
+    {
+        string roomCode = created.RoomId!;
+        if (!TcpGameRoomRegistry.Join(guestId, "roundtrip-guest", roomCode).Success ||
+            !TcpGameRoomRegistry.ReportScene(hostId, "LobbyScene").Success ||
+            !TcpGameRoomRegistry.ReportScene(guestId, "LobbyScene").Success ||
+            !TcpGameRoomRegistry.Start(hostId, new RequestPacket { MapName = "game1" }).Success)
+            throw new InvalidOperationException("Two ready players could not start a match.");
+
+        if (!TcpGameRoomRegistry.ListRooms().Any(room =>
+                room.Code == roomCode && room.CurrentPlayers == 2 && room.MaxPlayers == 2))
+            throw new InvalidOperationException("The open-room list did not expose the active room roster.");
+
+        if (!TcpGameRoomRegistry.ReturnToLobby(hostId).Success ||
+            !TcpGameRoomRegistry.ReportScene(hostId, "LobbyScene").Success)
+            throw new InvalidOperationException("The host could not return to the persistent room lobby.");
+
+        ResponsePacket waiting = TcpGameRoomRegistry.State(hostId);
+        if (!waiting.IsRacing || !waiting.IsReturnedToLobby ||
+            waiting.GameEvent?.Type != "PLAYER_RETURNED_TO_LOBBY")
+            throw new InvalidOperationException("The room did not retain the early-returning player or publish the lobby event.");
+
+        if (!TcpGameRoomRegistry.ReturnToLobby(guestId).Success ||
+            !TcpGameRoomRegistry.ReportScene(guestId, "LobbyScene").Success)
+            throw new InvalidOperationException("The guest could not return to the persistent room lobby.");
+
+        ResponsePacket readyAgain = TcpGameRoomRegistry.State(hostId);
+        if (readyAgain.IsRacing || !readyAgain.CanStart || readyAgain.PlayerCount != 2 ||
+            readyAgain.GameEvent?.Type != "ROOM_RESET")
+            throw new InvalidOperationException("The room did not reset with both players ready for another match.");
+
+        if (!TcpGameRoomRegistry.Leave(guestId).Success)
+            throw new InvalidOperationException("The guest could not leave the room.");
+        ResponsePacket afterLeave = TcpGameRoomRegistry.State(hostId);
+        if (afterLeave.PlayerCount != 1 || afterLeave.GameEvent?.Type != "PLAYER_LEFT" ||
+            afterLeave.GameEvent.Username != "roundtrip-guest")
+            throw new InvalidOperationException("The room did not publish the guest-leave event.");
+    }
+    finally
+    {
+        TcpGameRoomRegistry.Leave(hostId);
+        TcpGameRoomRegistry.Leave(guestId);
     }
 }
 

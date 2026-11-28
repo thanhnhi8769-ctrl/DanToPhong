@@ -1,6 +1,6 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using Unity.Cinemachine;
@@ -11,16 +11,21 @@ public sealed class TcpGameplaySync : MonoBehaviour
     private const float StalePlayerSeconds = 3f;
     private readonly Dictionary<int, PlayerReplica> replicas = new Dictionary<int, PlayerReplica>();
     private readonly IStateChannel stateChannel = new TcpStateChannel();
+    private readonly UdpMovementChannel udpChannel = new UdpMovementChannel();
+    private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
     private GameObject localCar;
     private int localVehicleIndex;
     private int tickRate = 20;
     private bool configured;
     private float nextWarningTime;
-    private int clientTick;
+    private uint clientTick;
     private bool finishEventRaised;
     private bool streamReady;
     private bool streamStarting;
     private float nextStreamAttempt;
+    private float nextUdpAttempt;
+    private bool udpReady;
+    private bool udpStarting;
 
     public static event Action<string> GameFinished;
     public static event Action<int> CheckpointCollected;
@@ -41,7 +46,7 @@ public sealed class TcpGameplaySync : MonoBehaviour
             body.isKinematic = true;
             body.useGravity = false;
         }
-        StartCoroutine(SendInputLoop());
+        _ = SendInputLoopAsync(lifetime.Token);
     }
 
     public void ConfigureSpectator()
@@ -49,7 +54,7 @@ public sealed class TcpGameplaySync : MonoBehaviour
         if (configured)
             return;
         configured = true;
-        StartCoroutine(SpectatorStreamLoop());
+        _ = SpectatorStreamLoopAsync(lifetime.Token);
     }
 
     public System.Threading.Tasks.Task<Resp> SendGameEventAsync(Req gameEvent)
@@ -57,77 +62,148 @@ public sealed class TcpGameplaySync : MonoBehaviour
         return stateChannel.SendEventAsync(gameEvent);
     }
 
-    private IEnumerator SendInputLoop()
+    private async Task SendInputLoopAsync(CancellationToken token)
     {
         float interval = 1f / tickRate;
-        while (configured && localCar != null)
+        try
         {
-            if (ServerClient.Ready)
+            while (configured && localCar != null && !token.IsCancellationRequested)
             {
-                if (!streamReady && !streamStarting && Time.unscaledTime >= nextStreamAttempt)
+                if (ServerClient.Ready)
                 {
-                    streamStarting = true;
-                    Task startTask = stateChannel.StartReceivingAsync();
-                    yield return new WaitUntil(() => startTask.IsCompleted);
-                    streamStarting = false;
-                    if (startTask.Status == TaskStatus.RanToCompletion)
-                        streamReady = true;
-                    else
+                    if (!streamReady && !streamStarting && Time.unscaledTime >= nextStreamAttempt)
                     {
-                        nextStreamAttempt = Time.unscaledTime + 5f;
-                        Debug.LogWarning("[TCP gameplay] Snapshot subscription failed; retrying.");
+                        streamStarting = true;
+                        try
+                        {
+                            await stateChannel.StartReceivingAsync();
+                            streamReady = true;
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            nextStreamAttempt = Time.unscaledTime + 5f;
+                            Debug.LogWarning("[TCP gameplay] Snapshot subscription failed: " + ex.GetType().Name);
+                        }
+                        finally
+                        {
+                            streamStarting = false;
+                        }
+                    }
+
+                    if (!udpReady && !udpStarting && Time.unscaledTime >= nextUdpAttempt)
+                    {
+                        udpStarting = true;
+                        try
+                        {
+                            await udpChannel.BindAsync(token);
+                            clientTick = udpChannel.InitialSequence - 1;
+                            udpReady = true;
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            nextUdpAttempt = Time.unscaledTime + 5f;
+                            Debug.LogWarning("[UDP gameplay] Movement bind failed: " + ex.GetType().Name);
+                        }
+                        finally
+                        {
+                            udpStarting = false;
+                        }
+                    }
+
+                    if (udpReady)
+                    {
+                        try
+                        {
+                            scooter controls = localCar.GetComponent<scooter>();
+                            await udpChannel.SendInputAsync(
+                                ++clientTick,
+                                controls != null ? controls.NetworkThrottle : 0f,
+                                controls != null ? controls.NetworkSteer : 0f,
+                                false,
+                                localVehicleIndex,
+                                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                                token);
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            udpChannel.Dispose();
+                            udpReady = false;
+                            nextUdpAttempt = Time.unscaledTime + 5f;
+                            if (Time.unscaledTime >= nextWarningTime)
+                            {
+                                nextWarningTime = Time.unscaledTime + 5f;
+                                Debug.LogWarning("[UDP gameplay] Movement send failed; will rebind: " + ex.GetType().Name);
+                            }
+                        }
                     }
                 }
 
-                scooter controls = localCar.GetComponent<scooter>();
-                Resp response = null;
-                var request = new Req
-                {
-                    command = "GAME_INPUT",
-                    roomId = LauncherArgs.Room,
-                    vehicleIndex = localVehicleIndex,
-                    throttle = controls != null ? controls.NetworkThrottle : 0f,
-                    steer = controls != null ? controls.NetworkSteer : 0f,
-                    clientTick = ++clientTick,
-                    clientTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-                var task = stateChannel.SendStateAsync(request);
-                yield return new WaitUntil(() => task.IsCompleted);
-                if (task.Status == System.Threading.Tasks.TaskStatus.RanToCompletion)
-                    response = task.Result;
-
-                if (response != null && response.success)
-                    ApplySnapshot(response);
-                else if (Time.unscaledTime >= nextWarningTime)
-                {
-                    nextWarningTime = Time.unscaledTime + 5f;
-                    Debug.LogWarning("[TCP gameplay] No valid authoritative snapshot was received.");
-                }
+                await Task.Delay(TimeSpan.FromSeconds(interval), token);
             }
-
-            yield return new WaitForSecondsRealtime(interval);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+            if (this != null)
+                Debug.LogWarning("[TCP gameplay] Input loop stopped because of a network error.");
         }
     }
 
-    private IEnumerator SpectatorStreamLoop()
+    private async Task SpectatorStreamLoopAsync(CancellationToken token)
     {
-        while (configured)
+        try
         {
-            if (ServerClient.Ready && !streamReady && !streamStarting && Time.unscaledTime >= nextStreamAttempt)
+            while (configured && !token.IsCancellationRequested)
             {
-                streamStarting = true;
-                Task startTask = stateChannel.StartReceivingAsync();
-                yield return new WaitUntil(() => startTask.IsCompleted);
-                streamStarting = false;
-                if (startTask.Status == TaskStatus.RanToCompletion)
-                    streamReady = true;
-                else
+                if (ServerClient.Ready && !streamReady && !streamStarting && Time.unscaledTime >= nextStreamAttempt)
                 {
-                    nextStreamAttempt = Time.unscaledTime + 5f;
-                    Debug.LogWarning("[TCP gameplay] Spectator stream subscription failed; retrying.");
+                    streamStarting = true;
+                    try
+                    {
+                        await stateChannel.StartReceivingAsync();
+                        streamReady = true;
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        nextStreamAttempt = Time.unscaledTime + 5f;
+                        Debug.LogWarning("[TCP gameplay] Spectator stream subscription failed: " + ex.GetType().Name);
+                    }
+                    finally
+                    {
+                        streamStarting = false;
+                    }
                 }
+
+                await Task.Delay(TimeSpan.FromSeconds(0.25), token);
             }
-            yield return new WaitForSecondsRealtime(0.25f);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+            if (this != null)
+                Debug.LogWarning("[TCP gameplay] Spectator stream loop stopped because of a network error.");
         }
     }
 
@@ -308,7 +384,10 @@ public sealed class TcpGameplaySync : MonoBehaviour
 
     private void OnDestroy()
     {
+        lifetime.Cancel();
         stateChannel.Close();
+        udpChannel.Dispose();
+        lifetime.Dispose();
     }
 
     private static void ApplyInterpolatedPose(PlayerReplica replica, long renderTime)

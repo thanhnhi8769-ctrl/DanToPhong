@@ -23,7 +23,7 @@ public class GameUi : MonoBehaviour
 
         if (!string.IsNullOrWhiteSpace(LauncherArgs.Room) && ServerClient.Ready)
             ServerClient.Fire(new Req { command = "ROOM_LEAVE" });
-        SceneManager.LoadScene("menu");
+        SceneManager.LoadScene(SceneNames.Menu);
     }
 
     public void TiepTuc()

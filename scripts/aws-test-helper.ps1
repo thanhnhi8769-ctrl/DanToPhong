@@ -17,6 +17,10 @@ param(
     [string]$SshUser = 'ubuntu',
     [string]$SshKeyPath,
 
+    [switch]$TemporaryGameIngress,
+    [string]$SecurityGroupId,
+    [string[]]$SourceIPv4,
+
     [ValidateRange(1, 60)]
     [int]$TimeoutMinutes = 30
 )
@@ -82,6 +86,10 @@ function Confirm-ResourceAction {
     param([ValidateSet('START', 'STOP')][string]$Verb)
 
     $expected = "$Verb $RdsInstanceId $Ec2InstanceId"
+    if ($TemporaryGameIngress) {
+        $sources = $SourceIPv4 -join ','
+        $expected += " TEMPORARY-GAME-INGRESS $SecurityGroupId $sources TCP:9000+UDP:9000"
+    }
     $answer = Read-Host "This may incur AWS charges. Type exactly '$expected' to continue"
     if ($answer -cne $expected) {
         throw "Confirmation did not match; no $Verb action was requested."
@@ -148,13 +156,21 @@ function Write-PortIngressSummary {
             '--query', 'SecurityGroups[0].{Id:GroupId,Ingress:IpPermissions}'
         )
         Write-Host "Security group $($groups.Id):"
-        foreach ($portNumber in @(9000, 1433)) {
+        foreach ($check in @(
+            @{ Protocol = 'tcp'; Number = 9000 },
+            @{ Protocol = 'udp'; Number = 9000 },
+            @{ Protocol = 'tcp'; Number = 1433 }
+        )) {
+            $portNumber = $check.Number
+            $protocol = $check.Protocol
             $broad = $false
             $sourceCount = 0
             foreach ($rule in @($groups.Ingress)) {
-                $isTcpOrAll = $rule.IpProtocol -eq '-1' -or $rule.IpProtocol -eq 'tcp' -or $rule.IpProtocol -eq '6'
+                $isProtocol = $rule.IpProtocol -eq '-1' -or
+                    ($protocol -eq 'tcp' -and ($rule.IpProtocol -eq 'tcp' -or $rule.IpProtocol -eq '6')) -or
+                    ($protocol -eq 'udp' -and ($rule.IpProtocol -eq 'udp' -or $rule.IpProtocol -eq '17'))
                 $coversPort = $rule.IpProtocol -eq '-1' -or
-                    ($isTcpOrAll -and $null -ne $rule.FromPort -and $null -ne $rule.ToPort -and
+                    ($isProtocol -and $null -ne $rule.FromPort -and $null -ne $rule.ToPort -and
                     $rule.FromPort -le $portNumber -and $rule.ToPort -ge $portNumber)
                 if (-not $coversPort) { continue }
                 foreach ($range in $rule.IpRanges) {
@@ -167,7 +183,122 @@ function Write-PortIngressSummary {
                 }
             }
             $summary = if ($broad) { 'BROAD CIDR DETECTED' } else { 'no 0.0.0.0/0 or ::/0 CIDR detected' }
-            Write-Host "  TCP $portNumber`: $summary; source range count=$sourceCount (CIDRs withheld)"
+            Write-Host "  $($protocol.ToUpperInvariant()) $portNumber`: $summary; source range count=$sourceCount (CIDRs withheld)"
+        }
+    }
+}
+
+function Assert-TemporaryIngressParameters {
+    if (-not $TemporaryGameIngress) { return }
+    if ([string]::IsNullOrWhiteSpace($SecurityGroupId) -or -not $SourceIPv4 -or $SourceIPv4.Count -eq 0) {
+        throw 'TemporaryGameIngress requires -SecurityGroupId and one or more exact -SourceIPv4 values.'
+    }
+    if ($SourceIPv4.Count -gt 8) { throw 'At most eight tester /32 source addresses are allowed per operation.' }
+    foreach ($source in $SourceIPv4) {
+        $parsed = $null
+        if (-not [System.Net.IPAddress]::TryParse($source, [ref]$parsed) -or
+            $parsed.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+            throw 'Each SourceIPv4 must be one explicit IPv4 address, never a CIDR or range.'
+        }
+        $bytes = $parsed.GetAddressBytes()
+        if ($bytes[0] -eq 0 -or $bytes[0] -eq 10 -or $bytes[0] -eq 127 -or
+            ($bytes[0] -eq 169 -and $bytes[1] -eq 254) -or
+            ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or
+            ($bytes[0] -eq 192 -and $bytes[1] -eq 168) -or
+            $bytes[0] -ge 224 -or $parsed.Equals([System.Net.IPAddress]::Any)) {
+            throw 'Each SourceIPv4 must be a public unicast IPv4 address.'
+        }
+    }
+}
+
+function Get-GameIngressGroup {
+    param([string]$Id)
+    Invoke-AwsJson @(
+        'ec2', 'describe-security-groups',
+        '--group-ids', $Id,
+        '--query', 'SecurityGroups[0].{Id:GroupId,Ingress:IpPermissions}'
+    )
+}
+
+function Test-PortCovered {
+    param($Rule, [string]$Protocol, [int]$Number)
+    $protocolMatch = $Rule.IpProtocol -eq '-1' -or
+        ($Protocol -eq 'tcp' -and ($Rule.IpProtocol -eq 'tcp' -or $Rule.IpProtocol -eq '6')) -or
+        ($Protocol -eq 'udp' -and ($Rule.IpProtocol -eq 'udp' -or $Rule.IpProtocol -eq '17'))
+    return $Rule.IpProtocol -eq '-1' -or (
+        $protocolMatch -and $null -ne $Rule.FromPort -and $null -ne $Rule.ToPort -and
+        $Rule.FromPort -le $Number -and $Rule.ToPort -ge $Number)
+}
+
+function Assert-NoBroadPortIngress {
+    param($Group, [string]$Protocol, [int]$Number)
+    foreach ($rule in @($Group.Ingress)) {
+        if (-not (Test-PortCovered $rule $Protocol $Number)) { continue }
+        if (@($rule.IpRanges | Where-Object { $_.CidrIp -eq '0.0.0.0/0' }).Count -gt 0 -or
+            @($rule.Ipv6Ranges | Where-Object { $_.CidrIpv6 -eq '::/0' }).Count -gt 0) {
+            throw "Security group $($Group.Id) has broad ingress for $($Protocol.ToUpperInvariant()) $Number; no resource or rule action was taken."
+        }
+    }
+}
+
+function Set-TemporaryGameIngress {
+    param([ValidateSet('Allow', 'Remove')][string]$Operation)
+    Assert-TemporaryIngressParameters
+    $group = Get-GameIngressGroup $SecurityGroupId
+    if (-not $group) { throw "Security group '$SecurityGroupId' was not found." }
+
+    if ($Operation -eq 'Allow') {
+        foreach ($check in @(
+            @{ Protocol = 'tcp'; Number = 9000 },
+            @{ Protocol = 'udp'; Number = 9000 }
+        )) {
+            Assert-NoBroadPortIngress $group $check.Protocol $check.Number
+        }
+    }
+
+    foreach ($source in @($SourceIPv4 | Select-Object -Unique)) {
+        $cidr = "$source/32"
+        foreach ($check in @(
+            @{ Protocol = 'tcp'; Number = 9000 },
+            @{ Protocol = 'udp'; Number = 9000 }
+        )) {
+            $exists = $false
+            foreach ($rule in @($group.Ingress)) {
+                if (-not (Test-PortCovered $rule $check.Protocol $check.Number)) { continue }
+                if (@($rule.IpRanges | Where-Object { $_.CidrIp -eq $cidr }).Count -gt 0) {
+                    $exists = $true
+                    break
+                }
+            }
+
+            if ($Operation -eq 'Allow' -and -not $exists) {
+                $permission = @{
+                    IpProtocol = $check.Protocol
+                    FromPort = $check.Number
+                    ToPort = $check.Number
+                    IpRanges = @(@{ CidrIp = $cidr; Description = 'Temporary DanToPhong demo tester' })
+                } | ConvertTo-Json -Compress -Depth 5
+                $null = Invoke-AwsJson @(
+                    'ec2', 'authorize-security-group-ingress',
+                    '--group-id', $SecurityGroupId,
+                    '--ip-permissions', $permission
+                )
+                Write-Host "Added temporary $($check.Protocol.ToUpperInvariant()) $($check.Number) ingress for one approved /32 source."
+            }
+            elseif ($Operation -eq 'Remove' -and $exists) {
+                $permission = @{
+                    IpProtocol = $check.Protocol
+                    FromPort = $check.Number
+                    ToPort = $check.Number
+                    IpRanges = @(@{ CidrIp = $cidr })
+                } | ConvertTo-Json -Compress -Depth 5
+                $null = Invoke-AwsJson @(
+                    'ec2', 'revoke-security-group-ingress',
+                    '--group-id', $SecurityGroupId,
+                    '--ip-permissions', $permission
+                )
+                Write-Host "Removed temporary $($check.Protocol.ToUpperInvariant()) $($check.Number) ingress for one /32 source."
+            }
         }
     }
 }
@@ -235,8 +366,27 @@ function Invoke-Status {
 
 function Invoke-Start {
     Assert-Ids
+    Assert-TemporaryIngressParameters
     if ([string]::IsNullOrWhiteSpace($ClientHostName) -or [string]::IsNullOrWhiteSpace($SshKeyPath)) {
         throw "Start requires -ClientHostName (SAN hostname) and -SshKeyPath (outside the repository)."
+    }
+
+    $inspectionEc2 = Get-Ec2 $Ec2InstanceId
+    $inspectionRds = Get-Rds $RdsInstanceId
+    if ($TemporaryGameIngress -and $inspectionEc2.Groups -notcontains $SecurityGroupId) {
+        throw 'SecurityGroupId must be attached to the target EC2 instance.'
+    }
+    if ($TemporaryGameIngress -and $inspectionRds.Groups -contains $SecurityGroupId) {
+        throw 'Refusing to add game ingress to a Security Group also attached to RDS.'
+    }
+    foreach ($groupId in @($inspectionEc2.Groups | Where-Object { $_ } | Select-Object -Unique)) {
+        $group = Get-GameIngressGroup $groupId
+        Assert-NoBroadPortIngress $group 'tcp' 9000
+        Assert-NoBroadPortIngress $group 'udp' 9000
+    }
+    foreach ($groupId in @($inspectionRds.Groups | Where-Object { $_ } | Select-Object -Unique)) {
+        $group = Get-GameIngressGroup $groupId
+        Assert-NoBroadPortIngress $group 'tcp' 1433
     }
     Confirm-ResourceAction 'START'
 
@@ -270,7 +420,7 @@ function Invoke-Start {
     if (-not (Test-Path -LiteralPath $SshKeyPath -PathType Leaf)) { throw 'SSH key path is missing; AWS instances are running, but service verification was not performed.' }
 
     $sshKey = (Resolve-Path -LiteralPath $SshKeyPath).Path
-    $remoteCommand = 'systemctl is-active --quiet dantophong && systemctl is-enabled --quiet dantophong && ss -ltnH "sport = :9000" | grep -q .'
+    $remoteCommand = 'systemctl is-active --quiet dantophong && systemctl is-enabled --quiet dantophong && ss -ltnH "sport = :9000" | grep -q . && ss -lunH "sport = :9000" | grep -q .'
     $sshArgs = @(
         '-i', $sshKey,
         '-o', 'BatchMode=yes',
@@ -283,16 +433,30 @@ function Invoke-Start {
     if ($LASTEXITCODE -ne 0) {
         throw "AWS instances are running, but systemd/listener verification failed; check SSH trust, security rules, and the service journal. $($sshOutput -join ' ')"
     }
+    if ($TemporaryGameIngress) {
+        Set-TemporaryGameIngress 'Allow'
+    }
     $tcp = Test-NetConnection -ComputerName $ClientHostName -Port $Port -WarningAction SilentlyContinue
     if (-not $tcp.TcpTestSucceeded) {
-        throw "Server service is active, but TCP $Port is not reachable from this client network; inspect the approved /32 security-group rules."
+        throw "Server service is active, but TCP $Port is not reachable from this client network. If temporary ingress was opened, use Action Stop with -TemporaryGameIngress to remove it."
     }
     Write-Host "RDS available; EC2 running with passing health checks."
-    Write-Host "systemd service active/enabled, TCP 9000 listening, and endpoint $ClientHostName`:$Port reachable from this client."
+    Write-Host "systemd service active/enabled; TCP 9000 and UDP 9000 listeners observed; endpoint $ClientHostName`:$Port reachable over TCP from this client."
 }
 
 function Invoke-Stop {
     Assert-Ids
+    Assert-TemporaryIngressParameters
+    if ($TemporaryGameIngress) {
+        $inspectionEc2 = Get-Ec2 $Ec2InstanceId
+        $inspectionRds = Get-Rds $RdsInstanceId
+        if ($inspectionEc2.Groups -notcontains $SecurityGroupId) {
+            throw 'SecurityGroupId must be attached to the target EC2 instance.'
+        }
+        if ($inspectionRds.Groups -contains $SecurityGroupId) {
+            throw 'Refusing to remove game ingress from a Security Group also attached to RDS.'
+        }
+    }
     Confirm-ResourceAction 'STOP'
 
     $ec2 = Get-Ec2 $Ec2InstanceId
@@ -304,6 +468,10 @@ function Invoke-Stop {
         }
         'stopping' { $ec2 = Wait-Ec2State $Ec2InstanceId 'stopped' }
         default { throw "EC2 state '$($ec2.State)' is not safe for shutdown; RDS was not stopped." }
+    }
+
+    if ($TemporaryGameIngress) {
+        Set-TemporaryGameIngress 'Remove'
     }
 
     $rds = Get-Rds $RdsInstanceId
@@ -381,6 +549,7 @@ function Invoke-Pin {
         [ordered]@{
             host = $ClientHostName
             port = $Port
+            udpPort = 9000
             useTls = $true
             certificateThumbprintSha256 = $actual
         } | ConvertTo-Json

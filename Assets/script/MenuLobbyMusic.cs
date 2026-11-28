@@ -12,7 +12,7 @@ public class MenuLobbyMusic : MonoBehaviour
     [Range(0f, 1f)] public float amLuong = 0.45f;
 
     [Header("Nhạc sảnh chỉ phát ở các Scene này")]
-    public string[] danhSachSceneSanh = { "menu", "ShopScene", "LobbyScene", "SelectScene" };
+    public string[] danhSachSceneSanh = { SceneNames.Menu, SceneNames.Shop, SceneNames.Lobby, SceneNames.Select };
 
     [Header("Nút mute (tự tạo, không cần làm UI)")]
     public bool tuTaoNutMute = true;
@@ -101,6 +101,13 @@ public class MenuLobbyMusic : MonoBehaviour
         if (audioSource != null && audioSource.isPlaying && !LaSceneSanh(SceneManager.GetActiveScene().name))
         {
             audioSource.Stop();
+        }
+        else if (audioSource != null && !audioSource.isPlaying &&
+                 nhacMenuLobby != null && LaSceneSanh(SceneManager.GetActiveScene().name))
+        {
+            audioSource.clip = nhacMenuLobby;
+            audioSource.volume = amLuong;
+            audioSource.Play();
         }
     }
 

@@ -627,15 +627,23 @@ namespace UI
                 if (IsDisposed) return;
                 btnSendCode.Enabled = true;
                 btnSendCode.Text = string.IsNullOrWhiteSpace(previousText) ? "Get Code" : previousText;
+                bool connectionFailed =
+                    ex.Message.StartsWith("Cannot connect to server", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.StartsWith("Network error:", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.StartsWith("Server closed the connection", StringComparison.OrdinalIgnoreCase);
 
                 lblErrVerificationCode.ForeColor = Color.Crimson;
-                lblErrVerificationCode.Text = $"Send failed: {ex.Message}";
+                lblErrVerificationCode.Text = connectionFailed
+                    ? $"Connection failed: {ex.Message}"
+                    : $"Send failed: {ex.Message}";
                 nightPanel1.Invalidate();
 
                 PopupNoticeForm.ShowNotice(
                     this,
-                    "Mail Error",
-                    $"Không gửi được email xác nhận:\n{ex.Message}",
+                    connectionFailed ? "Connection Error" : "Mail Error",
+                    connectionFailed
+                        ? $"Không kết nối được tới máy chủ:\n{ex.Message}"
+                        : $"Không gửi được email xác nhận:\n{ex.Message}",
                     PopupNoticeForm.NoticeKind.Error);
             }
         }
@@ -698,7 +706,7 @@ namespace UI
                  !string.Equals(email, _otpEmail, StringComparison.OrdinalIgnoreCase)))
                 eCode = "Username or email changed after the code was sent. Please request a new code.";
 
-            if (eCode == null && (!_codeExpiresAt.HasValue || DateTime.UtcNow > _codeExpiresAt.Value))
+            if (eCode == null && (!_codeExpiresAt.HasValue || DateTime.UtcNow >= _codeExpiresAt.Value))
                 eCode = "Verification code has expired. Please request a new code.";
 
             lblErrVerificationCode.Text = eCode ?? "";

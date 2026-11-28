@@ -7,6 +7,7 @@ public static class LauncherArgs
     public static string Token = ReadAndClearSessionToken();
     public static string Host = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST") ?? "";
     public static int Port = ParsePort(Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT"));
+    public static int UdpPort = ParsePort(Environment.GetEnvironmentVariable("DANTOPHONG_UDP_PORT"), 9000);
     public static bool UseTls = ParseBool(Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS"), true);
     public static string CertificateThumbprintSha256 = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_CERT_SHA256") ?? "";
     public static string Mode = "single";
@@ -19,7 +20,7 @@ public static class LauncherArgs
     public static string FullName = "";
     public static bool HasLauncher;
 
-    private static int ParsePort(string raw) => int.TryParse(raw, out int value) && value is > 0 and <= 65535 ? value : 9000;
+    private static int ParsePort(string raw, int fallback = 9000) => int.TryParse(raw, out int value) && value is > 0 and <= 65535 ? value : fallback;
     private static bool ParseBool(string raw, bool fallback) => bool.TryParse(raw, out bool value) ? value : fallback;
 
     private static string ReadAndClearSessionToken()
@@ -43,6 +44,7 @@ public static class LauncherArgs
                     break;
                 case "--host": Host = a[++i]; break;
                 case "--port": Port = ParsePort(a[++i]); break;
+                case "--udp-port": UdpPort = ParsePort(a[++i], 9000); break;
                 case "--tls": UseTls = ParseBool(a[++i], true); break;
                 case "--mode": Mode = a[++i]; break;
                 case "--room": Room = a[++i]; break;

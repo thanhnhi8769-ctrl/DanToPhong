@@ -7,6 +7,7 @@
         public const string GetInfo = "LAYTHONGTIN";
         public const string Logout = "DANGXUAT";
         public const string ResetPassword = "DOIMATKHAU";
+        public const string UpdateAccountSettings = "CAPNHATCAIDAT";
         public const string RequestResetCode = "YEUCAUMADATLAI";
         public const string RequestRegistrationCode = "YEUCAUMADANGKY";
         public const string UpdateCoins = "CAPNHATXU";
@@ -34,9 +35,14 @@
         public const string CreateGameRoom = "ROOM_CREATE";
         public const string JoinGameRoom = "ROOM_JOIN";
         public const string LeaveGameRoom = "ROOM_LEAVE";
+        public const string ReturnToLobby = "ROOM_RETURN";
         public const string GameRoomState = "ROOM_STATE";
         public const string StartGameRoom = "ROOM_START";
+        public const string ReportRoomScene = "ROOM_SCENE";
+        public const string StartSoloMatch = "SOLO_START";
+        public const string FinishSoloMatch = "SOLO_FINISH";
         public const string GameInput = "GAME_INPUT";
+        public const string GameUdpBind = "GAME_UDP_BIND";
         public const string GameStream = "GAME_STREAM";
         public const string GameSnapshot = "GAME_SNAPSHOT";
         public const string GameSpectate = "GAME_SPECTATE";

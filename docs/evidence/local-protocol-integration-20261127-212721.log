@@ -1,0 +1,25 @@
+2026-11-27 21:27:21.508 +07:00 [INFO] Bounded DB-backed TCP integration run; protocol evidence only, not GUI or cross-network evidence.
+2026-11-27 21:27:22.325 +07:00 [PASS] TC04 OTP repository rejected wrong codes and locked verification after five attempts; code values were not logged.
+2026-11-27 21:27:22.460 +07:00 [PASS] TC04 OTP repository rejected an expired code and consumed a valid code exactly once.
+2026-11-27 21:27:22.577 +07:00 [PASS] Login limiter allowed five attempts then rejected the next attempt.
+2026-11-27 21:27:22.601 +07:00 [PASS] Temporary OTP and login-limiter database rows were removed.
+2026-11-27 21:27:23.189 +07:00 [PASS] T1 test server was observed listening on dedicated loopback port 19000.
+2026-11-27 21:27:24.499 +07:00 [PASS] Authenticated settings rejected a wrong current password, persisted the new email/password, rotated the session token, and revoked the old token.
+2026-11-27 21:27:24.500 +07:00 [PASS] T2 authenticated login responses returned each account email persisted in SQL.
+2026-11-27 21:27:24.502 +07:00 [PASS] T2 both TCP clients connected, authenticated, and appeared in server session logs.
+2026-11-27 21:27:24.511 +07:00 [PASS] T3 both authenticated clients received PONG in under 1 second (A 5.6 ms; B 1.0 ms).
+2026-11-27 21:27:24.567 +07:00 [PASS] TC03 two authenticated clients created/joined a room and received sequenced, timestamped server snapshots.
+2026-11-27 21:27:25.114 +07:00 [PASS] TC03 server rejected invalid/stale input, ignored forged client coordinates, and broadcast bounded movement to the peer (1.08 m observed).
+2026-11-27 21:27:25.235 +07:00 [PASS] TC03 a third authenticated client spectated the running room and received racer snapshots without joining as a player.
+2026-11-27 21:27:25.243 +07:00 [PASS] T4 client B received client A's chat message in under 1 second (6.8 ms).
+2026-11-27 21:27:25.258 +07:00 [PASS] T5 all 20 consecutive messages arrived with consecutive IDs and unchanged content.
+2026-11-27 21:27:25.259 +07:00 [PASS] T6 the Vietnamese chat message round-tripped exactly through server storage and TCP framing.
+2026-11-27 21:27:25.272 +07:00 [PASS] T7 an abrupt client-A socket reset removed its session; client B received PLAYER_DISCONNECTED and IsDisconnected=true.
+2026-11-27 21:27:25.391 +07:00 [PASS] T7 the same account reconnected within the grace period and restored its racer state and snapshot stream.
+2026-11-27 21:27:26.383 +07:00 [PASS] T8 terminating the test server made both clients detect command- and game-stream connection loss without a client crash.
+2026-11-27 21:27:27.069 +07:00 [PASS] TC07 process restart cleared the documented in-memory room state; reconnect was rejected instead of returning a false success.
+2026-11-27 21:27:27.131 +07:00 [PASS] TC10 50 simultaneous anonymous clients got expected auth rejection; p95=3.0 ms, max=9.8 ms while a slow sender held an incomplete header.
+2026-11-27 21:27:27.139 +07:00 [PASS] TC10 malformed JSON frame was closed without an application response.
+2026-11-27 21:27:27.142 +07:00 [PASS] TC10 oversized frame header was closed without an application response.
+2026-11-27 21:27:27.187 +07:00 [PASS] Temporary protocol-test accounts were removed from DanToPhongDB_Test.
+2026-11-27 21:27:27.187 +07:00 [RESULT] PASS — OTP/login-state, room/snapshot, reconnect, shutdown, and bounded load checks passed; GUI/cross-network checks remain manual.

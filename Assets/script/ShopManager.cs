@@ -151,7 +151,7 @@ public class ShopManager : MonoBehaviour
     public float tocDoDemXu = 5f;
 
     [Header("Navigation")]
-    public string tenSceneMenu = "menu";
+    public string tenSceneMenu = SceneNames.Menu;
 
     private const float DO_CAO_SAN_KHAU = 1.45f;
     private const float KICH_THUOC_CHUAN = 1.35f;

@@ -17,7 +17,7 @@ public class GameNetworkManager : MonoBehaviour
     public float doCaoThaXe = 0.05f;
 
     [Header("Mạng (tăng để xe người khác chạy êm hơn)")]
-    [Tooltip("Tần suất gửi input đến server TCP.")]
+    [Tooltip("Tần suất gửi input chuyển động đến server qua UDP.")]
     public int tanSoGui = 20;
     [Tooltip("Tần suất hiển thị snapshot do server phát.")]
     public int tanSoDongBo = 10;
@@ -49,21 +49,9 @@ public class GameNetworkManager : MonoBehaviour
 
     private static void KiemTraVaTaoManager(Scene scene)
     {
-        string ten = scene.name.ToLower();
+        string ten = scene.name;
 
-        if (ten.Contains("select")) return;
-
-        if (ten == "game")
-        {
-            string m = LayMapDaChon();
-            if (!string.IsNullOrEmpty(m) && m != "game" && Application.CanStreamedLevelBeLoaded(m))
-            {
-                SceneManager.LoadScene(m);
-                return;
-            }
-        }
-
-        if (!ten.Contains("game")) return;
+        if (!SceneNames.IsRaceMap(ten)) return;
 
         // Kiểm tra theo ĐÚNG scene vừa nạp (scene cũ có thể chưa kịp bị huỷ)
         bool daCo = false;
@@ -90,7 +78,8 @@ public class GameNetworkManager : MonoBehaviour
     public static string LayTenSceneVaoGame()
     {
         string m = LayMapDaChon();
-        return (!string.IsNullOrEmpty(m) && m != "game" && Application.CanStreamedLevelBeLoaded(m)) ? m : "game";
+        m = SceneNames.NormalizeMap(m);
+        return Application.CanStreamedLevelBeLoaded(m) ? m : SceneNames.DefaultMap;
     }
 
     private void Start()

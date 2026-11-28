@@ -10,6 +10,8 @@ using System.Windows.Forms;
 using DanToPhong.Protocol;
 using UI.Services;
 using System.Linq;
+using System.Net.Sockets;
+using System.Security.Authentication;
 
 namespace UI
 {
@@ -43,21 +45,6 @@ namespace UI
             cloned.Save(DuongDanAvatarLocal, System.Drawing.Imaging.ImageFormat.Png);
             SetAvatar(cloned);
         }
-        private async Task DayAvatarLenServerAsync(string imagePath)
-        {
-            if (_netClient == null) return;
-            try
-            {
-                byte[]? data = AvatarHelper.ToJpeg128(imagePath);
-                if (data == null) { SetSettingsStatus("Avatar quá nặng, hãy chọn ảnh khác.", isError: true); return; }
-
-                ResponsePacket r = await _netClient.UploadAvatarAsync(data);
-                if (!r.Success)
-                    SetSettingsStatus("Không lưu được avatar lên server: " + r.Message, isError: true);
-            }
-            catch { }
-        }
-
         // Gọi khi vào Main: lấy avatar từ DB (đồng bộ mọi máy). Nếu DB chưa có mà máy có file local thì đẩy lên.
         private async Task DongBoAvatarTuServerAsync()
         {
@@ -80,12 +67,11 @@ namespace UI
 
                     SetAvatar(bmp);
                 }
-                else if (File.Exists(DuongDanAvatarLocal))
-                {
-                    await DayAvatarLenServerAsync(DuongDanAvatarLocal);
-                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Avatar refresh failed: {ex.GetType().Name}");
+            }
         }
 
         private async Task TaiDanhGiaTuServerAsync()
@@ -104,9 +90,14 @@ namespace UI
                     btnSubmitReview.Enabled = false;
                     btnSubmitReview.Text = "Reviewed";
                     ChonRating(r.ReviewSummary.MyStars);
+                    txtReviewComment.Text = r.ReviewSummary.MyComment ?? string.Empty;
+                    lblReviewPlaceholder.Visible = string.IsNullOrEmpty(txtReviewComment.Text);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Review refresh failed: {ex.GetType().Name}");
+            }
         }
 
         private void TaiAvatarLocalNeuCo()
@@ -118,9 +109,7 @@ namespace UI
                 using var temp = Image.FromStream(fs);
                 SetAvatar(new Bitmap(temp));
             }
-            catch
-            {
-            }
+            catch { }
         }
 
         private void KhoiTaoDieuKhienDoiAvatarSettings()
@@ -275,7 +264,11 @@ namespace UI
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Room/invite refresh failed: {ex.GetType().Name}");
+                SetConnectionStatus(false, "Server connection is unavailable.");
+            }
             finally { _polling = false; }
         }
         private async Task DongBoSauGameAsync()
@@ -291,7 +284,11 @@ namespace UI
                         u.Email, u.Birthday, u.NgayTao, u.LanDangNhapCuoi, u.RacerId);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Profile refresh after game failed: {ex.GetType().Name}");
+                SetConnectionStatus(false, "Server connection is unavailable.");
+            }
         }
 
         private void KhoiChayGame(string mode, string roomId = "")
@@ -309,6 +306,7 @@ namespace UI
                 token: _netClient.Token,
                 host: _netClient.Host,
                 port: _netClient.Port,
+                udpPort: _netClient.UdpPort,
                 useTls: _netClient.UseTls,
                 certificateThumbprintSha256: _netClient.CertificateThumbprintSha256,
                 mode: mode,
@@ -359,7 +357,7 @@ namespace UI
         {
             if (i < 0 || i >= _rooms.Count) return;
             RoomItem r = _rooms[i];
-            if (r.IsRacing || r.CurrentPlayers >= r.MaxPlayers) return;
+            if (!r.IsRacing && r.CurrentPlayers >= r.MaxPlayers) return;
             KhoiChayGame("room", r.RoomCode);
         }
         private void btnJoinRoom1_Click(object? sender, EventArgs e) => JoinRoomIndex(0);
@@ -373,14 +371,6 @@ namespace UI
             public int Stars { get; init; } = 5;
             public string Comment { get; init; } = "";
             public DateTime CreatedAt { get; init; } = DateTime.Now;
-        }
-
-        public sealed class SettingsSaveEventArgs : EventArgs
-        {
-            public string CurrentPassword { get; init; } = string.Empty;
-            public string? NewPassword { get; init; }
-            public string? NewEmail { get; init; }
-            public string? AvatarFilePath { get; init; }
         }
 
         private enum MainTab
@@ -398,7 +388,6 @@ namespace UI
         public event EventHandler? LogoutRequested;
         public event EventHandler? ExitRequested;
         public event EventHandler<GameReviewItem>? ReviewSubmitted;
-        public event EventHandler<SettingsSaveEventArgs>? SettingsSaveRequested;
 
         private readonly NetworkClientService? _netClient;
         private readonly string _username;
@@ -799,26 +788,37 @@ namespace UI
             }
         }
 
-        private void BtnSaveSettings_Click(object? sender, EventArgs e)
+        private async void BtnSaveSettings_Click(object? sender, EventArgs e)
         {
             string oldPass = txtSettingsOldPass.Text;
             string newPass = txtSettingsNewPass.Text;
             string email = txtSettingsEmail.Text.Trim();
+            bool hasNewPass = !string.IsNullOrEmpty(newPass);
+            string currentEmail = string.Equals(_email, "Not set", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : _email.Trim();
+            bool hasEmail = !string.IsNullOrEmpty(email) &&
+                !string.Equals(email, currentEmail, StringComparison.OrdinalIgnoreCase);
+            bool hasAvatar = !string.IsNullOrEmpty(_pendingAvatarPath);
+            bool hasAccountChanges = hasNewPass || hasEmail;
 
-            if (string.IsNullOrEmpty(oldPass))
+            if (!hasNewPass && !hasEmail && !hasAvatar)
+            {
+                SetSettingsStatus("Please enter a new password, email, or choose an avatar.", isError: true);
+                txtSettingsNewPass.Focus();
+                return;
+            }
+
+            if ((hasAccountChanges || hasAvatar) && string.IsNullOrEmpty(oldPass))
             {
                 SetSettingsStatus("Please enter your current password.", isError: true);
                 txtSettingsOldPass.Focus();
                 return;
             }
 
-            bool hasNewPass = !string.IsNullOrEmpty(newPass);
-            bool hasEmail = !string.IsNullOrEmpty(email);
-            bool hasAvatar = !string.IsNullOrEmpty(_pendingAvatarPath);
-
-            if (!hasNewPass && !hasEmail && !hasAvatar)
+            if (hasNewPass && string.Equals(newPass, oldPass, StringComparison.Ordinal))
             {
-                SetSettingsStatus("Please enter a new password, email, or choose an avatar.", isError: true);
+                SetSettingsStatus("New password must be different from the current password.", isError: true);
                 txtSettingsNewPass.Focus();
                 return;
             }
@@ -862,33 +862,115 @@ namespace UI
                 return;
             }
 
-            if (hasEmail)
+            btnSaveSettings.Enabled = false;
+            bool accountSaved = false;
+            try
             {
-                _email = email;
-                lblEmailValue.Text = _email;
+                if (hasAccountChanges)
+                {
+                    if (_netClient == null)
+                    {
+                        SetSettingsStatus("Account settings cannot be saved because the server session is unavailable.", isError: true);
+                        return;
+                    }
+
+                    ResponsePacket response = await _netClient.UpdateAccountSettingsAsync(
+                        oldPass,
+                        hasNewPass ? newPass : null,
+                        hasEmail ? email : null);
+                    if (IsDisposed)
+                        return;
+                    if (!response.Success)
+                    {
+                        SetSettingsStatus(response.Message, isError: true);
+                        return;
+                    }
+
+                    if (response.User != null)
+                    {
+                        UserInfoDto user = response.User;
+                        UpdatePlayerStats(
+                            user.Username,
+                            string.IsNullOrWhiteSpace(user.FullName) ? _fullName : user.FullName,
+                            user.Coins,
+                            user.Email,
+                            user.Birthday,
+                            user.NgayTao,
+                            user.LanDangNhapCuoi,
+                            user.RacerId);
+                    }
+                    accountSaved = true;
+                    txtSettingsOldPass.Clear();
+                    txtSettingsNewPass.Clear();
+                    txtSettingsConfirmPass.Clear();
+                }
+
+                if (hasAvatar)
+                {
+                    if (_netClient == null)
+                    {
+                        SetSettingsStatus(accountSaved
+                            ? "Account settings were saved, but the avatar could not be uploaded because the server session is unavailable."
+                            : "The avatar could not be uploaded because the server session is unavailable.", isError: true);
+                        return;
+                    }
+
+                    string imagePath = _pendingAvatarPath!;
+                    byte[]? imageData = AvatarHelper.ToJpeg128(imagePath);
+                    if (imageData == null)
+                    {
+                        SetSettingsStatus(accountSaved
+                            ? "Account settings were saved, but the avatar image could not be processed."
+                            : "The avatar image could not be processed.", isError: true);
+                        return;
+                    }
+
+                    string avatarPassword = hasNewPass ? newPass : oldPass;
+                    ResponsePacket avatarResponse = await _netClient.UploadAvatarAsync(imageData, avatarPassword);
+                    if (IsDisposed)
+                        return;
+                    if (!avatarResponse.Success)
+                    {
+                        SetSettingsStatus(accountSaved
+                            ? $"Account settings were saved, but the avatar was not uploaded: {avatarResponse.Message}"
+                            : $"The avatar was not uploaded: {avatarResponse.Message}", isError: true);
+                        return;
+                    }
+
+                    ApDungVaLuuAvatar(imagePath);
+                    _pendingAvatarPath = null;
+                }
+
+                txtSettingsOldPass.Clear();
+                txtSettingsNewPass.Clear();
+                txtSettingsConfirmPass.Clear();
+                SetSettingsStatus("Settings updated successfully.", isError: false);
             }
-
-            string? savedAvatarPath = null;
-            if (!string.IsNullOrEmpty(_pendingAvatarPath))
+            catch (SocketException ex)
             {
-                ApDungVaLuuAvatar(_pendingAvatarPath);
-                savedAvatarPath = DuongDanAvatarLocal;
-                _ = DayAvatarLenServerAsync(savedAvatarPath);
-                _pendingAvatarPath = null;
+                System.Diagnostics.Trace.TraceWarning($"Settings save socket failure: {ex.SocketErrorCode}");
+                SetSettingsStatus("Could not connect to the server while saving settings.", isError: true);
             }
-
-            txtSettingsOldPass.Clear();
-            txtSettingsNewPass.Clear();
-            txtSettingsConfirmPass.Clear();
-            SetSettingsStatus("Settings updated successfully.", isError: false);
-
-            SettingsSaveRequested?.Invoke(this, new SettingsSaveEventArgs
+            catch (IOException ex)
             {
-                CurrentPassword = oldPass,
-                NewPassword = hasNewPass ? newPass : null,
-                NewEmail = hasEmail ? email : null,
-                AvatarFilePath = savedAvatarPath
-            });
+                System.Diagnostics.Trace.TraceWarning($"Settings save I/O failure: {ex.GetType().Name}");
+                SetSettingsStatus("Settings could not be saved because the connection or image file failed.", isError: true);
+            }
+            catch (AuthenticationException ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Settings save TLS failure: {ex.GetType().Name}");
+                SetSettingsStatus("The secure server connection could not be verified.", isError: true);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Settings save failed: {ex.GetType().Name}");
+                SetSettingsStatus("Settings could not be saved. Please try again.", isError: true);
+            }
+            finally
+            {
+                if (!IsDisposed && !Disposing)
+                    btnSaveSettings.Enabled = true;
+            }
         }
 
         public void SetSettingsStatus(string message, bool isError)
@@ -1098,9 +1180,8 @@ namespace UI
             dlg.ShowDialog(this);
         }
 
-        private void OnConnectionStatusChanged(bool isConnected, string statusText)
-        {
-        }
+        private void OnConnectionStatusChanged(bool isConnected, string statusText) =>
+            SetConnectionStatus(isConnected, statusText);
 
         private async void Main_Shown(object? sender, EventArgs e)
         {
@@ -1132,18 +1213,35 @@ namespace UI
                 await DongBoAvatarTuServerAsync();
                 await TaiDanhGiaTuServerAsync();
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Trace.TraceWarning($"Main profile initialization failed: {ex.GetType().Name}");
+                SetConnectionStatus(false, "Server connection is unavailable.");
             }
         }
 
         public void SetConnectionStatus(string statusText, Color color)
         {
-            if (!IsDisposed && !lblConnectionStatus.IsDisposed)
+            SetConnectionStatus(false, statusText, color);
+        }
+
+        private void SetConnectionStatus(bool isConnected, string statusText, Color? color = null)
+        {
+            if (IsDisposed || lblConnectionStatus.IsDisposed)
+                return;
+
+            if (InvokeRequired)
             {
-                lblConnectionStatus.Visible = false;
-                lblConnectionStatus.Text = "";
+                BeginInvoke(new Action(() => SetConnectionStatus(isConnected, statusText, color)));
+                return;
             }
+
+            lblConnectionStatus.Visible = !isConnected;
+            lblConnectionStatus.Text = isConnected
+                ? string.Empty
+                : "Server connection lost. Check your network and sign in again.";
+            if (color.HasValue)
+                lblConnectionStatus.ForeColor = color.Value;
         }
 
         private void NapDuLieuMau()
@@ -1356,6 +1454,7 @@ namespace UI
 
                 bool isFull = room.CurrentPlayers >= room.MaxPlayers;
                 bool canJoin = !room.IsRacing && !isFull;
+                bool canSpectate = room.IsRacing;
 
                 var btn = new Button
                 {
@@ -1364,10 +1463,10 @@ namespace UI
                     FlatStyle = FlatStyle.Flat,
                     Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                     ForeColor = Color.White,
-                    BackColor = canJoin ? Color.FromArgb(155, 17, 24) : Color.Gray,
-                    Text = room.IsRacing ? "Racing" : isFull ? "Full" : "Join",
-                    Enabled = canJoin,
-                    Cursor = canJoin ? Cursors.Hand : Cursors.Default
+                    BackColor = canJoin || canSpectate ? Color.FromArgb(155, 17, 24) : Color.Gray,
+                    Text = canSpectate ? "Spectate" : isFull ? "Full" : "Join",
+                    Enabled = canJoin || canSpectate,
+                    Cursor = canJoin || canSpectate ? Cursors.Hand : Cursors.Default
                 };
                 btn.FlatAppearance.BorderSize = 0;
                 btn.Click += (_, _) => JoinRoomIndex(idx);

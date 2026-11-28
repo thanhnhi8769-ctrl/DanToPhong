@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DanToPhong.Protocol.Smoke" />
+    <InternalsVisibleTo Include="T2T8ProtocolTest" />
   </ItemGroup>
 
   <ItemGroup>

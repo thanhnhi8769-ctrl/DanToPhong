@@ -8,7 +8,7 @@ namespace DanToPhong.Server
 {
     internal static class TcpGameRoomRegistry
     {
-        private const int DefaultMaxPlayers = 6;
+        private const int DefaultMaxPlayers = 4;
         private const double TickSeconds = 0.05;
         private const double InputTimeoutSeconds = 0.5;
         private const double DisconnectGraceSeconds = 120;
@@ -35,7 +35,7 @@ namespace DanToPhong.Server
                     code = new string(bytes.Select(value => RoomAlphabet[value % RoomAlphabet.Length]).ToArray());
                 } while (Rooms.ContainsKey(code));
 
-                int maxPlayers = Math.Clamp(request.MaxPlayers ?? DefaultMaxPlayers, 2, 8);
+                int maxPlayers = Math.Clamp(request.MaxPlayers ?? DefaultMaxPlayers, 2, 4);
                 var room = new GameRoom(code, userId, username, maxPlayers, track);
                 Rooms.Add(code, room);
                 Membership[userId] = code;
@@ -43,6 +43,70 @@ namespace DanToPhong.Server
                 return ToResponse(room, userId, "Room created.");
             }
         }
+
+            public static ResponsePacket ReportScene(int userId, string? sceneName, bool isReady)
+            {
+                string scene = (sceneName ?? string.Empty).Trim();
+                if (scene.Length is 0 or > 64 || scene.Any(ch => !char.IsLetterOrDigit(ch) && ch != ' ' && ch != '_' && ch != '-'))
+                    return Failure("Invalid scene name.");
+
+                lock (Gate)
+                {
+                    if (!TryGetMemberRoom(userId, out GameRoom? room) ||
+                        !room.Players.TryGetValue(userId, out GamePlayer? player))
+                        return Failure("Join a room before reporting scene state.");
+
+                    player.SceneName = scene;
+                    player.SelectionConfirmed = isReady &&
+                        string.Equals(scene, "SelectScene", StringComparison.OrdinalIgnoreCase);
+                    player.LastSceneReportAt = DateTime.UtcNow;
+                    TryResetRoomForLobby(room);
+                    return ToResponse(room, userId, "Scene state updated.");
+                }
+            }
+
+            public static bool CanInvite(int inviterUserId, int targetUserId, string roomCode)
+            {
+                lock (Gate)
+                {
+                    return TryGetMemberRoom(inviterUserId, out GameRoom? room) &&
+                        string.Equals(room.Code, NormalizeCode(roomCode), StringComparison.OrdinalIgnoreCase) &&
+                        !room.IsRacing &&
+                        room.Players.Count < room.MaxPlayers &&
+                        !room.Players.ContainsKey(targetUserId);
+                }
+            }
+
+            public static bool AreRoommates(int firstUserId, int secondUserId)
+            {
+                lock (Gate)
+                {
+                    return TryGetMemberRoom(firstUserId, out GameRoom? firstRoom) &&
+                        TryGetMemberRoom(secondUserId, out GameRoom? secondRoom) &&
+                        ReferenceEquals(firstRoom, secondRoom);
+                }
+            }
+
+            public static List<RoomDto> ListRooms()
+            {
+                lock (Gate)
+                {
+                    return Rooms.Values
+                        .OrderBy(room => room.IsRacing)
+                        .ThenBy(room => room.Code, StringComparer.OrdinalIgnoreCase)
+                        .Select(room => new RoomDto
+                        {
+                            Code = room.Code,
+                            HostName = room.Players.TryGetValue(room.HostUserId, out GamePlayer? host)
+                                ? host.Username
+                                : "Unknown",
+                            CurrentPlayers = room.Players.Count,
+                            MaxPlayers = room.MaxPlayers,
+                            IsRacing = room.IsRacing
+                        })
+                        .ToList();
+                }
+            }
 
         public static ResponsePacket Join(int userId, string username, string roomCode)
         {
@@ -74,6 +138,32 @@ namespace DanToPhong.Server
             }
         }
 
+        public static ResponsePacket ReturnToLobby(int userId)
+        {
+            lock (Gate)
+            {
+                if (!TryGetMemberRoom(userId, out GameRoom? room) ||
+                    !room.Players.TryGetValue(userId, out GamePlayer? player))
+                    return Failure("Join a room before returning to the lobby.");
+
+                if (!room.IsRacing)
+                    return ToResponse(room, userId, "Already in the room lobby.");
+
+                if (player.ReturnedToLobby)
+                    return ToResponse(room, userId, "Waiting for all room players to return to the lobby.");
+
+                player.ReturnedToLobby = true;
+                player.Throttle = 0f;
+                player.Steer = 0f;
+                player.Brake = true;
+                RecordEvent(room, "PLAYER_RETURNED_TO_LOBBY", userId, player.Username, player.NextCheckpoint);
+                TryResetRoomForLobby(room);
+                return ToResponse(room, userId, room.IsRacing
+                    ? "Waiting for all room players to return to the lobby."
+                    : "Room is ready for another match.");
+            }
+        }
+
         public static ResponsePacket Start(int userId, RequestPacket request)
         {
             lock (Gate)
@@ -86,6 +176,8 @@ namespace DanToPhong.Server
                     return Failure("At least two players are required.");
                 if (room.IsRacing)
                     return Failure("The game has already started.");
+                if (room.Players.Values.Any(player => !IsReady(player)))
+                    return Failure("All room players must enter Select Scene and confirm their selections before starting.");
 
                 if (!string.IsNullOrWhiteSpace(request.MapName))
                 {
@@ -160,6 +252,60 @@ namespace DanToPhong.Server
 
                 Simulate(room, player.LastInputAt);
                 return ToResponse(room, userId, "Snapshot.");
+            }
+        }
+
+        public static bool SubmitUdpInput(
+            int userId,
+            uint sequence,
+            float throttle,
+            float steer,
+            bool brake,
+            int vehicleIndex)
+        {
+            lock (Gate)
+            {
+                if (!TryGetMemberRoom(userId, out GameRoom? room) || !room.IsRacing ||
+                    !room.Players.TryGetValue(userId, out GamePlayer? player) ||
+                    room.WinnerUserId.HasValue || player.IsEliminated || player.DisconnectedAt.HasValue ||
+                    sequence <= player.LastClientTick ||
+                    !float.IsFinite(throttle) || !float.IsFinite(steer) ||
+                    Math.Abs(throttle) > 1f || Math.Abs(steer) > 1f)
+                    return false;
+
+                DateTime now = DateTime.UtcNow;
+                player.Throttle = throttle;
+                player.Steer = steer;
+                player.Brake = brake;
+                player.LastInputAt = now;
+                player.LastClientTick = sequence;
+                player.VehicleIndex = Math.Clamp(vehicleIndex, 0, 100);
+                Simulate(room, now);
+                return true;
+            }
+        }
+
+        public static bool TryGetNextUdpSequence(int userId, out uint nextSequence)
+        {
+            lock (Gate)
+            {
+                if (!TryGetMemberRoom(userId, out GameRoom? room) || !room.IsRacing ||
+                    !room.Players.TryGetValue(userId, out GamePlayer? player) ||
+                    player.DisconnectedAt.HasValue || player.IsEliminated || room.WinnerUserId.HasValue)
+                {
+                    nextSequence = 0;
+                    return false;
+                }
+
+                long next = Math.Max(1L, player.LastClientTick + 1);
+                if (next > uint.MaxValue)
+                {
+                    nextSequence = 0;
+                    return false;
+                }
+
+                nextSequence = (uint)next;
+                return true;
             }
         }
 
@@ -372,6 +518,46 @@ namespace DanToPhong.Server
             };
         }
 
+        private static bool IsReady(GamePlayer player) =>
+            string.Equals(player.SceneName, "SelectScene", StringComparison.OrdinalIgnoreCase) &&
+            player.SelectionConfirmed &&
+            DateTime.UtcNow - player.LastSceneReportAt <= TimeSpan.FromSeconds(8);
+
+        private static void TryResetRoomForLobby(GameRoom room)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (!room.IsRacing || room.Players.Count == 0 ||
+                room.Players.Values.Any(player =>
+                    !player.ReturnedToLobby ||
+                    !string.Equals(player.SceneName, "LobbyScene", StringComparison.OrdinalIgnoreCase) ||
+                    now - player.LastSceneReportAt > TimeSpan.FromSeconds(8)))
+                return;
+
+            room.IsRacing = false;
+            room.MatchId = Guid.NewGuid();
+            room.WinnerUserId = null;
+            room.WinnerUsername = null;
+            room.WinnerRewardInProgress = false;
+            room.WinnerRewarded = false;
+            room.LastSimulationAt = now;
+            foreach (GamePlayer player in room.Players.Values)
+            {
+                player.ReturnedToLobby = false;
+                player.SelectionConfirmed = false;
+                player.Initialized = false;
+                player.Speed = 0f;
+                player.Throttle = 0f;
+                player.Steer = 0f;
+                player.Brake = false;
+                player.LastClientTick = -1;
+                player.NextCheckpoint = 0;
+                player.IsEliminated = false;
+                player.IsFinished = false;
+                player.DisconnectedAt = null;
+            }
+            RecordEvent(room, "ROOM_RESET", 0, "SYSTEM", 0);
+        }
+
         private static void Simulate(GameRoom room, DateTime now)
         {
             if (!room.IsRacing || room.WinnerUserId.HasValue)
@@ -483,6 +669,19 @@ namespace DanToPhong.Server
         {
             long serverTick = ++room.ServerTick;
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            List<RoomPlayerDto> roomPlayers = room.Players.Values
+                .OrderBy(player => player.SpawnIndex)
+                .Select(player => new RoomPlayerDto
+                {
+                    UserId = player.UserId,
+                    Username = player.Username,
+                    SceneName = player.SceneName ?? string.Empty,
+                    IsHost = room.HostUserId == player.UserId,
+                    IsReady = IsReady(player),
+                    IsReturnedToLobby = player.ReturnedToLobby
+                })
+                .ToList();
+            int readyPlayerCount = roomPlayers.Count(player => player.IsReady);
             return new ResponsePacket
             {
                 Success = true,
@@ -495,7 +694,16 @@ namespace DanToPhong.Server
                 SpawnIndex = room.Players.TryGetValue(userId, out GamePlayer? currentPlayer) ? currentPlayer.SpawnIndex : 0,
                 IsHost = room.HostUserId == userId,
                 IsSpectator = room.Spectators.Contains(userId),
+                IsReturnedToLobby = room.Players.TryGetValue(userId, out GamePlayer? roomPlayer) &&
+                    roomPlayer.ReturnedToLobby,
                 IsRacing = room.IsRacing,
+                CanStart = room.HostUserId == userId &&
+                    room.Players.Count >= 2 &&
+                    readyPlayerCount == room.Players.Count &&
+                    !room.IsRacing,
+                ReadyPlayerCount = readyPlayerCount,
+                UnreadyPlayerCount = room.Players.Count - readyPlayerCount,
+                RoomPlayers = roomPlayers,
                 GameFinished = room.WinnerUserId.HasValue,
                 WinnerUserId = room.WinnerUserId,
                 WinnerUsername = room.WinnerUsername,
@@ -527,7 +735,8 @@ namespace DanToPhong.Server
                         IsDisconnected = player.DisconnectedAt.HasValue,
                         ServerTimestampMs = timestamp
                     })
-                    .ToList()
+                    .ToList(),
+                GameEvent = room.Events.Count > 0 ? room.Events[room.Events.Count - 1] : null
             };
         }
 
@@ -540,6 +749,8 @@ namespace DanToPhong.Server
             if (!Rooms.TryGetValue(roomCode, out GameRoom? room))
                 return;
 
+            if (room.Players.TryGetValue(userId, out GamePlayer? leavingPlayer))
+                RecordEvent(room, "PLAYER_LEFT", userId, leavingPlayer.Username, leavingPlayer.NextCheckpoint);
             room.Players.Remove(userId);
             room.Spectators.Remove(userId);
             if (room.Players.Count == 0)
@@ -566,8 +777,7 @@ namespace DanToPhong.Server
 
         private static string SanitizeMap(string? mapName)
         {
-            string value = (mapName ?? "game").Trim();
-            return value.Length is > 0 and <= 50 ? value : "game";
+            return MapNames.Normalize(mapName?.Trim());
         }
 
         private static bool IsFinite(float? value) => value.HasValue && !float.IsNaN(value.Value) && !float.IsInfinity(value.Value);
@@ -608,7 +818,7 @@ namespace DanToPhong.Server
             public int HostUserId { get; set; }
             public int MaxPlayers { get; }
             public RaceTrackCatalog.RaceTrack Track { get; set; }
-            public Guid MatchId { get; } = Guid.NewGuid();
+            public Guid MatchId { get; set; } = Guid.NewGuid();
             public Dictionary<int, GamePlayer> Players { get; } = new();
             public HashSet<int> Spectators { get; } = new();
             public List<RoomChatMessageDto> ChatMessages { get; } = new();
@@ -649,11 +859,15 @@ namespace DanToPhong.Server
             public float Steer { get; set; }
             public bool Brake { get; set; }
             public DateTime LastInputAt { get; set; }
-            public int LastClientTick { get; set; } = -1;
+            public string? SceneName { get; set; }
+            public DateTime LastSceneReportAt { get; set; } = DateTime.MinValue;
+            public bool SelectionConfirmed { get; set; }
+            public long LastClientTick { get; set; } = -1;
             public int NextCheckpoint { get; set; }
             public bool IsEliminated { get; set; }
             public bool IsFinished { get; set; }
             public DateTime? DisconnectedAt { get; set; }
+            public bool ReturnedToLobby { get; set; }
         }
     }
 }

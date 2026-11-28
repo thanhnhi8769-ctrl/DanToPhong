@@ -1,5 +1,46 @@
 # Work log
 
+## 2026-11-28 — Fix and verify the SelectedMap database migration
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Correct the startup migration failure | The legacy constraint-drop SQL used `EXEC('...'+QUOTENAME(...))`, which SQL Server rejected; the initializer caught and logged that SQL error, then continued without normalizing existing values. Replaced it with `sp_executesql` and made the map normalization a required startup step so migration errors fail explicitly. | Isolated test-server startup exposed `[DB] Setup warning: Incorrect syntax near 'QUOTENAME'`; Server Release build |
+| Add a DB-backed regression check | The integration harness now sets all legacy aliases plus an unsupported map on temporary accounts, restarts the server, and verifies canonical values, no unsupported values remain, and the DB default is `game1`. All assertions passed against `DanToPhongDB_Test`; temporary accounts were removed. | `.\tools\run-t2t8-protocol-test.ps1 -Mode Integration`; [integration log](evidence/local-protocol-integration-20261128-135041.log) |
+
+## 2026-11-28 — GĐ1 scene names and gameplay transitions
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Centralize and migrate race-map names | Added the `SceneNames` constants used by Unity flows and a Protocol `MapNames` allowlist for `game1`, `game2`, and `game3`. Renamed the three active scene assets, updated Build Settings, SelectScene map entries, and server track catalog; moved the legacy `game` scene out of `Assets` into `_Archive`. The idempotent DB initializer now defaults to `game1`, maps the former spaced names to their matching maps, and normalizes unsupported values to the default. | `dotnet build UI\DanToPhong.Server\DanToPhong.Server.csproj -c Release`; catalog JSON parse; Protocol smoke |
+| Fix known scene/gameplay issues | Result-panel lobby buttons now return through the room-preserving flow rather than quitting; lobby music restarts when returning to a lobby scene; added the missing `Sea_Plane` tag; steering input can recover from a near-zero-speed stop. Existing WASD reads were already present and were left unchanged. | `dotnet build Assembly-CSharp.csproj -c Release` |
+| Stage validation | Server, Protocol smoke, and Launcher Release builds succeeded. Unity C# Release build succeeded with 7 existing warnings. Protocol smoke passed including the new strict three-map allowlist check. The SQL migration was compiled but not executed; GUI playthroughs and a native Unity player build remain unverified. No AWS, commit, or push was run. | `dotnet build` for Server, Protocol.Smoke, `Assembly-CSharp.csproj`, and `UI.csproj`; `dotnet run --project UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-build` |
+
+## 2026-11-28 — Launcher Get Code connectivity diagnosis
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Correct packaged endpoint precedence and connection diagnostics | Found stale user-scope endpoint/TLS environment overrides were taking precedence over the packaged `server.json`, causing the Launcher to connect to the wrong host or use plaintext against the TLS listener. The client now prefers explicitly configured JSON values and uses environment variables only as fallbacks; transport failures retain diagnostic detail and are labeled as connection errors in Register/Forgot Password instead of mail-delivery errors. No machine environment values were changed. | Server and Launcher Release builds; protocol smoke |
+| Refresh the friend package | Rebuilt `artifacts\DanToPhong-friends-win-x64.zip` with the configured DNS endpoint, TCP 9000, UDP 9001, TLS enabled, and SHA-256 pin. Verified the extracted archive contains the Launcher, Unity player, and valid client JSON. | `.\scripts\package-friends.ps1 ... -OverwriteExisting` |
+| Diagnose the live AWS endpoint and SMTP path | RDS became available; EC2 is running/healthy with the service active and TCP 9000 listening. The packaged endpoint's Elastic IP is attached to an RDS network interface, not EC2; TCP 9000 to that endpoint times out. EC2's current DNS does not match the deployed certificate SAN. SMTP credentials are configured and outbound TLS 465 succeeds, but no email was sent. Free Tier API had no public-IPv4 usage record; cost headroom is unverified. No SG or EIP changes were made. | `.\scripts\aws-test-helper.ps1 -Action Status`; strict-host-key SSH; read-only TLS/SMTP probes; [sanitized diagnosis](evidence/aws-mail-connectivity-diagnosis-20261128.log) |
+
+## 2026-11-27 — Persist account settings through the server
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Replace the Settings form's false success path | Added authenticated `CAPNHATCAIDAT`: verify current password, persist email/password updates in one SQL transaction, rotate/revoke tokens on password change, and close other active sessions. Launcher now awaits the server result, updates profile state only after success, rotates its token, disables the save button while pending, and reports failures. Avatar upload is awaited and reports partial failure explicitly. | Server/Launcher Release builds; protocol smoke |
+| Add a focused account-settings integration check | Wrong current password was rejected; updated email/password persisted; current session received a replacement token, prior token was rejected, and new credentials logged in successfully. Temporary account/DB rows were removed. | `.\tools\run-t2t8-protocol-test.ps1 -Mode Integration`; [log](evidence/local-protocol-integration-20261127-212721.log) |
+| Refresh latest metrics and evidence references | Updated report and evidence index to the latest integration run (T3 5.6/1.0 ms, T4 6.8 ms, TC10 p95 3.0/max 9.8 ms). UI GUI and Internet behavior remain unverified. | [Server build](evidence/local-settings-build-server-20261127-212653.log); [Launcher build](evidence/local-settings-build-ui-20261127-212653.log); `git diff --check` |
+
+## 2026-11-27 — Protocol integration and evidence refresh
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Re-run protocol smoke | Passed TCP framing, malformed/oversized/truncated frame handling, event/snapshot ordering, forged identity rejection, mailbox backpressure, account limits, certificate pin validation, and synthetic SMTP retry behavior. Captured clean output. | `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-build`; [log](evidence/local-protocol-smoke-20261127-2026.log) |
+| Extend and run local protocol integration harness | Against only `DanToPhongDB_Test` and port 19000, passed OTP wrong/expired/single-use/attempt lockout and login limiter state; two-client room/snapshot/input/spectate; reset/reconnect; server restart semantics; 50 anonymous clients with slow sender; malformed and oversized frames. Temporary rows/accounts were removed. T3 PONG A/B 2.4/1.1 ms, T4 chat 7.3 ms, TC10 p95 3.6 ms/max 10.6 ms. These are protocol/loopback results, not GUI, SMTP delivery, or Internet evidence. | `.\tools\run-t2t8-protocol-test.ps1`; [log](evidence/local-protocol-integration-20261127-202549.log) |
+| Verify Release builds | Restored the generated Unity project assets, then the Unity-generated solution command, Server and WinForms Launcher all built with 0 errors. Unity reported 7 `CS8632`/`CS0649` warnings and outputs under `Temp\bin\Debug`; Server 0 warnings; Launcher 6 generated-Designer `CS8669` warnings. | `dotnet restore .\DanToPhong.slnx --disable-parallel`; three `dotnet build ... -c Release --no-restore --no-incremental` commands; [build log](evidence/local-release-build-20261127-2030.log) |
+| Align test status and manual evidence plan | Promoted TC03/TC07 from BLOCKED to PARTIAL based on protocol coverage; clarified TC04 DB-state vs Launcher/email coverage and TC10 bounded anonymous scope; refreshed T2–T8 timings and manual screenshot checklist. Removed one unreferenced duplicate integration log. No GUI/network PASS inferred. | Cross-check `BAO_CAO_DO_AN_NHAP_MON_MANG.md`, `docs/evidence/README.md`, requirements matrices and screenshot checklist |
+| AWS and safety | No AWS mutation, security-group edit, GUI action, push or commit. | No AWS mutating command invoked |
+
 ## 2026-11-27 — TCP-only cleanup and verification
 
 | Work | Result | Commands / checks |
@@ -284,5 +325,40 @@ No AWS mutation, Git push, or Git identity/configuration change was performed.
 
 | Work | Result | Commands / checks |
 |---|---|---|
-| Verify report links and repository hygiene | Local Markdown paths/anchors pass across 17 documents; high-confidence scan of 250 text files found no credentials or private-key/certificate files; no tracked Photon references. | PowerShell Markdown path/anchor check; credential/key scan; `git grep -in photon` |
+| Verify report links and repository hygiene | Local Markdown paths/anchors pass across 17 documents; high-confidence scan of 250 text files found no credentials or private-key/certificate files; tracked-source networking dependency scan was clean. | PowerShell Markdown path/anchor check; credential/key scan; tracked-source string scan |
 | Verify test cleanup and patch formatting | No Server/test harness is running; ports 9000 and 19000 are clear; `git diff --check` passes. | `Get-CimInstance Win32_Process`; `Get-NetTCPConnection -State Listen -LocalPort 9000,19000`; `git diff --check` |
+
+## 2026-11-27 — AWS status refresh
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Refresh AWS status without mutation | Read-only credentials work in `us-east-1`; EC2 (`t3.micro`) and RDS are stopped; no public-wide ingress detected on TCP 9000/1433. Internet test not run; no start/stop or rule change. | `.\scripts\aws-test-helper.ps1 -Action Status`; sanitized snapshot in `docs/evidence/aws-status-readonly-20261127-2005.log` |
+| Reassess remaining test cases | Reused current TC05/T2–T8/TC10 logs; TC02/TC03/TC07 remain BLOCKED and TC04/T2–T8 remain PARTIAL because GUI/two-network interaction is still required. No unsupported PASS claims added. | `docs/evidence/README.md`; `BAO_CAO_DO_AN_NHAP_MON_MANG.md` |
+
+## 2026-11-27 - Hybrid UDP player build and validation
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify hybrid integration evidence | Reused the latest DB-backed run: four authenticated racers submitted sequenced HMAC UDP movement and all four server positions appeared in TCP snapshots; spectator, OTP state, reconnect/restart, chat and 50-client bounded framing checks passed. TC10 p95 3.4 ms / max 8.0 ms. GUI, UDP impairment and Internet checks remain unverified. | `local-protocol-integration-20261127-214844.log` |
+| Build Unity player and solution | Unity Windows x64 player build succeeded. Restored generated Unity project assets, then Release solution build succeeded with 0 errors and 7 Unity warnings (`CS8632`/`CS0649`). Server and Launcher Release builds succeeded with 0 warnings/errors. | `local-unity-hybrid-build-20261127-2200.log`; `local-unity-solution-restore-20261127-2210.log`; `local-unity-solution-release-build-20261127-2210.log`; `local-hybrid-release-build-20261127-2205.log` |
+| Validate deployment and packaging scripts without AWS | PowerShell parser checks passed for both helper scripts; `bash -n` passed for `setup-ec2.sh`. No AWS CLI was run. No friend ZIP was created because a real server host and verified SHA-256 pin are not available in shared configuration. | PowerShell AST parse; `bash -n`; no AWS actions |
+| Refresh report and verify cleanup | Updated report/evidence references to the latest integration/build results. No test/server listener remains on 9000, 9001, 19000 or 19001. | `docs/evidence/README.md`; `BAO_CAO_DO_AN_NHAP_MON_MANG.md`; `Get-NetTCPConnection`; final `git diff --check` |
+
+## 2026-11-28 - Fixing live AWS Get Code connectivity
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Correct the pinned endpoint | After explicit approval, used the separate EC2 EIP; the existing RDS EIP and Security Groups were not changed. Rotated the server certificate to match the EC2 DNS SAN. Fixed the rotation script's readiness check to wait for TCP 9000 before committing. | `bash -n deploy/aws/rotate-tls-certificate.sh`; remote systemd/listener checks |
+| Verify one live Get Code request | TLS hostname and SHA-256 pin validation passed. One request before the Server redeployment was accepted; the user confirmed receipt. No duplicate email, recipient, username, OTP, SMTP credential, or connection string was recorded. | `scripts/aws-test-helper.ps1 -Action Pin`; TLS-framed `YEUCAUMADANGKY` request; user confirmed mail receipt |
+| Deploy current Server and refresh package | Published Server Release for `linux-x64`, deployed to the existing systemd path with the previous app directory retained for rollback. Existing RDS reported `available`; DB connection, active service, TCP 9000 and UDP 9001 listeners verified. Rebuilt the friends ZIP with the verified TLS endpoint/pin and checked Launcher, Unity player, config and archive checksum. | `dotnet publish ... -c Release -r linux-x64 --self-contained false`; `scripts/package-friends.ps1 -OverwriteExisting`; live Pin check; `artifacts/DanToPhong-friends-win-x64.zip` |
+| Run and record local smoke | Protocol/framing, pin validator and bounded OTP queue smoke passed; simulated SMTP 451/550 retry then success. At that point AWS was running after the approved deploy; the later ordered shutdown stopped EC2 and RDS. | `dotnet run --project UI/DanToPhong.Protocol.Smoke/DanToPhong.Protocol.Smoke.csproj -c Release --no-restore`; `docs/evidence/local-mail-fix-protocol-smoke-20261128-final.log`; `BAO_CAO_DO_AN_NHAP_MON_MANG.md`; `docs/evidence/README.md` |
+
+## 2026-11-28 - Lobby readiness and final local validation
+
+| Work | Result | Commands / checks |
+|---|---|---|
+| Verify account safeguards and multiplayer protocols | DB-backed integration passed OTP wrong/expired/lockout, recovery email mismatch, password reuse rejection, password-protected avatar upload/persistence, four-racer UDP/TCP snapshots, spectator, reconnect/restart, chat and bounded 50-client framing. GUI and cross-network behavior remain unverified. | `.\tools\run-t2t8-protocol-test.ps1 -Mode Integration`; `docs/evidence/local-protocol-integration-20261128-043514.log` |
+| Build Release and smoke room readiness | Unity-generated solution, Server and Launcher Release builds passed with 0 warnings/errors. Protocol smoke passed, including four-player capacity and blocking Start until every member reports Lobby readiness. | `dotnet build .\DanToPhong.slnx -c Release --no-restore`; Server/Launcher Release builds; `dotnet run --project .\UI\DanToPhong.Protocol.Smoke\DanToPhong.Protocol.Smoke.csproj -c Release --no-restore`; `docs/evidence/local-*-20261128.log` |
+| Rebuild Windows player and friend ZIP | Unity Windows x64 player rebuilt from current Build Settings; 496-entry ZIP repackaged with the self-contained Launcher and previously verified pinned endpoint config. Archive structure/config were checked; live endpoint was not contacted because AWS is stopped. Package publish had six generated Designer nullable-context warnings, 0 errors. | Unity batch build `BuildWindowsPlayer.BuildWindows64Release`; `scripts/package-friends.ps1` with host/pin from the existing package config and `-OverwriteExisting`; `docs/evidence/local-unity-player-build-20261128.log`; `docs/evidence/local-friends-package-20261128.log` |
+| Confirm AWS and test cleanup | Read-only status showed existing EC2 and RDS stopped; no public-wide ingress detected on TCP 9000/UDP 9001/TCP 1433. No AWS resources/rules changed. Ports 9000, 19000 and 19001 are clear. | `.\scripts\aws-test-helper.ps1 -Action Status`; `Get-NetTCPConnection -State Listen -LocalPort 9000,19000,19001` |
+| Update handoff docs | Report/evidence index now point to current integration/build evidence, note current AWS stopped state, and distinguish protocol checks from required GUI checks. Added manual Lobby Host/Guest readiness captures. | `BAO_CAO_DO_AN_NHAP_MON_MANG.md`; `docs/evidence/README.md`; `docs/evidence/screenshot-checklist.md` |

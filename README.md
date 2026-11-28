@@ -28,15 +28,17 @@ WinForms Launcher ── TCP/TLS 9000 ── .NET Server ── SQL Server / RDS
         └── launches Unity
 
 Unity Solo: local physics
-Unity multiplayer: TCP/TLS 9000 input requests + dedicated event/snapshot stream
+Unity multiplayer: TCP/TLS 9000 for auth/events/snapshots + UDP 9000 for movement input
 ```
 
 The TCP framing is a 4-byte big-endian length followed by UTF-8 JSON. The
 Launcher/server protocol supports account, OTP and application data. A partial
-room/gameplay path implements room membership, 15–20 Hz input requests,
-simplified server-side kinematics, configured checkpoint/finish gate checks,
-and an authenticated TCP stream for ordered events and nominal 20 Hz
-snapshots. The server has in-memory spectate/reconnect paths (120-second
+room/gameplay path implements room membership, 20 Hz HMAC-authenticated UDP
+movement input, simplified server-side kinematics, configured checkpoint/
+finish gate checks, and an authenticated TCP/TLS stream for ordered events
+and nominal 20 Hz snapshots. The UDP key is established over TCP/TLS, while
+state snapshots remain reliable and sequenced on TCP. The server has in-memory
+spectate/reconnect paths (120-second
 disconnect grace) and server-side winner rewards, but these paths have not
 been verified in a live match. The model is not full Unity vehicle/track
 physics. A client may request its own elimination, but that request no longer
@@ -47,9 +49,12 @@ process-local and is lost on server restart. See
 [docs/protocol.md](docs/protocol.md) and
 [docs/requirements-checklist.md](docs/requirements-checklist.md).
 
-All implemented network features, including gameplay synchronization, use the
-custom TCP/TLS stack. UDP is not implemented; it is only noted as a possible
-future direction in [docs/protocol.md](docs/protocol.md#8-future-transport-direction-not-implemented).
+The network stack is team-developed: TCP framing is 4-byte big-endian length
+plus UTF-8 JSON on port 9000 with TLS pinning; signed UDP movement datagrams
+use port 9000. UDP is not used for authentication, OTP, room commands, chat,
+events, or snapshots. The server authenticates and sequences datagrams but
+does not encrypt their control values; see
+[docs/protocol.md](docs/protocol.md) for wire formats and limitations.
 
 Diagrams: [architecture](docs/diagrams/architecture.png),
 [application flow](docs/diagrams/application-flow.png),
@@ -166,7 +171,8 @@ Unity rendering and controls.
    setup and keep the server bound to `127.0.0.1`.
 2. Publish the Launcher as described below and copy
    `deploy\client\server.json.example` to `LauncherRelease\server.json`.
-   Set `host` to `localhost` and `port` to `19000`. With the normal TLS runner,
+   Set `host` to `localhost`, `port` to `19000`, and `udpPort` to `19001`.
+   With the normal TLS runner,
    set `useTls` to `true` and `certificateThumbprintSha256` to the printed pin.
    For the isolated plaintext GUI alternative only, set `useTls` to `false`
    and omit the pin. Do not copy the temporary server certificate into the
@@ -194,6 +200,28 @@ Copy-Item .\deploy\client\server.json.example .\LauncherRelease\server.json
 
 Set the endpoint in the untracked `LauncherRelease\server.json`. A framework-dependent build
 requires the matching .NET Desktop Runtime on the client PC.
+
+### Package a friend-ready Windows build
+
+The package builder self-contains the Launcher, includes the Unity Windows x64
+player, and writes a pinned `server.json`. It requires the already-built
+`BuildGameRelease\DanToPhong.exe` and the real host/SHA-256 pin verified from
+the running endpoint; it refuses placeholders and refuses overwriting an
+existing ZIP unless `-OverwriteExisting` is explicitly supplied:
+
+```powershell
+.\scripts\package-friends.ps1 -ServerHost 'DNS_IN_CERTIFICATE_SAN' -CertificateThumbprintSha256 '64_HEX_SHA256_PIN' -OverwriteExisting
+```
+
+The generated archive includes `DanToPhong.Launcher.exe`, `Game\`, and the
+verified endpoint config. Never publish the ZIP until the pin has been
+confirmed with `aws-test-helper.ps1 -Action Pin`; a build without the endpoint
+and pin is not a connect-ready package.
+
+At runtime, fields present in the packaged `server.json` take precedence over
+inherited `DANTOPHONG_SERVER_*` and `DANTOPHONG_USE_TLS` environment variables;
+those variables are fallbacks only when the corresponding JSON field is absent.
+Edit `server.json` to change a packaged endpoint.
 
 ### Build Unity
 
@@ -237,7 +265,8 @@ read-only AWS CLI queries with the account's configured profile and region.
 Preserve any Elastic IP associated with the RDS network interface. If the
 owner approves a short test, start RDS and wait for `available`, then start
 EC2; when finished, stop EC2 and wait for `stopped`, then stop RDS. Restrict
-TCP 9000 to a verified source `/32`; never use `0.0.0.0/0`.
+TCP 9000 and UDP 9000 only to verified tester `/32` sources; never use
+`0.0.0.0/0` or `::/0`. Keep SQL port 1433 private.
 
 The systemd unit template is `deploy/aws/dantophong.service`. Configure its
 environment file outside Git with restricted permissions and install/enable
@@ -246,7 +275,8 @@ is [deploy/aws/setup-ec2.sh](deploy/aws/setup-ec2.sh); it creates a self-signed
 certificate for the requested SAN host when needed and enables/restarts the
 unit. The local [scripts/aws-test-helper.ps1](scripts/aws-test-helper.ps1)
 provides read-only status, explicitly confirmed RDS-then-EC2 start and
-EC2-then-RDS stop flows, plus live TLS pin verification.
+EC2-then-RDS stop flows, optional exact `/32` TCP 9000 + UDP 9000 ingress
+add/remove (only when explicitly requested), and live TLS pin verification.
 
 The [demo runbook](docs/demo-runbook.md) documents setup, test and shutdown
 steps; it is not evidence that AWS was accessed or deployed. This repository's
@@ -280,17 +310,17 @@ must remain outside this repository.
 |---|---|---|
 | TC01 | PASS | Local TCP reachability observation only; not a two-network test. |
 | TC02 | BLOCKED | No two clients on independent networks. |
-| TC03 | BLOCKED | No live two-client GUI room/game observation. |
-| TC04 | PARTIAL | SMTP delivery observed; OTP entry/expiry/attempt lockout not observed. |
+| TC03 | PARTIAL | Four authenticated racers sent signed UDP movement; all four server positions appeared in sequenced TCP snapshots, and an additional client spectated. Unity GUI remains unverified. [Latest log](docs/evidence/local-protocol-integration-20261127-213927.log). |
+| TC04 | PARTIAL | Prior SMTP delivery is recorded; DB-backed checks verified wrong/expired/single-use OTP, five-attempt lockout, login limiter, and persisted email on login. Launcher email/code flow remains unverified. [Latest log](docs/evidence/local-protocol-integration-20261127-213927.log). |
 | TC05 | PASS | Four pinned TLS/plaintext cases on loopback; see evidence index. |
 | TC06 | PASS | Prior sanitized local capture; see evidence index. |
-| TC07 | BLOCKED | Live match reconnect/restart not observed. |
+| TC07 | PARTIAL | Protocol harness verified disconnect/reconnect within grace period and loss of in-memory room state after server restart; GUI remains unverified. [Latest log](docs/evidence/local-protocol-integration-20261127-213927.log). |
 | TC08 | PASS | Unity player build only; no gameplay/network proof. |
 | TC09 | PASS | In-memory protocol/framing and queue smoke only. |
-| TC10 | PARTIAL | Anonymous loopback framing/load probes; no authenticated gameplay or Clumsy run. |
+| TC10 | PARTIAL | 50 anonymous loopback clients, p95 1.7 ms/max 5.2 ms with an incomplete-header slow sender, malformed and oversized frame rejection; no authenticated gameplay load or Clumsy. [Latest log](docs/evidence/local-protocol-integration-20261127-213927.log). |
 | TC11–TC12 | PASS | Prior sanitized Npcap loopback capture; not proof of Internet behavior. |
 | T1 | PASS | Loopback listener observed; does not show public reachability. |
-| T2–T8 | PARTIAL | Console protocol harness passed; Launcher/Unity GUI still requires manual verification. [Latest log](docs/evidence/T2-T8-protocol-console-20261127-184734.log). |
+| T2–T8 | PARTIAL | Latest protocol run passed; four clients authenticated, room/snapshot and chat tests passed, and reconnect/shutdown paths were checked. Launcher/Unity GUI still requires manual verification. [Latest log](docs/evidence/local-protocol-integration-20261127-213927.log). |
 
 Current evidence and test scope are indexed in
 [docs/evidence/README.md](docs/evidence/README.md); the detailed requirement

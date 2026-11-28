@@ -1228,8 +1228,11 @@ public class scooter : MonoBehaviour
     {
         float huongMucTieu = 0f;
 
-        if (Mathf.Abs(tocDoDangChay) >= 0.1f && !Mathf.Approximately(dauVaoRe, 0f))
-            huongMucTieu = tocDoDangChay < 0f ? -dauVaoRe : dauVaoRe;
+        if (!Mathf.Approximately(dauVaoRe, 0f))
+        {
+            bool dangLuiXe = tocDoDangChay < 0f || (Mathf.Abs(tocDoDangChay) < 0.1f && dangLui);
+            huongMucTieu = dangLuiXe ? -dauVaoRe : dauVaoRe;
+        }
 
         gocReHienTai = Mathf.MoveTowards(gocReHienTai, huongMucTieu, doMuotLai * Time.fixedDeltaTime);
 

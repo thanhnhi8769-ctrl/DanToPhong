@@ -8,8 +8,8 @@ using UnityEngine.SceneManagement;
 // Menu là trung tâm: Shop/Select/Lobby thoát đều quay về đây. Chỉ QUIT ở đây mới thoát game.
 public class MenuUI : MonoBehaviour
 {
-    public string scenePlay = "LobbyScene";
-    public string sceneShop = "ShopScene";
+    public string scenePlay = SceneNames.Lobby;
+    public string sceneShop = SceneNames.Shop;
 
     public void Play() { SceneManager.LoadScene(scenePlay); }
     public void Shop() { SceneManager.LoadScene(sceneShop); }

@@ -17,10 +17,10 @@ using DanToPhong.Protocol;
 [Serializable]
 public class Req
 {
-    public string command, token, category, mapName, targetId, roomId, mode, requestId;
+    public string command, token, category, mapName, sceneName, matchId, targetId, roomId, mode, requestId;
     public string chatMessage, gameEventType;
-    public int itemIndex, coinsDelta, price, playerCount, maxPlayers, vehicleIndex, clientTick, checkpointIndex, totalCheckpoints;
-    public bool isRacing, brake;
+    public int userId, itemIndex, coinsDelta, price, playerCount, maxPlayers, vehicleIndex, clientTick, checkpointIndex, totalCheckpoints;
+    public bool isRacing, isReady, brake;
     public float positionX, positionY, positionZ, rotationY, throttle, steer;
     public long clientTimestampMs, afterMessageId;
 }
@@ -51,11 +51,20 @@ public class Req
     public long messageId, serverTimestampMs;
     public string username, message;
 }
+ [Serializable] public class RoomPlayerDto
+{
+    public int userId;
+    public string username, sceneName;
+     public bool isHost, isReady, isReturnedToLobby;
+}
 [Serializable] public class Resp
 {
-    public bool success, isHost, isSpectator, isRacing, gameFinished;
-    public string code, command, message, roomId, mapName, winnerUsername;
-    public int playerCount, maxPlayers, spawnIndex;
+     public bool success, isHost, isSpectator, isReturnedToLobby, isRacing, gameFinished, canStart;
+    public string code, command, message, roomId, matchId, mapName, winnerUsername;
+    public string udpSessionId, udpKey;
+    public uint udpNextSequence;
+    public int playerCount, maxPlayers, spawnIndex, readyPlayerCount, unreadyPlayerCount;
+    public int udpPort;
     public int winnerUserId;
     public long serverTick, serverTimestampMs;
     public InvDto inventory;
@@ -66,6 +75,7 @@ public class Req
     public List<GamePlayerDto> gamePlayers;
     public GameEventDto gameEvent;
     public List<RoomChatMessageDto> chatMessages;
+    public List<RoomPlayerDto> roomPlayers;
 }
 
 public static class ServerClient
@@ -87,7 +97,8 @@ public static class ServerClient
     private static readonly HashSet<string> Idempotent = new HashSet<string>
     {
         "XACTHUCTOKEN", "LAYKHO", "LAYTHONGTIN", "LAYAVATAR", "PING",
-        "CAPNHATPHONG", "XOAPHONG", "CHONMAP", "TRANGBI", "CAPNHATXU", "MUAHANG"
+        "CAPNHATPHONG", "XOAPHONG", "CHONMAP", "TRANGBI", "CAPNHATXU", "MUAHANG",
+        "ROOM_SCENE", "ROOM_RETURN", "SOLO_FINISH"
     };
 
     public static InvDto Cache;

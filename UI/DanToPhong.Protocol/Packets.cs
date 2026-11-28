@@ -10,6 +10,8 @@ namespace DanToPhong.Protocol
         public string? RacerId { get; set; }
         public string? Username { get; set; }
         public string? Password { get; set; }
+        public string? CurrentPassword { get; set; }
+        public string? NewPassword { get; set; }
         public string? VerificationCode { get; set; }
         public string? RequestId { get; set; }
         public string? FullName { get; set; }
@@ -27,6 +29,9 @@ namespace DanToPhong.Protocol
         public int? ItemIndex { get; set; }
         public int? Price { get; set; }
         public string? MapName { get; set; }
+        public string? SceneName { get; set; }
+        public bool? IsReady { get; set; }
+        public string? MatchId { get; set; }
         public string? AvatarBase64 { get; set; }
         public int? Stars { get; set; }
         public string? Comment { get; set; }
@@ -65,10 +70,15 @@ namespace DanToPhong.Protocol
         public string Message { get; set; } = string.Empty;
         public string? Mode { get; set; }
         public string? RoomId { get; set; }
+        public string? MatchId { get; set; }
         public UserInfoDto? User { get; set; }
 
         // MỚI
         public string? Token { get; set; }
+        public int UdpPort { get; set; }
+        public string? UdpSessionId { get; set; }
+        public string? UdpKey { get; set; }
+        public uint UdpNextSequence { get; set; }
         public InventoryDto? Inventory { get; set; }
         public string? AvatarBase64 { get; set; }
         public ReviewSummaryDto? ReviewSummary { get; set; }
@@ -80,8 +90,12 @@ namespace DanToPhong.Protocol
         public int SpawnIndex { get; set; }
         public bool IsHost { get; set; }
         public bool IsSpectator { get; set; }
+        public bool IsReturnedToLobby { get; set; }
         public bool IsRacing { get; set; }
+        public bool CanStart { get; set; }
         public bool GameFinished { get; set; }
+        public int ReadyPlayerCount { get; set; }
+        public int UnreadyPlayerCount { get; set; }
         public int? WinnerUserId { get; set; }
         public string? WinnerUsername { get; set; }
         public string? MapName { get; set; }
@@ -90,6 +104,7 @@ namespace DanToPhong.Protocol
         public List<GamePlayerSnapshotDto>? GamePlayers { get; set; }
         public List<RoomChatMessageDto>? ChatMessages { get; set; }
         public GameEventDto? GameEvent { get; set; }
+        public List<RoomPlayerDto>? RoomPlayers { get; set; }
     }
 
     public sealed class UserInfoDto
@@ -117,7 +132,7 @@ namespace DanToPhong.Protocol
     public sealed class InventoryDto
     {
         public int Coins { get; set; }
-        public string SelectedMap { get; set; } = "game";
+        public string SelectedMap { get; set; } = MapNames.Default;
         public List<ItemDto> Items { get; set; } = new();
     }
 
@@ -126,6 +141,7 @@ namespace DanToPhong.Protocol
         public int[] Counts { get; set; } = new int[5];   // số lượt 1..5 sao
         public bool HasReviewed { get; set; }
         public int MyStars { get; set; }
+        public string? MyComment { get; set; }
     }
 
     public sealed class LeaderboardEntryDto
@@ -144,6 +160,16 @@ namespace DanToPhong.Protocol
         public int CurrentPlayers { get; set; }
         public int MaxPlayers { get; set; }
         public bool IsRacing { get; set; }
+    }
+
+    public sealed class RoomPlayerDto
+    {
+        public int UserId { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string SceneName { get; set; } = string.Empty;
+        public bool IsHost { get; set; }
+        public bool IsReady { get; set; }
+        public bool IsReturnedToLobby { get; set; }
     }
 
     public sealed class InviteDto

@@ -12,7 +12,6 @@ using UnityEngine;
 public interface IStateChannel
 {
     Task StartReceivingAsync();
-    Task<Resp> SendStateAsync(Req input);
     Task<Resp> SendEventAsync(Req gameEvent);
     bool TryDequeueSnapshot(out Resp snapshot);
     bool TryDequeueEvent(out Resp gameEvent);
@@ -54,11 +53,6 @@ public sealed class TcpStateChannel : IStateChannel
             CloseConnection();
             throw;
         }
-    }
-
-    public Task<Resp> SendStateAsync(Req input)
-    {
-        return ServerClient.CallAsync(input);
     }
 
     public Task<Resp> SendEventAsync(Req gameEvent)

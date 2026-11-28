@@ -52,3 +52,4 @@
 **/secrets/
 
 # Only project-owned scenes are versioned; imported demos stay out of this project.
+artifacts/

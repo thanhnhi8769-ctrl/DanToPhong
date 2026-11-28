@@ -1,0 +1,11 @@
+2026-11-28 09:42:53.054 +07:00 [INFO] Bounded DB-backed TCP integration run; protocol evidence only, not GUI or cross-network evidence.
+2026-11-28 09:42:53.660 +07:00 [PASS] TC04 OTP repository rejected wrong codes and locked verification after five attempts; code values were not logged.
+2026-11-28 09:42:53.810 +07:00 [PASS] TC04 OTP repository rejected an expired code and consumed a valid code exactly once.
+2026-11-28 09:42:53.962 +07:00 [PASS] Login limiter allowed five attempts then rejected the next attempt.
+2026-11-28 09:42:53.996 +07:00 [PASS] Temporary OTP and login-limiter database rows were removed.
+2026-11-28 09:42:54.770 +07:00 [PASS] T1 test server was observed listening on dedicated loopback port 19000.
+2026-11-28 09:42:57.682 +07:00 [PASS] Recovery clearly rejected unknown users and email mismatch and rejected password reuse; settings rejected a wrong current password and password reuse; avatar changes required a correct current password and persisted; account changes rotated the token and revoked the old token.
+2026-11-28 09:43:07.983 +07:00 [PASS] Server-issued solo match ticket awarded exactly 10 coins after the minimum duration; duplicate finish did not award again.
+2026-11-28 09:43:08.039 +07:00 [FAIL] The multiplayer winner reward did not persist exactly 50 coins.
+2026-11-28 09:43:08.081 +07:00 [PASS] Temporary protocol-test accounts were removed from DanToPhongDB_Test.
+2026-11-28 09:43:08.081 +07:00 [RESULT] FAIL

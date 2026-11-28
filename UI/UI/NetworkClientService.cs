@@ -14,6 +14,7 @@ namespace UI.Services
     {
         private readonly string _host;
         private readonly int _port;
+        private readonly int _udpPort;
         private readonly bool _useTls;
         private readonly string _certificateThumbprintSha256;
         private readonly SemaphoreSlim _ioLock = new(1, 1);
@@ -28,11 +29,13 @@ namespace UI.Services
 
         private TcpClient? _client;
         private Stream? _stream;
+        private string? _lastConnectionError;
         private volatile bool _disposed;
 
         // MỚI: launcher truyền cho game Unity
         public string Host => _host;
         public int Port => _port;
+        public int UdpPort => _udpPort;
         public bool UseTls => _useTls;
         public string CertificateThumbprintSha256 => _certificateThumbprintSha256;
         public string Token { get; private set; } = string.Empty;
@@ -56,6 +59,7 @@ namespace UI.Services
         {
             string? fileHost = null;
             int? filePort = null;
+            int? fileUdpPort = null;
             bool? fileUseTls = null;
             string? fileCertificateThumbprintSha256 = null;
             string configPath = Path.Combine(AppContext.BaseDirectory, "server.json");
@@ -65,16 +69,21 @@ namespace UI.Services
                 ServerConfig? config = JsonSerializer.Deserialize<ServerConfig>(File.ReadAllText(configPath), options);
                 fileHost = config?.Host;
                 filePort = config?.Port;
+                fileUdpPort = config?.UdpPort;
                 fileUseTls = config?.UseTls;
                 fileCertificateThumbprintSha256 = config?.CertificateThumbprintSha256;
             }
 
             string? envHost = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_HOST");
-            _host = (host ?? (string.IsNullOrWhiteSpace(envHost) ? fileHost : envHost) ?? string.Empty).Trim();
+            _host = (host ?? (string.IsNullOrWhiteSpace(fileHost) ? envHost : fileHost) ?? string.Empty).Trim();
             string? envPort = Environment.GetEnvironmentVariable("DANTOPHONG_SERVER_PORT");
             if (port.HasValue)
             {
                 _port = port.Value;
+            }
+            else if (filePort.HasValue)
+            {
+                _port = filePort.Value;
             }
             else if (!string.IsNullOrWhiteSpace(envPort))
             {
@@ -86,9 +95,20 @@ namespace UI.Services
             {
                 _port = filePort ?? 9000;
             }
+            string? envUdpPort = Environment.GetEnvironmentVariable("DANTOPHONG_UDP_PORT");
+            if (fileUdpPort.HasValue)
+                _udpPort = fileUdpPort.Value;
+            else if (string.IsNullOrWhiteSpace(envUdpPort))
+                _udpPort = 9000;
+            else if (!int.TryParse(envUdpPort, out int parsedUdpPort) || parsedUdpPort is < 1 or > 65535)
+                throw new InvalidOperationException("DANTOPHONG_UDP_PORT must be an integer between 1 and 65535.");
+            else
+                _udpPort = parsedUdpPort;
             string? envTls = Environment.GetEnvironmentVariable("DANTOPHONG_USE_TLS");
-            if (string.IsNullOrWhiteSpace(envTls))
-                _useTls = fileUseTls ?? true;
+            if (fileUseTls.HasValue)
+                _useTls = fileUseTls.Value;
+            else if (string.IsNullOrWhiteSpace(envTls))
+                _useTls = true;
             else if (bool.TryParse(envTls, out bool parsedTls))
                 _useTls = parsedTls;
             else
@@ -110,6 +130,7 @@ namespace UI.Services
         {
             public string? Host { get; set; }
             public int? Port { get; set; }
+            public int? UdpPort { get; set; }
             public bool? UseTls { get; set; }
             public string? CertificateThumbprintSha256 { get; set; }
         }
@@ -191,6 +212,7 @@ namespace UI.Services
                     stream = ssl;
                 }
                 _stream = stream;
+                _lastConnectionError = null;
                 if (_disposed)
                 {
                     DisconnectInternal(raiseEvent: false);
@@ -203,9 +225,23 @@ namespace UI.Services
             catch (Exception ex)
             {
                 DisconnectInternal(raiseEvent: false);
-                ConnectionStatusChanged?.Invoke(false, $"Offline ({ex.Message})");
+                _lastConnectionError = DescribeConnectionFailure(ex);
+                ConnectionStatusChanged?.Invoke(false, $"Offline ({_lastConnectionError})");
                 return false;
             }
+        }
+
+        private static string DescribeConnectionFailure(Exception exception)
+        {
+            if (exception is AuthenticationException)
+                return $"TLS handshake or certificate validation failed: {exception.Message}";
+            if (exception is OperationCanceledException)
+                return "Connection timed out or was cancelled.";
+            if (exception is SocketException socketException)
+                return $"Socket error {socketException.SocketErrorCode}: {socketException.Message}";
+            if (exception is IOException { InnerException: SocketException innerSocketException })
+                return $"Socket error {innerSocketException.SocketErrorCode}: {innerSocketException.Message}";
+            return $"{exception.GetType().Name}: {exception.Message}";
         }
 
         private async Task<ResponsePacket> SendAndReceiveAsync(RequestPacket request, CancellationToken token = default)
@@ -237,7 +273,7 @@ namespace UI.Services
                         {
                             Success = false,
                             Code = ErrorCodes.ServerError,
-                            Message = "Cannot connect to server."
+                            Message = $"Cannot connect to server: {_lastConnectionError ?? "connection failed; check the host, port and TLS settings."}"
                         };
                     }
                 }
@@ -366,12 +402,16 @@ namespace UI.Services
             }, token);
         }
 
-        public Task<ResponsePacket> UploadAvatarAsync(byte[] data, CancellationToken token = default)
+        public Task<ResponsePacket> UploadAvatarAsync(
+            byte[] data,
+            string currentPassword,
+            CancellationToken token = default)
         {
             return SendAndReceiveAsync(new RequestPacket
             {
                 Command = Commands.UploadAvatar,
-                AvatarBase64 = Convert.ToBase64String(data)
+                AvatarBase64 = Convert.ToBase64String(data),
+                CurrentPassword = currentPassword
             }, token);
         }
 
@@ -440,6 +480,26 @@ namespace UI.Services
                 Password = newPassword,
                 VerificationCode = verificationCode
             }, token);
+        }
+
+        public async Task<ResponsePacket> UpdateAccountSettingsAsync(
+            string currentPassword,
+            string? newPassword,
+            string? email,
+            CancellationToken token = default)
+        {
+            ResponsePacket response = await SendAndReceiveAsync(new RequestPacket
+            {
+                Command = Commands.UpdateAccountSettings,
+                CurrentPassword = currentPassword,
+                NewPassword = newPassword,
+                Email = email
+            }, token);
+
+            if (response.Success && !string.IsNullOrWhiteSpace(response.Token))
+                Token = response.Token;
+
+            return response;
         }
 
         public Task<ResponsePacket> RequestResetCodeAsync(string username, string email, CancellationToken token = default)

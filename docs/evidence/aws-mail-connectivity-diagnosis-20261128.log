@@ -1,0 +1,69 @@
+AWS Get Code connectivity diagnosis — 2026-11-28
+
+Scope: read-only AWS inspection, strict-host-key SSH reads, TLS probes, and
+sanitized service logs. RDS and EC2 were started with the user's authorization.
+No Security Group, Elastic IP association, or machine trust-store changes were
+made. No SMTP email or OTP was sent.
+
+AWS state after startup:
+- RDS: available.
+- EC2: running; instance and system health checks passed.
+- systemd dantophong: active and enabled.
+- EC2 listeners: TCP 9000 present; UDP 9001 absent.
+- No 0.0.0.0/0 or ::/0 ingress was found for TCP 9000, UDP 9001, or TCP 1433.
+- The AWS Free Tier API returned no public-IPv4 usage record; cost eligibility
+  for a new Elastic IP remains unverified.
+
+Root cause of the Launcher connection failure:
+- The packaged client endpoint DNS resolves to an Elastic IP whose network
+  interface is identified by AWS as an RDS network interface, not the target
+  EC2 instance. TCP 9000 at that configured endpoint timed out.
+- The target EC2 has a different, automatically assigned public DNS name. Its
+  running TLS certificate matches the configured SHA-256 pin and the old
+  configured DNS/IP SAN, but does not match the current EC2 DNS SAN. The
+  fail-closed Launcher correctly rejects that hostname mismatch.
+- The service journal contains the previously reported unexpected EOF. No
+  current OTP attempt occurred because the packaged endpoint cannot reach the
+  EC2 listener.
+- The packaged Launcher displayed `Cannot connect to server: Connection timed
+  out or was cancelled.` during startup. This verified the more useful
+  connection diagnostic, not Get Code or SMTP delivery.
+
+SMTP isolation:
+- SMTP host is smtp.gmail.com on port 465. SMTP user, password, and sender
+  values are configured; values are intentionally withheld.
+- Outbound TLS handshake to smtp.gmail.com:465 succeeded.
+- No SMTP AUTH or message-delivery result was claimed; an OTP was not sent.
+
+Required resolution:
+- Do not move the existing Elastic IP: it is associated with an RDS network
+  interface, and reassigning it could disrupt database connectivity.
+- A stable endpoint requires a new Elastic IP for EC2 (potential ongoing
+  public-IPv4 charges) or an explicitly approved alternative. A temporary
+  current-EC2-DNS solution requires certificate rotation and a refreshed pin,
+  and that DNS may change after a stop/start.
+
+## Follow-up after explicit approval — 2026-11-28
+
+- An EIP dedicated to EC2 was associated after user approval. The existing
+  RDS-associated EIP was not moved, and no Security Group rules were changed.
+- The EC2 certificate was rotated for its current DNS SAN. Live TLS hostname
+  and SHA-256 pin verification passed. A first rotation attempt rolled back;
+  the script was corrected to wait for TCP readiness before committing.
+- The current Linux Release Server was published and deployed to the existing
+  service path. A rollback copy of the prior app directory was retained.
+  systemd is active; the existing RDS reports `available`; the Server journal
+  confirms database connection; TCP 9000 and UDP 9001 listeners are present.
+- The friend ZIP was rebuilt with the verified TLS endpoint and pin. The
+  Launcher executable, Unity player, TLS-enabled configuration, and archive
+  checksum were verified locally (SHA-256:
+  `A09C6C4C807B414AF2032B153B84C7166B6A650B639B932CA9FB772650F3E142`).
+- One live registration-code request, submitted before the Server Release
+  deployment, was accepted over the verified TLS connection. The user
+  confirmed receipt of the email. No recipient address, username, OTP, SMTP
+  credential, or connection string is recorded here; no duplicate email was
+  sent after deployment.
+- Local protocol/OTP-queue smoke passed after the update. GUI code entry,
+  wrong/expired-code behavior in the Launcher, two-network multiplayer, and
+  Internet gameplay remain unverified. AWS remains running for the user's
+  final test; no RDS creation/redeployment or AWS stop was performed.

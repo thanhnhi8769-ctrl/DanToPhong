@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using DanToPhong.Protocol;
 using Microsoft.Data.SqlClient;
 
 namespace DanToPhong.Server
@@ -47,6 +48,8 @@ namespace DanToPhong.Server
                 }
             }
 
+            await NormalizeSelectedMapAsync(db, token).ConfigureAwait(false);
+
             await using (var verify = new SqlCommand(@"
                 IF OBJECT_ID('dbo.AuthTokens') IS NULL OR
                    OBJECT_ID('dbo.VerificationCodes') IS NULL OR
@@ -61,6 +64,47 @@ namespace DanToPhong.Server
             }
 
             Console.WriteLine("[DB] Database setup OK.");
+        }
+
+        private static async Task NormalizeSelectedMapAsync(SqlConnection db, CancellationToken token)
+        {
+            await using var cmd = new SqlCommand($@"
+                BEGIN TRY
+                    BEGIN TRANSACTION;
+                    DECLARE @defaultName sysname;
+                    SELECT @defaultName = dc.name
+                    FROM sys.default_constraints dc
+                    JOIN sys.columns c ON c.default_object_id = dc.object_id
+                    WHERE dc.parent_object_id = OBJECT_ID('dbo.NguoiDung')
+                      AND c.name = 'SelectedMap';
+                    IF @defaultName IS NOT NULL
+                    BEGIN
+                        DECLARE @dropSql nvarchar(300) =
+                            N'ALTER TABLE dbo.NguoiDung DROP CONSTRAINT ' + QUOTENAME(@defaultName);
+                        EXEC sys.sp_executesql @dropSql;
+                    END;
+                    ALTER TABLE dbo.NguoiDung
+                        ADD CONSTRAINT DF_NguoiDung_Map DEFAULT '{MapNames.Default}' FOR SelectedMap;
+                    UPDATE dbo.NguoiDung
+                    SET SelectedMap = CASE LOWER(LTRIM(RTRIM(SelectedMap)))
+                        WHEN 'game1' THEN '{MapNames.Game1}'
+                        WHEN 'game 1' THEN '{MapNames.Game1}'
+                        WHEN 'game2' THEN '{MapNames.Game2}'
+                        WHEN 'game 2' THEN '{MapNames.Game2}'
+                        WHEN 'game3' THEN '{MapNames.Game3}'
+                        WHEN 'game 3' THEN '{MapNames.Game3}'
+                        ELSE '{MapNames.Default}'
+                    END
+                    WHERE SelectedMap IS NULL
+                       OR LOWER(LTRIM(RTRIM(SelectedMap))) NOT IN ('{MapNames.Game1}', '{MapNames.Game2}', '{MapNames.Game3}')
+                       OR SelectedMap <> LOWER(LTRIM(RTRIM(SelectedMap)));
+                    COMMIT TRANSACTION;
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;", db);
+            await cmd.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }
 
         private static readonly string[] Statements =
@@ -79,7 +123,7 @@ namespace DanToPhong.Server
                   AvatarPath      NVARCHAR(260)  NULL,
                   AvatarData      VARBINARY(MAX) NULL,
                   Coins           INT            NOT NULL CONSTRAINT DF_NguoiDung_Coins DEFAULT 100,
-                  SelectedMap     NVARCHAR(50)   NOT NULL CONSTRAINT DF_NguoiDung_Map DEFAULT 'game',
+                  SelectedMap     NVARCHAR(50)   NOT NULL CONSTRAINT DF_NguoiDung_Map DEFAULT 'game1',
                   NgayTao         DATETIME2      NOT NULL CONSTRAINT DF_NguoiDung_NgayTao DEFAULT SYSDATETIME(),
                   LanDangNhapCuoi DATETIME2      NULL
               );",
@@ -100,7 +144,7 @@ namespace DanToPhong.Server
 
             @"IF COL_LENGTH('dbo.NguoiDung', 'SelectedMap') IS NULL
                   ALTER TABLE dbo.NguoiDung ADD SelectedMap NVARCHAR(50) NOT NULL
-                      CONSTRAINT DF_NguoiDung_Map DEFAULT 'game';",
+                      CONSTRAINT DF_NguoiDung_Map DEFAULT 'game1';",
 
             @"IF OBJECT_ID('dbo.VatPham') IS NULL
               CREATE TABLE dbo.VatPham (

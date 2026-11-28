@@ -1,0 +1,13 @@
+2026-11-28 04:33:54.489 +07:00 [INFO] Bounded DB-backed TCP integration run; protocol evidence only, not GUI or cross-network evidence.
+2026-11-28 04:33:56.570 +07:00 [PASS] TC04 OTP repository rejected wrong codes and locked verification after five attempts; code values were not logged.
+2026-11-28 04:33:56.704 +07:00 [PASS] TC04 OTP repository rejected an expired code and consumed a valid code exactly once.
+2026-11-28 04:33:56.836 +07:00 [PASS] Login limiter allowed five attempts then rejected the next attempt.
+2026-11-28 04:33:56.871 +07:00 [PASS] Temporary OTP and login-limiter database rows were removed.
+2026-11-28 04:33:58.593 +07:00 [PASS] T1 test server was observed listening on dedicated loopback port 19000.
+2026-11-28 04:34:00.587 +07:00 [PASS] Authenticated settings rejected a wrong current password, persisted the new email/password, rotated the session token, and revoked the old token.
+2026-11-28 04:34:00.589 +07:00 [PASS] T2 authenticated login responses returned each account email persisted in SQL.
+2026-11-28 04:34:00.591 +07:00 [PASS] T2 four TCP clients connected, authenticated, and appeared in server session logs.
+2026-11-28 04:34:00.598 +07:00 [PASS] T3 both authenticated clients received PONG in under 1 second (A 2.4 ms; B 1.1 ms).
+2026-11-28 04:34:00.654 +07:00 [FAIL] The two-client game room could not be started.
+2026-11-28 04:34:00.732 +07:00 [PASS] Temporary protocol-test accounts were removed from DanToPhongDB_Test.
+2026-11-28 04:34:00.732 +07:00 [RESULT] FAIL

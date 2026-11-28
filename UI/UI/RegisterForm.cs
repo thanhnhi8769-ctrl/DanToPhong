@@ -51,6 +51,7 @@ namespace UI
 
             _otpTimer.Interval = 1000;
             _otpTimer.Tick += OtpTimer_Tick;
+            FormClosing += RegisterForm_FormClosing;
 
             TextBox[] fields = new[]
             {
@@ -105,7 +106,7 @@ namespace UI
                 ResponsePacket login = await _netClient.LoginAsync(username, password);
                 if (!login.Success) return;
 
-                await _netClient.UploadAvatarAsync(data);
+                await _netClient.UploadAvatarAsync(data, password);
                 await _netClient.LogoutAsync();
             }
             catch
@@ -148,6 +149,14 @@ namespace UI
 
             using Pen borderPen = new Pen(Color.FromArgb(43, 27, 61), 2f);
             e.Graphics.DrawEllipse(borderPen, 1, 1, picAvatar.Width - 3, picAvatar.Height - 3);
+        }
+
+        private void RegisterForm_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            _otpTimer.Stop();
+            _otpTimer.Dispose();
+            picAvatar.Image?.Dispose();
+            picAvatar.Image = null;
         }
 
         private void CauHinhNutDoExit()
@@ -528,16 +537,24 @@ namespace UI
                 if (IsDisposed) return;
                 hasSentCode = false;
                 otpExpiresAt = null;
+                bool connectionFailed =
+                    ex.Message.StartsWith("Cannot connect to server", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.StartsWith("Network error:", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.StartsWith("Server closed the connection", StringComparison.OrdinalIgnoreCase);
                 lblCodeStatus.ForeColor = Color.FromArgb(170, 25, 25);
-                lblCodeStatus.Text = "Could not send the verification email. Please try again later.";
+                lblCodeStatus.Text = connectionFailed
+                    ? "Could not connect to the server. Please check the connection and try again."
+                    : "Could not send the verification email. Please try again later.";
                 btnSendCode.Enabled = true;
                 btnSendCode.ForeColor = Color.White;
                 btnSendCode.Text = "Get Code";
 
                 PopupNoticeForm.ShowNotice(
                     this,
-                    "Mail Error",
-                    $"Không gửi được email xác nhận:\n{ex.Message}",
+                    connectionFailed ? "Connection Error" : "Mail Error",
+                    connectionFailed
+                        ? $"Không kết nối được tới máy chủ:\n{ex.Message}"
+                        : $"Không gửi được email xác nhận:\n{ex.Message}",
                     PopupNoticeForm.NoticeKind.Error);
             }
 
@@ -645,7 +662,7 @@ namespace UI
                 lblCodeStatus.Text = "Code expired. Please request a new one.";
                 hasError = true;
             }
-            else if (code.Length != 6 || !code.All(char.IsDigit))
+            else if (code.Length != 6 || code.Any(ch => ch < '0' || ch > '9'))
             {
                 lblCodeStatus.ForeColor = Color.Crimson;
                 lblCodeStatus.Text = "Please enter the 6-digit verification code.";

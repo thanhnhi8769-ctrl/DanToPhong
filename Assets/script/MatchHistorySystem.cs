@@ -26,11 +26,11 @@ public class MatchHistorySystem : MonoBehaviour
         public List<MatchRecord> danhSach = new List<MatchRecord>();
     }
 
-    private const string SAVE_KEY = "DanToPhong_MatchHistory_v1";
     private const int MAX_RECORDS = 20;
 
     private static bool daDangKy = false;
     private static bool daLuuTranHienTai = false;
+    private static string soloMatchId = string.Empty;
     private GameObject panelLichSu;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -48,6 +48,10 @@ public class MatchHistorySystem : MonoBehaviour
     private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         daLuuTranHienTai = false;
+        if (LauncherArgs.HasLauncher &&
+            string.IsNullOrWhiteSpace(LauncherArgs.Room) &&
+            IsRaceScene(scene.name))
+            _ = StartSoloMatchAsync(scene.name);
 
         if (scene.name.ToLowerInvariant().Contains("menu"))
         {
@@ -64,7 +68,75 @@ public class MatchHistorySystem : MonoBehaviour
     /// </summary>
     public static void LuuKetQuaTran(bool thang, int xuThuong)
     {
-        if (daLuuTranHienTai) return;
+        if (!GhiTranVaoLichSu(thang, xuThuong))
+            return;
+
+        if (!thang && !string.IsNullOrWhiteSpace(soloMatchId))
+            _ = FinishSoloMatchAsync(SceneManager.GetActiveScene().name, won: false);
+    }
+
+    public static async System.Threading.Tasks.Task<int> LuuKetQuaTranAsync(int xuThuong)
+    {
+        int xuDaXacNhan = xuThuong;
+        if (LauncherArgs.HasLauncher)
+        {
+            xuDaXacNhan = 0;
+            if (ServerClient.Ready)
+            {
+                if (string.IsNullOrWhiteSpace(LauncherArgs.Room))
+                {
+                    if (!string.IsNullOrWhiteSpace(soloMatchId))
+                    {
+                        bool confirmed = await FinishSoloMatchAsync(
+                            SceneManager.GetActiveScene().name, won: true);
+                        xuDaXacNhan = confirmed ? xuThuong : 0;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[MatchHistory] No server-issued solo match ticket; reward was not confirmed.");
+                    }
+                }
+                else
+                {
+                    int coinsBefore = PlayerInventory.GetCoins();
+                    for (int attempt = 0; attempt < 20; attempt++)
+                    {
+                        try
+                        {
+                            Resp response = await ServerClient.CallAsync(new Req { command = "LAYKHO" });
+                            if (response != null && response.success && response.inventory != null &&
+                                response.inventory.coins >= coinsBefore + xuThuong)
+                            {
+                                xuDaXacNhan = xuThuong;
+                                break;
+                            }
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogWarning("[MatchHistory] Could not refresh multiplayer reward: " + ex.GetType().Name);
+                            break;
+                        }
+
+                        await System.Threading.Tasks.Task.Delay(150);
+                    }
+
+                    if (xuDaXacNhan == 0)
+                        Debug.LogWarning("[MatchHistory] The server did not confirm the multiplayer win reward.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning("[MatchHistory] The server session is unavailable; win reward was not confirmed.");
+            }
+        }
+
+        GhiTranVaoLichSu(true, xuDaXacNhan);
+        return xuDaXacNhan;
+    }
+
+    private static bool GhiTranVaoLichSu(bool thang, int xuThuong)
+    {
+        if (daLuuTranHienTai) return false;
         daLuuTranHienTai = true;
 
         MatchHistoryData data = DocDuLieu();
@@ -88,13 +160,14 @@ public class MatchHistorySystem : MonoBehaviour
         if (data.danhSach.Count > MAX_RECORDS)
             data.danhSach.RemoveRange(MAX_RECORDS, data.danhSach.Count - MAX_RECORDS);
 
-        PlayerPrefs.SetString(SAVE_KEY, JsonUtility.ToJson(data));
+        PlayerPrefs.SetString(GetSaveKey(), JsonUtility.ToJson(data));
         PlayerPrefs.Save();
+        return true;
     }
 
     private static MatchHistoryData DocDuLieu()
     {
-        string json = PlayerPrefs.GetString(SAVE_KEY, "");
+        string json = PlayerPrefs.GetString(GetSaveKey(), "");
         if (string.IsNullOrEmpty(json))
             return new MatchHistoryData();
 
@@ -106,6 +179,68 @@ public class MatchHistorySystem : MonoBehaviour
         catch
         {
             return new MatchHistoryData();
+        }
+    }
+
+    private static string GetSaveKey()
+    {
+        string account = string.IsNullOrWhiteSpace(LauncherArgs.User)
+            ? "guest"
+            : LauncherArgs.User.Trim().ToLowerInvariant();
+        return $"DanToPhong_MatchHistory_v1_{account}";
+    }
+
+    private static bool IsRaceScene(string sceneName) => SceneNames.IsRaceMap(sceneName);
+
+    private static async System.Threading.Tasks.Task StartSoloMatchAsync(string sceneName)
+    {
+        soloMatchId = string.Empty;
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req
+            {
+                command = "SOLO_START",
+                mapName = sceneName
+            });
+            if (response != null && response.success)
+                soloMatchId = response.matchId ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(soloMatchId))
+                Debug.LogWarning("[MatchHistory] The server did not issue a solo match ticket.");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[MatchHistory] Could not start a server-tracked solo match: " + ex.GetType().Name);
+        }
+    }
+
+    private static async System.Threading.Tasks.Task<bool> FinishSoloMatchAsync(string sceneName, bool won)
+    {
+        string matchId = soloMatchId;
+        if (string.IsNullOrWhiteSpace(matchId))
+            return false;
+
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req
+            {
+                command = "SOLO_FINISH",
+                matchId = matchId,
+                mapName = sceneName,
+                gameEventType = won ? "WIN" : "LOSE"
+            });
+            if (response == null || !response.success)
+            {
+                Debug.LogWarning("[MatchHistory] The server did not confirm the solo match result.");
+                return false;
+            }
+
+            soloMatchId = string.Empty;
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[MatchHistory] Could not submit the solo match result: " + ex.GetType().Name);
+            return false;
         }
     }
 

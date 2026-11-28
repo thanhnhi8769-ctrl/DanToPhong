@@ -1,3 +1,8 @@
+param(
+    [ValidateSet('Integration', 'TC05Pinned')]
+    [string]$Mode = 'Integration'
+)
+
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $root
@@ -6,6 +11,7 @@ $previousSaPassword = $env:DANTOPHONG_TEST_SA_PASSWORD
 $previousConnection = $env:DANTOPHONG_DB_CONNECTION
 $previousServerDll = $env:DANTOPHONG_TEST_SERVER_DLL
 $previousTestPort = $env:DANTOPHONG_TEST_PORT
+$previousTestUdpPort = $env:DANTOPHONG_TEST_UDP_PORT
 $exitCode = 0
 
 try {
@@ -29,6 +35,7 @@ try {
         $connectionBuilder['TrustServerCertificate'] = 'True'
         $env:DANTOPHONG_DB_CONNECTION = $connectionBuilder.ConnectionString
         $env:DANTOPHONG_TEST_PORT = '19000'
+        $env:DANTOPHONG_TEST_UDP_PORT = '19001'
         $buildOutput = 'bin\t2t8-protocol\'
         $project = '.\tools\T2T8ProtocolTest\T2T8ProtocolTest.csproj'
 
@@ -39,7 +46,12 @@ try {
         else {
             $env:DANTOPHONG_TEST_SERVER_DLL = Join-Path $root 'UI\DanToPhong.Server\bin\t2t8-protocol\Release\net10.0\DanToPhong.Server.dll'
             $harness = Join-Path $root 'tools\T2T8ProtocolTest\bin\t2t8-protocol\Release\net10.0\T2T8ProtocolTest.dll'
-            dotnet $harness
+            if ($Mode -eq 'TC05Pinned') {
+                dotnet $harness --tc05-pinned
+            }
+            else {
+                dotnet $harness
+            }
             $exitCode = $LASTEXITCODE
         }
     }
@@ -68,6 +80,12 @@ finally {
     }
     else {
         $env:DANTOPHONG_TEST_PORT = $previousTestPort
+    }
+    if ($null -eq $previousTestUdpPort) {
+        Remove-Item Env:DANTOPHONG_TEST_UDP_PORT -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:DANTOPHONG_TEST_UDP_PORT = $previousTestUdpPort
     }
 }
 

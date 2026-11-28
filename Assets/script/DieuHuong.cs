@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 public static class DieuHuong
 {
     // Các scene (Shop, Select, Lobby...) "thoát" = quay về scene menu, KHÔNG thoát game.
-    public static void VeMenu(string sceneMenu = "menu")
+    public static void VeMenu(string sceneMenu = SceneNames.Menu)
     {
         Time.timeScale = 1f;
         SceneManager.LoadScene(sceneMenu);

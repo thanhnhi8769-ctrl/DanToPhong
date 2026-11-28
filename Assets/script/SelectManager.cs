@@ -120,8 +120,8 @@ public class SelectManager : MonoBehaviour
     public bool hieuUngNut = true;
 
     [Header("Navigation")]
-    public string tenSceneLobby = "LobbyScene";
-    public string tenSceneMenu = "menu";
+    public string tenSceneLobby = SceneNames.Lobby;
+    public string tenSceneMenu = SceneNames.Menu;
 
     private const string TAB_SCOOTER = "Scooter";
 

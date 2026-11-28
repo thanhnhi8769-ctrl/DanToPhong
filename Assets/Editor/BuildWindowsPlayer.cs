@@ -11,8 +11,10 @@ public static class BuildWindowsPlayer
     public static void BuildWindows64Release()
     {
         string projectRoot = Directory.GetParent(Application.dataPath).FullName;
-        string outputDirectory = Path.Combine(projectRoot, "BuildGameRelease");
-        string outputPath = Path.Combine(outputDirectory, "DanToPhong.exe");
+        string configuredOutput = Environment.GetEnvironmentVariable("DANTOPHONG_PLAYER_OUTPUT");
+        string outputPath = string.IsNullOrWhiteSpace(configuredOutput)
+            ? Path.Combine(projectRoot, "BuildGameRelease", "DanToPhong.exe")
+            : Path.GetFullPath(configuredOutput);
         string[] scenes = EditorBuildSettings.scenes
             .Where(scene => scene.enabled)
             .Select(scene => scene.path)
@@ -21,7 +23,10 @@ public static class BuildWindowsPlayer
         if (scenes.Length == 0)
             throw new InvalidOperationException("No enabled scenes are configured in Build Settings.");
 
-        Directory.CreateDirectory(outputDirectory);
+        if (!string.IsNullOrWhiteSpace(configuredOutput) && File.Exists(outputPath))
+            throw new InvalidOperationException($"Refusing to overwrite existing player output: {outputPath}");
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)
+            ?? throw new InvalidOperationException("The player output must include a directory."));
 
         BuildReport report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
@@ -33,6 +38,8 @@ public static class BuildWindowsPlayer
 
         if (report.summary.result != BuildResult.Succeeded)
             throw new InvalidOperationException($"Windows x64 build failed: {report.summary.result}.");
+        if (!File.Exists(outputPath))
+            throw new InvalidOperationException($"The build reported success but the player executable was not created: {outputPath}.");
 
         Debug.Log($"Windows x64 player built: {outputPath}");
     }

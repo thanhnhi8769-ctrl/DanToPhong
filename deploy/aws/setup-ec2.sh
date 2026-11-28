@@ -127,6 +127,14 @@ elif [[ "$PORT_VALUE" != 9000 ]]; then
     exit 1
 fi
 
+UDP_PORT_VALUE=$(read_env_value DANTOPHONG_UDP_PORT)
+if [[ -z "$UDP_PORT_VALUE" ]]; then
+    write_env_value DANTOPHONG_UDP_PORT 9000
+elif [[ "$UDP_PORT_VALUE" != 9000 ]]; then
+    echo "DANTOPHONG_UDP_PORT must be 9000 for this deployment." >&2
+    exit 1
+fi
+
 TLS_VALUE=$(read_env_value DANTOPHONG_USE_TLS)
 if [[ -z "$TLS_VALUE" ]]; then
     write_env_value DANTOPHONG_USE_TLS true
@@ -262,8 +270,12 @@ if ! ss -ltnH 'sport = :9000' | grep -q .; then
     echo "Service is active but no TCP listener is visible on port 9000." >&2
     exit 1
 fi
+if ! ss -lunH 'sport = :9000' | grep -q .; then
+    echo "Service is active but no UDP listener is visible on port 9000." >&2
+    exit 1
+fi
 
-echo "Service enabled and active; TCP 9000 is listening with TLS."
+echo "Service enabled and active; TLS TCP 9000 and authenticated UDP 9000 are listening."
 echo "Certificate SAN host: $CERT_HOST"
 echo "SHA-256 certificate thumbprint: $THUMBPRINT"
 echo "Client server.json host must exactly match the SAN host above."

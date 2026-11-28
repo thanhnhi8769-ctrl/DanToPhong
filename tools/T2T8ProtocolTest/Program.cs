@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
@@ -25,31 +26,48 @@ internal static class Program
             throw new ArgumentException("Supported option: --tc05-pinned.");
         string root = FindRepositoryRoot();
         string stamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        string evidencePath = Path.Combine(root, "docs", "evidence", $"T2-T8-protocol-console-{stamp}.log");
+        string evidencePath = Path.Combine(root, "docs", "evidence", $"local-protocol-integration-{stamp}.log");
         using var log = new EvidenceLog(evidencePath);
-        log.Write("INFO", "Console TCP protocol integration run; this is protocol-level evidence, not GUI evidence.");
+        log.Write("INFO", "Bounded DB-backed TCP integration run; protocol evidence only, not GUI or cross-network evidence.");
 
         TestAccounts? accounts = null;
         Exception? failure = null;
         bool blocked = false;
+        string? roomIdLostOnRestart = null;
 
         try
         {
             string connectionString = ResolveTestConnectionString();
             string serverAssembly = ResolveServerAssembly(root);
+            await RunSecurityStateChecksAsync(connectionString, log);
             accounts = new TestAccounts();
 
             await using (TestServer server = await TestServer.StartAsync(serverAssembly, connectionString))
             {
                 log.Write("PASS", $"T1 test server was observed listening on dedicated loopback port {server.Port}.");
                 await accounts.SeedAsync(connectionString);
-                await RunDisconnectPhaseAsync(server, accounts, log);
+                _ = await RunDisconnectPhaseAsync(server, accounts, connectionString, log);
+                await server.StopAbruptlyAsync();
+            }
+
+            await SetSelectedMapAsync(connectionString, accounts.A, "game 1");
+            await SetSelectedMapAsync(connectionString, accounts.B, "game 2");
+            await SetSelectedMapAsync(connectionString, accounts.C, "game 3");
+            await SetSelectedMapAsync(connectionString, accounts.D, "game");
+            await SetSelectedMapAsync(connectionString, accounts.E, "unsupported-map");
+            await using (TestServer server = await TestServer.StartAsync(serverAssembly, connectionString))
+            {
+                await VerifySelectedMapMigrationAsync(connectionString, accounts, log);
+                roomIdLostOnRestart = await RunShutdownPhaseAsync(server, accounts, log);
                 await server.StopAbruptlyAsync();
             }
 
             await using (TestServer server = await TestServer.StartAsync(serverAssembly, connectionString))
             {
-                await RunShutdownPhaseAsync(server, accounts, log);
+                string roomId = roomIdLostOnRestart
+                    ?? throw new TestFailureException("The pre-restart test room was not recorded.");
+                await VerifyRestartDropsRoomStateAsync(server, accounts.A, roomId, log);
+                await RunLoadAndFramingPhaseAsync(server, log);
                 await server.StopAbruptlyAsync();
             }
         }
@@ -96,7 +114,7 @@ internal static class Program
             return 2;
         }
 
-        log.Write("RESULT", "PASS — T2-T8 protocol checks observed; GUI checks remain manual.");
+        log.Write("RESULT", "PASS — OTP/login-state, room/snapshot, reconnect, shutdown, and bounded load checks passed; GUI/cross-network checks remain manual.");
         return 0;
     }
 
@@ -107,6 +125,7 @@ internal static class Program
         string evidencePath = Path.Combine(root, "docs", "evidence", $"TC05-pinned-local-{stamp}.log");
         using var log = new EvidenceLog(evidencePath);
         log.Write("INFO", "TC05 transport checks on dedicated loopback ports; no GUI or remote-network claim.");
+        string? certificatePath = null;
         try
         {
             string connectionString = ResolveTestConnectionString();
@@ -119,7 +138,7 @@ internal static class Program
             request.CertificateExtensions.Add(names.Build());
             DateTimeOffset now = DateTimeOffset.UtcNow;
             using X509Certificate2 certificate = request.CreateSelfSigned(now.AddMinutes(-1), now.AddDays(1));
-            string certificatePath = Path.Combine(Path.GetTempPath(), $"DanToPhong-tc05-{Guid.NewGuid():N}.pfx");
+            certificatePath = Path.Combine(Path.GetTempPath(), $"DanToPhong-tc05-{Guid.NewGuid():N}.pfx");
             string certificatePassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             byte[] pfx = certificate.Export(X509ContentType.Pkcs12, certificatePassword);
             await using (var certificateFile = new FileStream(certificatePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -178,6 +197,20 @@ internal static class Program
             log.Write("FAIL", detail);
             log.Write("RESULT", "FAIL");
             return 1;
+        }
+        finally
+        {
+            if (certificatePath != null && File.Exists(certificatePath))
+            {
+                try
+                {
+                    File.Delete(certificatePath);
+                }
+                catch (Exception ex)
+                {
+                    log.Write("WARN", $"Temporary TLS certificate cleanup failed ({ex.GetType().Name}); remove the exact test artifact manually.");
+                }
+            }
         }
     }
 
@@ -246,29 +279,146 @@ internal static class Program
         }
     }
 
-    private static async Task RunDisconnectPhaseAsync(
+    private static async Task RunSecurityStateChecksAsync(string connectionString, EvidenceLog log)
+    {
+        var state = new ServerStateRepository(connectionString);
+        string wrongCodeLockKey = $"harness|otp-lock|{Guid.NewGuid():N}";
+        string expiredCodeKey = $"harness|otp-expired|{Guid.NewGuid():N}";
+        string consumedCodeKey = $"harness|otp-consume|{Guid.NewGuid():N}";
+        string loginLimiterKey = $"harness|login|{Guid.NewGuid():N}";
+        string[] verificationKeys = { wrongCodeLockKey, expiredCodeKey, consumedCodeKey };
+
+        try
+        {
+            string validCode = RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+            string wrongCode = validCode == "999999" ? "100000" : (int.Parse(validCode, CultureInfo.InvariantCulture) + 1).ToString("D6", CultureInfo.InvariantCulture);
+            if (!await state.TryReserveVerificationAsync(wrongCodeLockKey, DateTime.UtcNow.AddMinutes(1), CancellationToken.None))
+                throw new TestFailureException("OTP test reservation unexpectedly hit a cooldown.");
+            await state.SaveVerificationCodeAsync(wrongCodeLockKey, validCode, DateTime.UtcNow.AddMinutes(10), CancellationToken.None);
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                if (await state.VerifyAndConsumeCodeAsync(wrongCodeLockKey, wrongCode, CancellationToken.None))
+                    throw new TestFailureException("OTP accepted a wrong verification code.");
+            }
+            if (await state.VerifyAndConsumeCodeAsync(wrongCodeLockKey, validCode, CancellationToken.None))
+                throw new TestFailureException("OTP accepted a correct code after five failed attempts.");
+            log.Write("PASS", "TC04 OTP repository rejected wrong codes and locked verification after five attempts; code values were not logged.");
+
+            if (!await state.TryReserveVerificationAsync(expiredCodeKey, DateTime.UtcNow.AddMinutes(1), CancellationToken.None))
+                throw new TestFailureException("Expired OTP test reservation unexpectedly hit a cooldown.");
+            string expiredCode = RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+            await state.SaveVerificationCodeAsync(expiredCodeKey, expiredCode, DateTime.UtcNow.AddSeconds(-1), CancellationToken.None);
+            if (await state.VerifyAndConsumeCodeAsync(expiredCodeKey, expiredCode, CancellationToken.None))
+                throw new TestFailureException("OTP accepted an expired verification code.");
+
+            if (!await state.TryReserveVerificationAsync(consumedCodeKey, DateTime.UtcNow.AddMinutes(1), CancellationToken.None))
+                throw new TestFailureException("Valid OTP test reservation unexpectedly hit a cooldown.");
+            string singleUseCode = RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+            await state.SaveVerificationCodeAsync(consumedCodeKey, singleUseCode, DateTime.UtcNow.AddMinutes(10), CancellationToken.None);
+            if (!await state.VerifyAndConsumeCodeAsync(consumedCodeKey, singleUseCode, CancellationToken.None) ||
+                await state.VerifyAndConsumeCodeAsync(consumedCodeKey, singleUseCode, CancellationToken.None))
+                throw new TestFailureException("OTP did not accept a valid code exactly once.");
+            log.Write("PASS", "TC04 OTP repository rejected an expired code and consumed a valid code exactly once.");
+
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                if (!await state.TryBeginLoginAttemptAsync(
+                        loginLimiterKey, 5, TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15), CancellationToken.None))
+                    throw new TestFailureException("Login limiter locked before the configured attempt limit.");
+                await state.RecordFailedLoginAsync(loginLimiterKey, 5, TimeSpan.FromMinutes(15), CancellationToken.None);
+            }
+            if (await state.TryBeginLoginAttemptAsync(
+                    loginLimiterKey, 5, TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15), CancellationToken.None))
+                throw new TestFailureException("Login limiter allowed an attempt after reaching its configured limit.");
+            log.Write("PASS", "Login limiter allowed five attempts then rejected the next attempt.");
+        }
+        finally
+        {
+            foreach (string key in verificationKeys)
+                await DeleteVerificationRowAsync(connectionString, key);
+            await state.ClearLoginAttemptsAsync(loginLimiterKey, CancellationToken.None);
+        }
+        log.Write("PASS", "Temporary OTP and login-limiter database rows were removed.");
+    }
+
+    private static async Task DeleteVerificationRowAsync(string connectionString, string key)
+    {
+        string hash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE dbo.VerificationCodes WHERE KeyHash=@hash;";
+        command.Parameters.Add("@hash", System.Data.SqlDbType.Char, 64).Value = hash;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<string> RunDisconnectPhaseAsync(
         TestServer server,
         TestAccounts accounts,
+        string connectionString,
         EvidenceLog log)
     {
         await using var clientA = new TestTcpClient("A");
         await using var clientB = new TestTcpClient("B");
+        await using var clientC = new TestTcpClient("C");
+        await using var clientD = new TestTcpClient("D");
         await clientA.ConnectAsync(server.Port);
         await clientB.ConnectAsync(server.Port);
+        await clientC.ConnectAsync(server.Port);
+        await clientD.ConnectAsync(server.Port);
         await clientA.LoginAsync(accounts.A);
         await clientB.LoginAsync(accounts.B);
-        await server.WaitForAcceptedClientsAsync(2, TimeSpan.FromSeconds(5));
-        log.Write("PASS", "T2 both TCP clients connected, authenticated, and appeared in server session logs.");
+        await clientC.LoginAsync(accounts.C);
+        await clientD.LoginAsync(accounts.D);
+        await VerifyAccountSettingsAsync(clientA, accounts.A, server.Port, connectionString, log);
+        await VerifySoloWinRewardAsync(clientA, log);
+        await VerifyMultiplayerRewardPersistenceAsync(clientA, accounts.A.Username, connectionString, log);
+        log.Write("PASS", "T2 authenticated login responses returned each account email persisted in SQL.");
+        await server.WaitForAcceptedClientsAsync(4, TimeSpan.FromSeconds(5));
+        log.Write("PASS", "T2 four TCP clients connected, authenticated, and appeared in server session logs.");
 
         TimeSpan latencyA = await MeasurePingAsync(clientA);
         TimeSpan latencyB = await MeasurePingAsync(clientB);
         log.Write("PASS", $"T3 both authenticated clients received PONG in under 1 second (A {latencyA.TotalMilliseconds:F1} ms; B {latencyB.TotalMilliseconds:F1} ms).");
 
-        string roomId = await CreateAndStartRoomAsync(clientA, clientB);
+        string roomId = await CreateAndStartRoomAsync(clientA, clientB, clientC, clientD);
         await using var gameStreamB = await GameStreamClient.ConnectAsync(server.Port, clientB.Token);
-        await gameStreamB.WaitForSnapshotAsync(
-            snapshot => snapshot.RoomId == roomId && snapshot.GamePlayers?.Count == 2,
+        ResponsePacket initialSnapshot = await gameStreamB.WaitForSnapshotAsync(
+            snapshot => snapshot.RoomId == roomId && snapshot.GamePlayers?.Count == 4,
             TimeSpan.FromSeconds(5));
+        if (!initialSnapshot.IsRacing ||
+            initialSnapshot.ServerTick <= 0 ||
+            initialSnapshot.ServerTimestampMs <= 0 ||
+            initialSnapshot.GamePlayers!.Any(player =>
+                player.Sequence != initialSnapshot.ServerTick || player.ServerTimestampMs <= 0))
+            throw new TestFailureException("TC03 initial room snapshot omitted race state, sequence, or timestamp.");
+        log.Write("PASS", "TC03 four authenticated clients created/joined a room and received sequenced, timestamped server snapshots.");
+
+        await VerifyAuthoritativeInputAsync(clientA, gameStreamB, clientA.UserId, initialSnapshot, log);
+        await VerifyFourPlayerUdpMovementAsync(
+            server,
+            new[] { clientA, clientB, clientC, clientD },
+            gameStreamB,
+            roomId,
+            log);
+
+        await using var clientE = new TestTcpClient("E");
+        await clientE.ConnectAsync(server.Port);
+        await clientE.LoginAsync(accounts.E);
+        ResponsePacket spectate = await clientE.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameSpectate,
+            RoomId = roomId
+        });
+        if (!spectate.Success || !spectate.IsSpectator || spectate.PlayerCount != 4)
+            throw new TestFailureException("TC03 an additional authenticated client could not spectate without becoming a racer.");
+        await using var gameStreamE = await GameStreamClient.ConnectAsync(server.Port, clientE.Token);
+        ResponsePacket spectatorSnapshot = await gameStreamE.WaitForSnapshotAsync(
+            snapshot => snapshot.RoomId == roomId && snapshot.IsSpectator && snapshot.GamePlayers?.Count == 4,
+            TimeSpan.FromSeconds(5));
+        if (!spectatorSnapshot.IsRacing)
+            throw new TestFailureException("TC03 spectator stream did not receive the live authoritative snapshot.");
+        log.Write("PASS", "TC03 an additional authenticated client spectated the four-racer room and received live snapshots.");
 
         TimeSpan messageLatency = await SendAndObserveChatAsync(clientA, clientB);
         log.Write("PASS", $"T4 client B received client A's chat message in under 1 second ({messageLatency.TotalMilliseconds:F1} ms).");
@@ -293,9 +443,311 @@ internal static class Program
         await server.WaitForDisconnectedUserAsync(accounts.A.Username, TimeSpan.FromSeconds(5));
         log.Write("PASS", "T7 an abrupt client-A socket reset removed its session; client B received PLAYER_DISCONNECTED and IsDisconnected=true.");
 
+        await using var reconnectedA = new TestTcpClient("A-reconnected");
+        await reconnectedA.ConnectAsync(server.Port);
+        await reconnectedA.LoginAsync(accounts.A);
+        ResponsePacket reconnect = await reconnectedA.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameReconnect,
+            RoomId = roomId
+        });
+        if (!reconnect.Success || reconnect.RoomId != roomId || !reconnect.IsRacing ||
+            reconnect.GamePlayers?.Any(player => player.UserId == clientA.UserId && player.IsDisconnected) == true)
+            throw new TestFailureException("T7 reconnect inside the grace period did not restore the player to the running room.");
+        await using var reconnectedStream = await GameStreamClient.ConnectAsync(server.Port, reconnectedA.Token);
+        ResponsePacket restoredSnapshot = await reconnectedStream.WaitForSnapshotAsync(
+            snapshot => snapshot.RoomId == roomId &&
+                        snapshot.GamePlayers?.Any(player =>
+                            player.UserId == clientA.UserId && !player.IsDisconnected) == true,
+            TimeSpan.FromSeconds(5));
+        if (!restoredSnapshot.IsRacing)
+            throw new TestFailureException("T7 the reconnected client did not receive the restored live snapshot.");
+        log.Write("PASS", "T7 the same account reconnected within the grace period and restored its racer state and snapshot stream.");
+        return roomId;
     }
 
-    private static async Task RunShutdownPhaseAsync(
+    private static async Task VerifyAccountSettingsAsync(
+        TestTcpClient client,
+        TestAccount account,
+        int port,
+        string connectionString,
+        EvidenceLog log)
+    {
+        string previousPassword = account.Password;
+        string previousToken = client.Token;
+        string replacementPassword = $"Q8{Convert.ToHexString(RandomNumberGenerator.GetBytes(18))}x";
+        string replacementEmail = $"{account.Username}+updated@example.invalid";
+
+        ResponsePacket resetMismatch = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.RequestResetCode,
+            Username = account.Username,
+            Email = replacementEmail
+        });
+        if (resetMismatch.Success || !resetMismatch.Message.Contains("does not match", StringComparison.OrdinalIgnoreCase))
+            throw new TestFailureException("Password recovery did not clearly reject a mismatched registered email.");
+
+        string unknownUsername = $"ghost_{Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant()}";
+        ResponsePacket resetUnknownUser = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.RequestResetCode,
+            Username = unknownUsername,
+            Email = $"{unknownUsername}@example.invalid"
+        });
+        if (resetUnknownUser.Success ||
+            !resetUnknownUser.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
+            throw new TestFailureException("Password recovery did not clearly reject an unknown username.");
+
+        var repository = new NguoiDungRepository(connectionString);
+        var resetPasswordResult =
+            await repository.DoiMatKhauAsync(account.Username, account.Email, previousPassword);
+        if (resetPasswordResult.Success ||
+            !resetPasswordResult.Message.Contains("different", StringComparison.OrdinalIgnoreCase))
+            throw new TestFailureException("Password recovery accepted a new password identical to the current password.");
+
+        ResponsePacket samePassword = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.UpdateAccountSettings,
+            CurrentPassword = previousPassword,
+            NewPassword = previousPassword
+        });
+        if (samePassword.Success || !samePassword.Message.Contains("different", StringComparison.OrdinalIgnoreCase))
+            throw new TestFailureException("Account settings accepted a new password identical to the current password.");
+
+        string avatarBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/C2kAAAAASUVORK5CYII=";
+        ResponsePacket avatarWithoutPassword = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.UploadAvatar,
+            AvatarBase64 = avatarBase64
+        });
+        if (avatarWithoutPassword.Success || avatarWithoutPassword.Code != ErrorCodes.InvalidInput)
+            throw new TestFailureException("Avatar upload did not require a current password.");
+
+        ResponsePacket avatarWrongPassword = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.UploadAvatar,
+            CurrentPassword = "incorrect-current-password",
+            AvatarBase64 = avatarBase64
+        });
+        if (avatarWrongPassword.Success || avatarWrongPassword.Code != ErrorCodes.AuthFailed)
+            throw new TestFailureException("Avatar upload accepted an incorrect current password.");
+
+        ResponsePacket avatarSaved = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.UploadAvatar,
+            CurrentPassword = previousPassword,
+            AvatarBase64 = avatarBase64
+        });
+        ResponsePacket avatarFetched = await client.SendAsync(new RequestPacket { Command = Commands.GetAvatar });
+        if (!avatarSaved.Success || !avatarFetched.Success || avatarFetched.AvatarBase64 != avatarBase64)
+            throw new TestFailureException("Avatar upload did not persist data for the authenticated account.");
+
+        ResponsePacket rejected = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.UpdateAccountSettings,
+            CurrentPassword = "incorrect-current-password",
+            NewPassword = replacementPassword,
+            Email = replacementEmail
+        });
+        if (rejected.Success || rejected.Code != ErrorCodes.AuthFailed)
+            throw new TestFailureException("Account settings accepted an incorrect current password.");
+
+        ResponsePacket updated = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.UpdateAccountSettings,
+            CurrentPassword = previousPassword,
+            NewPassword = replacementPassword,
+            Email = replacementEmail
+        });
+        if (!updated.Success ||
+            updated.User == null ||
+            updated.User.Email != replacementEmail ||
+            string.IsNullOrWhiteSpace(updated.Token) ||
+            updated.Token == previousToken)
+            throw new TestFailureException("Account settings did not persist email and rotate the authenticated token.");
+
+        client.SetToken(updated.Token);
+        account.UpdateCredentials(replacementPassword, replacementEmail);
+
+        await using var oldTokenClient = new TestTcpClient("stale-token");
+        await oldTokenClient.ConnectAsync(port);
+        ResponsePacket staleToken = await oldTokenClient.SendAsync(new RequestPacket
+        {
+            Command = Commands.AuthToken,
+            Token = previousToken
+        });
+        if (staleToken.Success || staleToken.Code != ErrorCodes.Unauthorized)
+            throw new TestFailureException("Password change did not revoke the previous auth token.");
+
+        await using var verifier = new TestTcpClient("updated-credentials");
+        await verifier.ConnectAsync(port);
+        await verifier.LoginAsync(account);
+        log.Write("PASS", "Recovery clearly rejected unknown users and email mismatch and rejected password reuse; settings rejected a wrong current password and password reuse; avatar changes required a correct current password and persisted; account changes rotated the token and revoked the old token.");
+    }
+
+    private static async Task VerifySoloWinRewardAsync(TestTcpClient client, EvidenceLog log)
+    {
+        ResponsePacket before = await client.SendAsync(new RequestPacket { Command = Commands.GetInventory });
+        if (!before.Success || before.Inventory == null)
+            throw new TestFailureException("The solo reward test could not read the initial account coins.");
+
+        ResponsePacket started = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.StartSoloMatch,
+            MapName = "game1"
+        });
+        if (!started.Success || string.IsNullOrWhiteSpace(started.MatchId))
+            throw new TestFailureException("The server did not issue a solo match ticket.");
+
+        await Task.Delay(TimeSpan.FromSeconds(10.2));
+        var finishRequest = new RequestPacket
+        {
+            Command = Commands.FinishSoloMatch,
+            MatchId = started.MatchId,
+            MapName = "game1",
+            GameEventType = "WIN"
+        };
+        ResponsePacket finished = await client.SendAsync(finishRequest);
+        if (!finished.Success || finished.Inventory == null ||
+            finished.Inventory.Coins != before.Inventory.Coins + 10)
+            throw new TestFailureException("A verified solo win did not add exactly 10 coins.");
+
+        ResponsePacket duplicate = await client.SendAsync(finishRequest);
+        if (!duplicate.Success || duplicate.Inventory == null ||
+            duplicate.Inventory.Coins != finished.Inventory.Coins)
+            throw new TestFailureException("Retrying a solo win applied the reward more than once.");
+
+        log.Write("PASS", "Server-issued solo match ticket awarded exactly 10 coins after the minimum duration; duplicate finish did not award again.");
+    }
+
+    private static async Task VerifyMultiplayerRewardPersistenceAsync(
+        TestTcpClient client,
+        string username,
+        string connectionString,
+        EvidenceLog log)
+    {
+        ResponsePacket before = await client.SendAsync(new RequestPacket { Command = Commands.GetInventory });
+        if (!before.Success || before.Inventory == null)
+            throw new TestFailureException("The multiplayer reward test could not read the initial account coins.");
+
+        int userId;
+        await using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT UserId FROM dbo.NguoiDung WHERE Username=@username;";
+            command.Parameters.Add("@username", System.Data.SqlDbType.NVarChar, 20).Value = username;
+            object? result = await command.ExecuteScalarAsync();
+            if (result == null || result == DBNull.Value)
+                throw new TestFailureException("The multiplayer reward test account was not present in the test database.");
+            userId = Convert.ToInt32(result, CultureInfo.InvariantCulture);
+        }
+
+        Guid matchId = Guid.NewGuid();
+        var repository = new NguoiDungRepository(connectionString);
+        await repository.AwardRaceWinnerAsync(
+            matchId, userId, TcpGameRoomRegistry.WinnerRewardCoins, CancellationToken.None);
+        int coinsAfterAward = await ReadAccountCoinsAsync(connectionString, username);
+        if (coinsAfterAward != before.Inventory.Coins + 50)
+            throw new TestFailureException("The multiplayer winner reward did not persist exactly 50 coins.");
+
+        await repository.AwardRaceWinnerAsync(
+            matchId, userId, TcpGameRoomRegistry.WinnerRewardCoins, CancellationToken.None);
+        int coinsAfterDuplicate = await ReadAccountCoinsAsync(connectionString, username);
+        if (coinsAfterDuplicate != coinsAfterAward)
+            throw new TestFailureException("A repeated multiplayer winner reward was applied more than once.");
+
+        log.Write("PASS", "Server multiplayer reward persistence added exactly 50 coins; repeated database award with the same match ID was deduplicated.");
+    }
+
+    private static async Task<int> ReadAccountCoinsAsync(string connectionString, string username)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Coins FROM dbo.NguoiDung WHERE Username=@username;";
+        command.Parameters.Add("@username", System.Data.SqlDbType.NVarChar, 20).Value = username;
+        object? result = await command.ExecuteScalarAsync();
+        if (result == null || result == DBNull.Value)
+            throw new TestFailureException("The reward test account was not present in the test database.");
+        return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task SetSelectedMapAsync(
+        string connectionString,
+        TestAccount account,
+        string map)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE dbo.NguoiDung SET SelectedMap=@map WHERE Username=@username;";
+        command.Parameters.Add("@map", System.Data.SqlDbType.NVarChar, 50).Value = map;
+        command.Parameters.Add("@username", System.Data.SqlDbType.NVarChar, 20).Value = account.Username;
+        if (await command.ExecuteNonQueryAsync() != 1)
+            throw new TestFailureException("The selected-map migration fixture could not be updated.");
+    }
+
+    private static async Task VerifySelectedMapMigrationAsync(
+        string connectionString,
+        TestAccounts accounts,
+        EvidenceLog log)
+    {
+        string[] usernames = new[] { accounts.A, accounts.B, accounts.C, accounts.D, accounts.E }
+            .Select(account => account.Username)
+            .ToArray();
+        string[] expectedMaps = { MapNames.Game1, MapNames.Game2, MapNames.Game3, MapNames.Default, MapNames.Default };
+        for (int i = 0; i < usernames.Length; i++)
+        {
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT SelectedMap FROM dbo.NguoiDung WHERE Username=@username;";
+            command.Parameters.Add("@username", System.Data.SqlDbType.NVarChar, 20).Value = usernames[i];
+            string? actual = Convert.ToString(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
+            if (!string.Equals(actual, expectedMaps[i], StringComparison.Ordinal))
+                throw new TestFailureException("A legacy selected-map value was not normalized to the expected catalog value.");
+        }
+
+        await using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+SELECT COUNT(*)
+FROM dbo.NguoiDung
+WHERE SelectedMap NOT IN (@game1, @game2, @game3);";
+            command.Parameters.Add("@game1", System.Data.SqlDbType.NVarChar, 50).Value = MapNames.Game1;
+            command.Parameters.Add("@game2", System.Data.SqlDbType.NVarChar, 50).Value = MapNames.Game2;
+            command.Parameters.Add("@game3", System.Data.SqlDbType.NVarChar, 50).Value = MapNames.Game3;
+            if (Convert.ToInt32(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture) != 0)
+                throw new TestFailureException("The selected-map migration left unsupported values in the test database.");
+        }
+
+        await using (var connection = new SqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+SELECT dc.definition
+FROM sys.default_constraints dc
+JOIN sys.columns c ON c.default_object_id = dc.object_id
+JOIN sys.tables t ON t.object_id = c.object_id
+JOIN sys.schemas s ON s.schema_id = t.schema_id
+WHERE s.name='dbo' AND t.name='NguoiDung' AND c.name='SelectedMap';";
+            string definition = Convert.ToString(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture) ?? string.Empty;
+            string normalized = definition.Replace("(", string.Empty, StringComparison.Ordinal)
+                .Replace(")", string.Empty, StringComparison.Ordinal)
+                .Replace("'", string.Empty, StringComparison.Ordinal)
+                .Trim();
+            if (!string.Equals(normalized, MapNames.Default, StringComparison.Ordinal))
+                throw new TestFailureException("The SelectedMap database default does not match the canonical default map.");
+        }
+
+        log.Write("PASS", "Server startup normalized all legacy/unsupported SelectedMap values and set the database default to game1.");
+    }
+
+    private static async Task<string> RunShutdownPhaseAsync(
         TestServer server,
         TestAccounts accounts,
         EvidenceLog log)
@@ -329,6 +781,239 @@ internal static class Program
         if (!clientALost || !clientBLost || !streamALost || !streamBLost)
             throw new TestFailureException("T8 both clients did not report loss on their command and game-stream connections.");
         log.Write("PASS", "T8 terminating the test server made both clients detect command- and game-stream connection loss without a client crash.");
+        return roomId;
+    }
+
+    private static async Task VerifyAuthoritativeInputAsync(
+        TestTcpClient racer,
+        GameStreamClient observerStream,
+        int userId,
+        ResponsePacket initialSnapshot,
+        EvidenceLog log)
+    {
+        ResponsePacket outOfRange = await racer.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameInput,
+            Throttle = 2f,
+            Steer = 0f,
+            ClientTick = 1,
+            ClientTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        });
+        if (outOfRange.Success)
+            throw new TestFailureException("Server accepted a throttle value outside [-1, 1].");
+
+        ResponsePacket missingTimestamp = await racer.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameInput,
+            Throttle = 1f,
+            Steer = 0f,
+            ClientTick = 1
+        });
+        if (missingTimestamp.Success)
+            throw new TestFailureException("Server accepted game input without a client timestamp.");
+
+        ResponsePacket latest = await racer.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameInput,
+            Throttle = 0f,
+            Steer = 0f,
+            ClientTick = 1,
+            ClientTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        });
+        if (!latest.Success)
+            throw new TestFailureException("Server rejected valid initial game input.");
+
+        int tick = 1;
+        GamePlayerSnapshotDto start = FindPlayer(initialSnapshot, userId);
+        for (int step = 0; step < 8; step++)
+        {
+            await Task.Delay(60);
+            latest = await racer.SendAsync(new RequestPacket
+            {
+                Command = Commands.GameInput,
+                Throttle = 1f,
+                Steer = 0f,
+                ClientTick = ++tick,
+                ClientTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                PositionX = start.PositionX + 100_000f,
+                PositionY = start.PositionY - 100_000f,
+                PositionZ = start.PositionZ + 100_000f
+            });
+            if (!latest.Success)
+                throw new TestFailureException("Server rejected valid bounded game input.");
+        }
+
+        ResponsePacket stale = await racer.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameInput,
+            Throttle = 0f,
+            Steer = 0f,
+            ClientTick = tick,
+            ClientTimestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        });
+        if (stale.Success)
+            throw new TestFailureException("Server accepted a duplicate client input tick.");
+
+        GamePlayerSnapshotDto end = FindPlayer(latest, userId);
+        double displacement = Math.Sqrt(
+            Math.Pow(end.PositionX - start.PositionX, 2) +
+            Math.Pow(end.PositionY - start.PositionY, 2) +
+            Math.Pow(end.PositionZ - start.PositionZ, 2));
+        if (displacement < 0.1 || displacement > 100 ||
+            latest.ServerTick <= initialSnapshot.ServerTick ||
+            latest.ServerTimestampMs <= initialSnapshot.ServerTimestampMs)
+            throw new TestFailureException("Server-authoritative input did not produce a bounded, sequenced movement snapshot.");
+
+        ResponsePacket peerSnapshot = await observerStream.WaitForSnapshotAsync(
+            snapshot => snapshot.RoomId == initialSnapshot.RoomId &&
+                        snapshot.GamePlayers?.Any(player =>
+                            player.UserId == userId &&
+                            Math.Sqrt(Math.Pow(player.PositionX - start.PositionX, 2) +
+                                      Math.Pow(player.PositionY - start.PositionY, 2) +
+                                      Math.Pow(player.PositionZ - start.PositionZ, 2)) > 0.1) == true,
+            TimeSpan.FromSeconds(5));
+        if (FindPlayer(peerSnapshot, userId).IsDisconnected)
+            throw new TestFailureException("Peer snapshot marked the active racer disconnected.");
+        log.Write("PASS", $"TC03 server rejected invalid/stale input, ignored forged client coordinates, and broadcast bounded movement to the peer ({displacement:F2} m observed).");
+    }
+
+    private static GamePlayerSnapshotDto FindPlayer(ResponsePacket response, int userId) =>
+        response.GamePlayers?.FirstOrDefault(player => player.UserId == userId)
+        ?? throw new TestFailureException("Authoritative snapshot did not include the expected racer.");
+
+    private static async Task VerifyFourPlayerUdpMovementAsync(
+        TestServer server,
+        TestTcpClient[] racers,
+        GameStreamClient observer,
+        string roomId,
+        EvidenceLog log)
+    {
+        ResponsePacket before = await racers[0].SendAsync(new RequestPacket { Command = Commands.GameRoomState });
+        if (!before.Success || before.GamePlayers?.Count != 4)
+            throw new TestFailureException("The UDP test did not start with four server-authoritative racers.");
+
+        UdpInputProbe[] probes = await Task.WhenAll(
+            racers.Select(racer => racer.BindUdpAsync(server.UdpPort)));
+        try
+        {
+            for (int frame = 0; frame < 8; frame++)
+            {
+                await Task.WhenAll(probes.Select((probe, index) =>
+                    probe.SendNextAsync(1f, (index - 1.5f) * 0.05f)));
+                await Task.Delay(50);
+            }
+
+            ResponsePacket moved = await observer.WaitForSnapshotAsync(snapshot =>
+            {
+                if (snapshot.RoomId != roomId || snapshot.GamePlayers?.Count != 4)
+                    return false;
+                return racers.All(racer =>
+                {
+                    GamePlayerSnapshotDto start = FindPlayer(before, racer.UserId);
+                    GamePlayerSnapshotDto current = FindPlayer(snapshot, racer.UserId);
+                    double distance = Math.Sqrt(
+                        Math.Pow(current.PositionX - start.PositionX, 2) +
+                        Math.Pow(current.PositionY - start.PositionY, 2) +
+                        Math.Pow(current.PositionZ - start.PositionZ, 2));
+                    return distance > 0.05;
+                });
+            }, TimeSpan.FromSeconds(5));
+
+            if (moved.GamePlayers!.Any(player => player.Sequence != moved.ServerTick))
+                throw new TestFailureException("TCP snapshots did not carry the matching server tick after UDP movement.");
+            log.Write("PASS", "Four authenticated racers sent HMAC-protected, sequenced UDP movement; all four authoritative positions arrived in ordered TCP snapshots.");
+        }
+        finally
+        {
+            foreach (UdpInputProbe probe in probes)
+                probe.Dispose();
+        }
+    }
+
+    private static async Task VerifyRestartDropsRoomStateAsync(
+        TestServer server,
+        TestAccount account,
+        string previousRoomId,
+        EvidenceLog log)
+    {
+        await using var client = new TestTcpClient("post-restart");
+        await client.ConnectAsync(server.Port);
+        await client.LoginAsync(account);
+        ResponsePacket reconnect = await client.SendAsync(new RequestPacket
+        {
+            Command = Commands.GameReconnect,
+            RoomId = previousRoomId
+        });
+        if (reconnect.Success)
+            throw new TestFailureException("Server restored an in-memory room after a process restart.");
+        log.Write("PASS", "TC07 process restart cleared the documented in-memory room state; reconnect was rejected instead of returning a false success.");
+    }
+
+    private static async Task RunLoadAndFramingPhaseAsync(TestServer server, EvidenceLog log)
+    {
+        const int clientCount = 50;
+        using var slowSender = new TcpClient(AddressFamily.InterNetwork);
+        using var slowConnectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await slowSender.ConnectAsync(IPAddress.Loopback, server.Port, slowConnectTimeout.Token);
+        await slowSender.GetStream().WriteAsync(new byte[] { 0, 0 }, slowConnectTimeout.Token);
+
+        var allResponded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int responded = 0;
+        async Task<double> ProbeAsync()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var client = new TcpClient(AddressFamily.InterNetwork);
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            await client.ConnectAsync(IPAddress.Loopback, server.Port, timeout.Token);
+            NetworkStream stream = client.GetStream();
+            await MessageFramer.SendAsync(stream, new RequestPacket { Command = Commands.Ping }, timeout.Token);
+            ResponsePacket response = await MessageFramer.ReceiveAsync<ResponsePacket>(stream, timeout.Token)
+                ?? throw new TestFailureException("An anonymous load client was disconnected before receiving a response.");
+            stopwatch.Stop();
+            if (response.Success || response.Code != ErrorCodes.Unauthorized)
+                throw new TestFailureException("Anonymous load client received an unexpected PING response.");
+            if (Interlocked.Increment(ref responded) == clientCount)
+                allResponded.TrySetResult(true);
+            await allResponded.Task.WaitAsync(timeout.Token);
+            return stopwatch.Elapsed.TotalMilliseconds;
+        }
+
+        double[] latencies = await Task.WhenAll(
+                Enumerable.Range(0, clientCount).Select(_ => ProbeAsync()))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+        double[] ordered = latencies.OrderBy(value => value).ToArray();
+        double p95 = ordered[(int)Math.Ceiling(ordered.Length * 0.95) - 1];
+        if (latencies.Length != clientCount || p95 >= 3000 || ordered[^1] >= 5000)
+            throw new TestFailureException("Fifty concurrent anonymous clients exceeded the bounded local response threshold.");
+        log.Write("PASS", $"TC10 {clientCount} simultaneous anonymous clients got expected auth rejection; p95={p95:F1} ms, max={ordered[^1]:F1} ms while a slow sender held an incomplete header.");
+
+        await VerifyMalformedFrameClosesAsync(server.Port, new byte[] { 0, 0, 0, 1, (byte)'{' }, "malformed JSON");
+        log.Write("PASS", "TC10 malformed JSON frame was closed without an application response.");
+        byte[] oversizedHeader = new byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(oversizedHeader, 64 * 1024 + 1);
+        await VerifyMalformedFrameClosesAsync(server.Port, oversizedHeader, "oversized frame header");
+        log.Write("PASS", "TC10 oversized frame header was closed without an application response.");
+    }
+
+    private static async Task VerifyMalformedFrameClosesAsync(int port, byte[] frame, string caseName)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var client = new TcpClient(AddressFamily.InterNetwork);
+        await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+        await client.GetStream().WriteAsync(frame, timeout.Token);
+        byte[] response = new byte[1];
+        try
+        {
+            int received = await client.GetStream().ReadAsync(response, timeout.Token);
+            if (received != 0)
+                throw new TestFailureException($"Server returned application data after {caseName}.");
+        }
+        catch (IOException)
+        {
+        }
+        catch (SocketException)
+        {
+        }
     }
 
     private static async Task<TimeSpan> MeasurePingAsync(TestTcpClient client)
@@ -346,13 +1031,16 @@ internal static class Program
     private static bool IsPong(ResponsePacket response) =>
         response.Success && string.Equals(response.Message, "PONG", StringComparison.Ordinal);
 
-    private static async Task<string> CreateAndStartRoomAsync(TestTcpClient host, TestTcpClient guest)
+    private static async Task<string> CreateAndStartRoomAsync(
+        TestTcpClient host,
+        TestTcpClient guest,
+        params TestTcpClient[] additionalRacers)
     {
         ResponsePacket created = await host.SendAsync(new RequestPacket
         {
             Command = Commands.CreateGameRoom,
-            MapName = "game 1",
-            MaxPlayers = 2
+            MapName = "game1",
+            MaxPlayers = Math.Min(4, additionalRacers.Length + 2)
         });
         if (!created.Success || string.IsNullOrWhiteSpace(created.RoomId))
             throw new TestFailureException("The test host could not create a game room.");
@@ -365,10 +1053,40 @@ internal static class Program
         if (!joined.Success)
             throw new TestFailureException("The second test client could not join the game room.");
 
+        foreach (TestTcpClient racer in additionalRacers)
+        {
+            ResponsePacket added = await racer.SendAsync(new RequestPacket
+            {
+                Command = Commands.JoinGameRoom,
+                RoomId = created.RoomId
+            });
+            if (!added.Success)
+                throw new TestFailureException("An additional test client could not join the four-player room.");
+        }
+
+        ResponsePacket blocked = await host.SendAsync(new RequestPacket
+        {
+            Command = Commands.StartGameRoom,
+            MapName = "game1"
+        });
+        if (blocked.Success)
+            throw new TestFailureException("The server allowed START before every client reported the lobby scene.");
+
+        foreach (TestTcpClient racer in new[] { host, guest }.Concat(additionalRacers))
+        {
+            ResponsePacket reported = await racer.SendAsync(new RequestPacket
+            {
+                Command = Commands.ReportRoomScene,
+                SceneName = "LobbyScene"
+            });
+            if (!reported.Success)
+                throw new TestFailureException($"Test client {racer.Name} could not report lobby readiness.");
+        }
+
         ResponsePacket started = await host.SendAsync(new RequestPacket
         {
             Command = Commands.StartGameRoom,
-            MapName = "game 1"
+            MapName = "game1"
         });
         if (!started.Success || !started.IsRacing)
             throw new TestFailureException("The two-client game room could not be started.");
@@ -516,18 +1234,24 @@ internal sealed class TestAccounts
 {
     public TestAccount A { get; } = TestAccount.Create();
     public TestAccount B { get; } = TestAccount.Create();
-    public bool HasCreatedAccounts => A.Created || B.Created;
+    public TestAccount C { get; } = TestAccount.Create();
+    public TestAccount D { get; } = TestAccount.Create();
+    public TestAccount E { get; } = TestAccount.Create();
+    public bool HasCreatedAccounts => A.Created || B.Created || C.Created || D.Created || E.Created;
 
     public async Task SeedAsync(string connectionString)
     {
         var repository = new NguoiDungRepository(connectionString);
         await CreateAsync(repository, A, "Protocol test A");
         await CreateAsync(repository, B, "Protocol test B");
+        await CreateAsync(repository, C, "Protocol test C");
+        await CreateAsync(repository, D, "Protocol test D");
+        await CreateAsync(repository, E, "Protocol test E");
     }
 
     public async Task CleanupAsync(string connectionString)
     {
-        string[] usernames = new[] { A, B }.Where(account => account.Created).Select(account => account.Username).ToArray();
+        string[] usernames = new[] { A, B, C, D, E }.Where(account => account.Created).Select(account => account.Username).ToArray();
         if (usernames.Length == 0)
             return;
 
@@ -539,7 +1263,7 @@ internal sealed class TestAccounts
         command.CommandText = @"
 DECLARE @TestUserIds TABLE (UserId INT PRIMARY KEY);
 INSERT INTO @TestUserIds(UserId)
-SELECT UserId FROM dbo.NguoiDung WHERE Username IN (@usernameA, @usernameB);
+SELECT UserId FROM dbo.NguoiDung WHERE Username IN (@usernameA, @usernameB, @usernameC, @usernameD, @usernameE);
 DELETE r FROM dbo.GameMatchRewards AS r JOIN @TestUserIds AS u ON u.UserId = r.UserId;
 DELETE r FROM dbo.RequestIdempotency AS r JOIN @TestUserIds AS u ON u.UserId = r.UserId;
 DELETE t FROM dbo.AuthTokens AS t JOIN @TestUserIds AS u ON u.UserId = t.UserId;
@@ -550,10 +1274,19 @@ DELETE FROM dbo.NguoiDung WHERE UserId IN (SELECT UserId FROM @TestUserIds);";
             usernames.Contains(A.Username, StringComparer.Ordinal) ? A.Username : "__unused_a__";
         command.Parameters.Add("@usernameB", System.Data.SqlDbType.NVarChar, 20).Value =
             usernames.Contains(B.Username, StringComparer.Ordinal) ? B.Username : "__unused_b__";
+        command.Parameters.Add("@usernameC", System.Data.SqlDbType.NVarChar, 20).Value =
+            usernames.Contains(C.Username, StringComparer.Ordinal) ? C.Username : "__unused_c__";
+        command.Parameters.Add("@usernameD", System.Data.SqlDbType.NVarChar, 20).Value =
+            usernames.Contains(D.Username, StringComparer.Ordinal) ? D.Username : "__unused_d__";
+        command.Parameters.Add("@usernameE", System.Data.SqlDbType.NVarChar, 20).Value =
+            usernames.Contains(E.Username, StringComparer.Ordinal) ? E.Username : "__unused_e__";
         await command.ExecuteNonQueryAsync();
         await transaction.CommitAsync();
         A.Created = false;
         B.Created = false;
+        C.Created = false;
+        D.Created = false;
+        E.Created = false;
     }
 
     private static async Task CreateAsync(NguoiDungRepository repository, TestAccount account, string fullName)
@@ -562,7 +1295,8 @@ DELETE FROM dbo.NguoiDung WHERE UserId IN (SELECT UserId FROM @TestUserIds);";
         {
             Username = account.Username,
             Password = account.Password,
-            FullName = fullName
+            FullName = fullName,
+            Email = account.Email
         });
         if (!success)
             throw new TestFailureException($"Could not create an isolated account fixture ({code}).");
@@ -573,13 +1307,21 @@ DELETE FROM dbo.NguoiDung WHERE UserId IN (SELECT UserId FROM @TestUserIds);";
 internal sealed class TestAccount
 {
     public string Username { get; }
-    public string Password { get; }
+    public string Password { get; private set; }
+    public string Email { get; private set; }
     public bool Created { get; set; }
 
     private TestAccount(string username, string password)
     {
         Username = username;
         Password = password;
+        Email = $"{username}@example.invalid";
+    }
+
+    public void UpdateCredentials(string password, string email)
+    {
+        Password = password;
+        Email = email;
     }
 
     public static TestAccount Create()
@@ -619,10 +1361,31 @@ internal sealed class TestTcpClient : IAsyncDisposable
         }, TimeSpan.FromSeconds(20));
         if (!response.Success || string.IsNullOrWhiteSpace(response.Token) || response.User == null)
             throw new TestFailureException($"Client {Name} did not authenticate over TCP.");
+        if (!string.Equals(response.User.Email, account.Email, StringComparison.Ordinal))
+            throw new TestFailureException($"Client {Name} did not receive the email persisted for its account.");
 
         Token = response.Token;
         UserId = response.User.UserId;
     }
+
+    public async Task<UdpInputProbe> BindUdpAsync(int expectedPort)
+    {
+        ResponsePacket response = await SendAsync(new RequestPacket { Command = Commands.GameUdpBind });
+        if (!response.Success || response.UdpPort != expectedPort ||
+            string.IsNullOrWhiteSpace(response.UdpSessionId) ||
+            string.IsNullOrWhiteSpace(response.UdpKey) ||
+            response.UdpNextSequence == 0)
+            throw new TestFailureException($"Client {Name} did not receive a valid authenticated UDP binding.");
+
+        return new UdpInputProbe(
+            IPAddress.Loopback,
+            response.UdpPort,
+            Convert.FromHexString(response.UdpSessionId),
+            Convert.FromBase64String(response.UdpKey),
+            response.UdpNextSequence);
+    }
+
+    public void SetToken(string token) => Token = token;
 
     public async Task<ResponsePacket> SendAsync(RequestPacket request, TimeSpan? timeout = null)
     {
@@ -724,7 +1487,7 @@ internal sealed class GameStreamClient : IAsyncDisposable
         }
     }
 
-    public async Task WaitForSnapshotAsync(Func<ResponsePacket, bool> predicate, TimeSpan timeout)
+    public async Task<ResponsePacket> WaitForSnapshotAsync(Func<ResponsePacket, bool> predicate, TimeSpan timeout)
     {
         using var deadline = new CancellationTokenSource(timeout);
         while (await _messages.Reader.WaitToReadAsync(deadline.Token))
@@ -732,7 +1495,7 @@ internal sealed class GameStreamClient : IAsyncDisposable
             while (_messages.Reader.TryRead(out ResponsePacket? response))
             {
                 if (response.Command == Commands.GameSnapshot && predicate(response))
-                    return;
+                    return response;
             }
         }
         throw new TestFailureException("The game stream did not produce the expected snapshot.");
@@ -826,6 +1589,57 @@ internal sealed class GameStreamClient : IAsyncDisposable
     }
 }
 
+internal sealed class UdpInputProbe : IDisposable
+{
+    private const int ContentLength = 42;
+    private readonly UdpClient _client = new(AddressFamily.InterNetwork);
+    private readonly IPEndPoint _endpoint;
+    private readonly byte[] _sessionId;
+    private readonly byte[] _key;
+    private uint _nextSequence;
+
+    public UdpInputProbe(IPAddress address, int port, byte[] sessionId, byte[] key, uint nextSequence)
+    {
+        if (sessionId.Length != 16 || key.Length < 32 || nextSequence == 0)
+            throw new ArgumentException("The UDP binding material has an invalid length.");
+
+        _endpoint = new IPEndPoint(address, port);
+        _sessionId = sessionId;
+        _key = key;
+        _nextSequence = nextSequence;
+    }
+
+    public Task SendNextAsync(float throttle, float steer)
+    {
+        uint sequence = _nextSequence;
+        if (sequence == 0)
+            throw new InvalidOperationException("The UDP sequence wrapped and requires a new binding.");
+        _nextSequence = sequence == uint.MaxValue ? 0 : sequence + 1;
+        return SendAsync(sequence, throttle, steer);
+    }
+
+    private async Task SendAsync(uint sequence, float throttle, float steer)
+    {
+        byte[] datagram = new byte[ContentLength + 32];
+        "DTP1"u8.CopyTo(datagram);
+        _sessionId.CopyTo(datagram, 4);
+        BinaryPrimitives.WriteUInt32BigEndian(datagram.AsSpan(20, 4), sequence);
+        BinaryPrimitives.WriteInt64BigEndian(datagram.AsSpan(24, 8), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        BinaryPrimitives.WriteInt32BigEndian(datagram.AsSpan(32, 4), BitConverter.SingleToInt32Bits(throttle));
+        BinaryPrimitives.WriteInt32BigEndian(datagram.AsSpan(36, 4), BitConverter.SingleToInt32Bits(steer));
+        datagram[40] = 0;
+        datagram[41] = 0;
+        HMACSHA256.HashData(_key, datagram.AsSpan(0, ContentLength)).CopyTo(datagram, ContentLength);
+        await _client.SendAsync(datagram, datagram.Length, _endpoint);
+    }
+
+    public void Dispose()
+    {
+        _client.Dispose();
+        CryptographicOperations.ZeroMemory(_key);
+    }
+}
+
 internal sealed class TestServer : IAsyncDisposable
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(30);
@@ -834,11 +1648,13 @@ internal sealed class TestServer : IAsyncDisposable
     private bool _started;
 
     public int Port { get; }
+    public int UdpPort { get; }
 
-    private TestServer(Process process, int port)
+    private TestServer(Process process, int port, int udpPort)
     {
         _process = process;
         Port = port;
+        UdpPort = udpPort;
     }
 
     public static async Task<TestServer> StartAsync(
@@ -851,6 +1667,7 @@ internal sealed class TestServer : IAsyncDisposable
         int? secondaryPort = null)
     {
         int port = requestedPort ?? GetConfiguredTestPort();
+        int udpPort = GetConfiguredTestUdpPort();
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -867,9 +1684,10 @@ internal sealed class TestServer : IAsyncDisposable
         startInfo.Environment["DANTOPHONG_CERT_PATH"] = useTls ? certificatePath ?? string.Empty : string.Empty;
         startInfo.Environment["DANTOPHONG_CERT_PASSWORD"] = useTls ? certificatePassword ?? string.Empty : string.Empty;
         startInfo.Environment["DANTOPHONG_SECONDARY_PORT"] = secondaryPort?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        startInfo.Environment["DANTOPHONG_UDP_PORT"] = udpPort.ToString(CultureInfo.InvariantCulture);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        var server = new TestServer(process, port);
+        var server = new TestServer(process, port, udpPort);
         process.OutputDataReceived += (_, eventArgs) =>
         {
             if (eventArgs.Data != null)
@@ -980,6 +1798,19 @@ internal sealed class TestServer : IAsyncDisposable
             return 19000;
         if (!int.TryParse(configured, out int port) || port is < 1024 or > 65535 || port == 9000)
             throw new TestFailureException("DANTOPHONG_TEST_PORT must be a non-privileged test port other than 9000.");
+        return port;
+    }
+
+    private static int GetConfiguredTestUdpPort()
+    {
+        string? configured = Environment.GetEnvironmentVariable("DANTOPHONG_TEST_UDP_PORT");
+        if (string.IsNullOrWhiteSpace(configured))
+            return 19001;
+        if (!int.TryParse(configured, out int port) ||
+            port is < 1024 or > 65535 ||
+            port is 9000 or 9001 ||
+            port == GetConfiguredTestPort())
+            throw new TestFailureException("DANTOPHONG_TEST_UDP_PORT must be a non-privileged UDP test port distinct from the TCP ports.");
         return port;
     }
 }

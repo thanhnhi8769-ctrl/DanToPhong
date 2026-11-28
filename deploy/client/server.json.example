@@ -1,6 +1,7 @@
 {
   "host": "YOUR_PUBLIC_HOSTNAME_OR_IP_IN_CERTIFICATE_SAN",
   "port": 9000,
+  "udpPort": 9000,
   "useTls": true,
   "certificateThumbprintSha256": "REPLACE_WITH_64_HEX_SHA256_CERTIFICATE_THUMBPRINT"
 }

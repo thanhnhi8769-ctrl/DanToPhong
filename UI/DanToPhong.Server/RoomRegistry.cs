@@ -135,8 +135,7 @@ namespace DanToPhong.Server
                 foreach (Invite i in Invites.Where(x => x.ToUserId == userId && !x.Delivered))
                 {
                     i.Delivered = true;
-                    if (Rooms.ContainsKey(i.RoomCode))
-                        list.Add(new InviteDto { RoomCode = i.RoomCode, FromName = i.FromName });
+                    list.Add(new InviteDto { RoomCode = i.RoomCode, FromName = i.FromName });
                 }
                 return list;
             }

@@ -2,6 +2,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using DanToPhong.Protocol;
@@ -458,24 +460,31 @@ namespace DanToPhong.Server
             await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(token).ConfigureAwait(false);
 
             const string verifySql = @"
-                SELECT UserId
+                SELECT UserId, PasswordHash, PasswordSalt
                 FROM dbo.NguoiDung
                 WHERE Username = @Username
                   AND Email IS NOT NULL
                   AND LOWER(LTRIM(RTRIM(Email))) = LOWER(@Email);";
 
             int userId;
+            string passwordHash;
+            string passwordSalt;
             await using (var verifyCmd = new SqlCommand(verifySql, conn, tx))
             {
                 verifyCmd.Parameters.Add("@Username", SqlDbType.NVarChar, 20).Value = cleanUser;
                 verifyCmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = cleanEmail;
 
-                object? result = await verifyCmd.ExecuteScalarAsync(token).ConfigureAwait(false);
-                if (result == null || result == DBNull.Value)
+                await using var reader = await verifyCmd.ExecuteReaderAsync(token).ConfigureAwait(false);
+                if (!await reader.ReadAsync(token).ConfigureAwait(false))
                     return (false, ErrorCodes.AuthFailed, "Username or registered email does not match.");
 
-                userId = Convert.ToInt32(result);
+                userId = reader.GetInt32(0);
+                passwordHash = reader.GetString(1);
+                passwordSalt = reader.GetString(2);
             }
+
+            if (MatKhau.KiemTraMatKhau(newPassword, passwordHash, passwordSalt))
+                return (false, ErrorCodes.InvalidInput, "New password must be different from your current password.");
 
             var (hash, salt) = MatKhau.BamMatKhau(newPassword);
 
@@ -504,6 +513,90 @@ namespace DanToPhong.Server
             await tx.CommitAsync(token).ConfigureAwait(false);
 
             return (true, ErrorCodes.Ok, "Password updated successfully.");
+        }
+
+        public async Task<(bool Success, string Code, string Message, UserInfoDto? User)> CapNhatCaiDatAsync(
+            int userId,
+            string currentPassword,
+            string? newPassword,
+            string? email,
+            string? replacementToken,
+            DateTime? replacementTokenExpiresAt,
+            CancellationToken token)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(token).ConfigureAwait(false);
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(
+                IsolationLevel.Serializable, token).ConfigureAwait(false);
+
+            string? passwordHash = null;
+            string? passwordSalt = null;
+            await using (var read = new SqlCommand(@"
+                SELECT PasswordHash, PasswordSalt
+                FROM dbo.NguoiDung WITH (UPDLOCK, HOLDLOCK)
+                WHERE UserId=@UserId;", conn, tx))
+            {
+                read.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                await using var reader = await read.ExecuteReaderAsync(token).ConfigureAwait(false);
+                if (await reader.ReadAsync(token).ConfigureAwait(false))
+                {
+                    passwordHash = reader.GetString(0);
+                    passwordSalt = reader.GetString(1);
+                }
+            }
+
+            if (passwordHash == null || passwordSalt == null ||
+                !MatKhau.KiemTraMatKhau(currentPassword, passwordHash, passwordSalt))
+                return (false, ErrorCodes.AuthFailed, "Current password is incorrect.", null);
+
+            if (newPassword != null && MatKhau.KiemTraMatKhau(newPassword, passwordHash, passwordSalt))
+                return (false, ErrorCodes.InvalidInput, "New password must be different from the current password.", null);
+
+            string? newHash = null;
+            string? newSalt = null;
+            if (newPassword != null)
+                (newHash, newSalt) = MatKhau.BamMatKhau(newPassword);
+
+            await using (var update = new SqlCommand(@"
+                UPDATE dbo.NguoiDung
+                SET Email=CASE WHEN @UpdateEmail=1 THEN @Email ELSE Email END,
+                    PasswordHash=CASE WHEN @UpdatePassword=1 THEN @PasswordHash ELSE PasswordHash END,
+                    PasswordSalt=CASE WHEN @UpdatePassword=1 THEN @PasswordSalt ELSE PasswordSalt END
+                WHERE UserId=@UserId;", conn, tx))
+            {
+                update.Parameters.Add("@UpdateEmail", SqlDbType.Bit).Value = email != null;
+                update.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = (object?)email ?? DBNull.Value;
+                update.Parameters.Add("@UpdatePassword", SqlDbType.Bit).Value = newPassword != null;
+                update.Parameters.Add("@PasswordHash", SqlDbType.NVarChar, 128).Value = (object?)newHash ?? DBNull.Value;
+                update.Parameters.Add("@PasswordSalt", SqlDbType.NVarChar, 64).Value = (object?)newSalt ?? DBNull.Value;
+                update.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                if (await update.ExecuteNonQueryAsync(token).ConfigureAwait(false) != 1)
+                    return (false, ErrorCodes.AuthFailed, "Account was not found.", null);
+            }
+
+            if (replacementToken != null && replacementTokenExpiresAt.HasValue)
+            {
+                string tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(replacementToken)));
+                await using var revoke = new SqlCommand(@"
+                    UPDATE dbo.AuthTokens SET RevokedAt=SYSUTCDATETIME()
+                    WHERE UserId=@UserId AND RevokedAt IS NULL;", conn, tx);
+                revoke.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                await revoke.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+
+                await using var saveToken = new SqlCommand(@"
+                    INSERT dbo.AuthTokens(TokenHash, UserId, Username, ExpiresAt, RevokedAt)
+                    SELECT @TokenHash, UserId, Username, @ExpiresAt, NULL
+                    FROM dbo.NguoiDung WHERE UserId=@UserId;", conn, tx);
+                saveToken.Parameters.Add("@TokenHash", SqlDbType.Char, 64).Value = tokenHash;
+                saveToken.Parameters.Add("@ExpiresAt", SqlDbType.DateTime2).Value = replacementTokenExpiresAt.Value;
+                saveToken.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                if (await saveToken.ExecuteNonQueryAsync(token).ConfigureAwait(false) != 1)
+                    return (false, ErrorCodes.AuthFailed, "Account was not found.", null);
+            }
+
+            await tx.CommitAsync(token).ConfigureAwait(false);
+            UserInfoDto? user = await LayThongTinTheoIdAsync(userId, token).ConfigureAwait(false);
+            return (true, ErrorCodes.Ok, "Account settings updated successfully.", user);
         }
 
         // =====================================================================
@@ -653,6 +746,21 @@ namespace DanToPhong.Server
             return o == null || o == DBNull.Value ? null : (byte[])o;
         }
 
+        public async Task<bool> KiemTraMatKhauHienTaiAsync(int userId, string currentPassword, CancellationToken t = default)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync(t).ConfigureAwait(false);
+
+            await using var cmd = new SqlCommand(
+                "SELECT PasswordHash, PasswordSalt FROM dbo.NguoiDung WHERE UserId=@u;", conn);
+            cmd.Parameters.Add("@u", SqlDbType.Int).Value = userId;
+            await using var reader = await cmd.ExecuteReaderAsync(t).ConfigureAwait(false);
+            if (!await reader.ReadAsync(t).ConfigureAwait(false))
+                return false;
+
+            return MatKhau.KiemTraMatKhau(currentPassword, reader.GetString(0), reader.GetString(1));
+        }
+
         // =====================================================================
         // ĐÁNH GIÁ + BẢNG XẾP HẠNG
         // =====================================================================
@@ -683,7 +791,7 @@ namespace DanToPhong.Server
 
             await using var cmd = new SqlCommand(@"
                 SELECT Stars, COUNT(*) FROM dbo.DanhGia GROUP BY Stars;
-                SELECT Stars FROM dbo.DanhGia WHERE UserId=@u;", conn);
+                SELECT Stars, Comment FROM dbo.DanhGia WHERE UserId=@u;", conn);
             cmd.Parameters.Add("@u", SqlDbType.Int).Value = userId;
 
             await using var r = await cmd.ExecuteReaderAsync(t).ConfigureAwait(false);
@@ -697,6 +805,7 @@ namespace DanToPhong.Server
             {
                 sum.HasReviewed = true;
                 sum.MyStars = Convert.ToInt32(r.GetValue(0));
+                sum.MyComment = r.IsDBNull(1) ? null : r.GetString(1);
             }
             return sum;
         }

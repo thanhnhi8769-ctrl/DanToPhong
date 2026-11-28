@@ -29,7 +29,7 @@ public static class PlayerInventory
         PlayerPrefs.SetInt(K(COINS_KEY), 100);
         PlayerPrefs.SetInt(K("Unlocked_Scooter_0"), 1);
         PlayerPrefs.SetInt(K("Equipped_Scooter"), 0);
-        PlayerPrefs.SetString(K(MAP_KEY), "game");
+        PlayerPrefs.SetString(K(MAP_KEY), SceneNames.DefaultMap);
 
         PlayerPrefs.SetInt(K(INIT_KEY), 1);
         PlayerPrefs.Save();
@@ -169,14 +169,38 @@ public static class PlayerInventory
     public static string GetSelectedMap()
     {
         if (UseServer)
-            return string.IsNullOrEmpty(ServerClient.Cache.selectedMap) ? "game" : ServerClient.Cache.selectedMap;
+        {
+            string serverMap = ServerClient.Cache.selectedMap;
+            string normalized = SceneNames.NormalizeMap(serverMap);
+            if (!string.Equals(serverMap, normalized, StringComparison.Ordinal))
+            {
+                SetSelectedMap(normalized);
+                return normalized;
+            }
+            return normalized;
+        }
 
         EnsureInitialized();
-        return PlayerPrefs.GetString(K(MAP_KEY), "game");
+        string localMap = PlayerPrefs.GetString(K(MAP_KEY), SceneNames.DefaultMap);
+        string normalizedLocalMap = SceneNames.NormalizeMap(localMap);
+        if (!string.Equals(localMap, normalizedLocalMap, StringComparison.Ordinal))
+        {
+            PlayerPrefs.SetString(K(MAP_KEY), normalizedLocalMap);
+            PlayerPrefs.Save();
+            return normalizedLocalMap;
+        }
+        return normalizedLocalMap;
     }
 
     public static void SetSelectedMap(string sceneName)
     {
+        if (!SceneNames.IsRaceMap(sceneName))
+        {
+            Debug.LogWarning("[PlayerInventory] Ignored an unsupported race map.");
+            return;
+        }
+        sceneName = SceneNames.NormalizeMap(sceneName);
+
         if (UseServer)
         {
             ServerClient.Cache.selectedMap = sceneName;

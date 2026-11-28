@@ -9,17 +9,17 @@ The canonical consolidated report is
 | Requirement | Status | Evidence / remaining work |
 |---|---|---|
 | C# client with GUI | PARTIAL | WinForms UI under `UI/UI/`; Unity C# game has its own GUI. Needs current-build interactive verification. |
-| At least two GUI clients at once | PARTIAL | Two Unity instances opened to the main menu simultaneously; a live login/match between them remains unverified. |
+| At least two GUI clients at once | PARTIAL | Two Unity instances were previously observed at the main menu, but not logged into one live match. The latest two-client room test used protocol clients, not GUI. |
 | Server implemented in an allowed language with database | SOURCE IMPLEMENTED; LOCAL TEST DB USED | C# server and SQL repositories in `UI/DanToPhong.Server/`; TC05 used the isolated `DanToPhongDB_Test`. Authenticated application workflows remain unverified. |
-| Team-developed client/server network stack | PARTIAL | TCP framing and protocol are in `DanToPhong.Protocol`; the 2026-11-27 console run verifies T2–T8 only at protocol level ([log](evidence/T2-T8-protocol-console-20261127-184734.log)). Gameplay GUI remains unverified. |
-| Client/server ports and message structures specified | DOCUMENTED | `docs/protocol.md`: TCP 9000, 4-byte big-endian length prefix, UTF-8 JSON, command names, DTO fields and limits. |
-| Multiple concurrent connections | PARTIAL | Async accept/session handling and a concurrent session limit are implemented; TC10 verified 50 anonymous loopback PING clients plus framing edge cases, but authenticated/gameplay sustained load and impairment remain untested. |
+| Team-developed client/server network stack | PARTIAL | Custom TCP/TLS framing plus authenticated UDP movement input; four concurrent racers were verified protocol-level ([latest log](evidence/local-protocol-integration-20261127-213927.log)). GUI/Internet gameplay remains unverified. |
+| Client/server ports and message structures specified | DOCUMENTED | `docs/protocol.md`: TCP/TLS 9000 with big-endian length + UTF-8 JSON, UDP 9000 fixed 74-byte HMAC movement datagram, commands, DTOs and limits. |
+| Multiple concurrent connections | PARTIAL | TC10 verified 50 anonymous loopback clients, p95 1.7 ms/max 5.2 ms with a slow incomplete-header sender, malformed/oversized rejection; four UDP racer inputs were separately verified. Authenticated sustained load and impairment remain untested ([latest log](evidence/local-protocol-integration-20261127-213927.log)). |
 | Internet operation | NOT VERIFIED | Pinned self-signed TLS passed only on loopback ([TC05](evidence/TC05-pinned-local-20261127-184719.log)); public endpoint/SAN, ingress, database connectivity and two independent client networks require approved manual validation. |
-| Account registration/login/OTP over custom protocol | PARTIAL; E2E NOT VERIFIED | Latest local smoke accepted synthetic SMTP sample and queued OTP delivery ([log](evidence/local-final-validation-20261127-194616.log)); registration-mail receipt exists, but OTP entry/expiry/attempt lockout and login limiter still need runtime evidence. |
-| Lobby/room membership over custom protocol | PARTIAL | `ROOM_CREATE`, `ROOM_JOIN`, `ROOM_LEAVE`, `ROOM_STATE`, `ROOM_START` use in-memory server registry. Subscribed clients receive ordered event/snapshot frames; spectate/reconnect paths retain state for a 120-second grace period, but no state survives server restart. |
-| Gameplay state over custom protocol | PARTIAL / NOT READY | `GAME_INPUT` requests and `GAME_STREAM` push ordered events/snapshots over TCP; server uses simplified kinematics and configured checkpoint/finish gates; Unity bounds its snapshot queue at eight and interpolates remote state. Full physics, server-owned timer/elimination, and live two-client evidence are still absent. |
+| Account registration/login/OTP over custom protocol | PARTIAL; E2E NOT VERIFIED | The local DB harness rejected wrong/expired OTPs, enforced single use and lockout after five attempts, and exercised the login limiter. Existing SMTP receipt is separate evidence; new email delivery and code entry through Launcher remain unverified ([integration log](evidence/local-protocol-integration-20261127-202549.log)). |
+| Lobby/room membership over custom protocol | PARTIAL | Four authenticated racers exercised create/join/start; an additional client spectated and received snapshots. Reconnect works within grace period; in-memory state does not survive process restart. GUI remains unverified ([latest integration log](evidence/local-protocol-integration-20261127-213927.log)). |
+| Gameplay state over custom protocol | PARTIAL / NOT READY | Four racers sent signed sequenced UDP input; server snapshot positions and events remain on TCP/TLS. Finish/winner authority, full physics, server-owned timer/elimination, and live GUI match remain unverified. |
 | Solo mode | SOURCE PRESENT; RUNTIME NOT VERIFIED | Local Unity vehicle flow exists; build/scene and real playthrough must be rechecked after current edits. |
-| Git-managed source and reproducible build | PARTIAL | Current Server Release build passed with 0 warnings/errors and Launcher Release passed with 0 errors/6 generated-Designer warnings ([latest log](evidence/local-final-validation-20261127-194616.log)). Unity/clean-clone builds passed earlier; a final clean-clone check remains. |
+| Git-managed source and reproducible build | PARTIAL | Unity-generated solution, Server and Launcher Release builds passed with 0 errors (7 Unity warnings, 0 Server warnings, 6 generated-Designer Launcher warnings) ([latest log](evidence/local-release-build-20261127-2030.log)). A final clean-clone check remains. |
 | Architecture, GUI, application flow, three user stories | DOCUMENTED; PNG EXPORTED | Four Draw.io PNGs were exported and visually reviewed; conceptual GUI wireframe is not a screenshot of the running app. |
 | Assignment roles/contact information | NEEDS OWNER INPUT | Report placeholders must be completed from actual group records; no personal details should be invented. |
 
@@ -29,7 +29,8 @@ The canonical consolidated report is
 |---|---|---|
 | Registration, login, OTP, password reset, profile, inventory and reviews | Custom TCP protocol, port 9000 | Source exists; runtime configuration and end-to-end tests required. |
 | Room create/join/leave/state/start | Custom TCP protocol, port 9000 | In-memory server-side membership, spectate and reconnect during a 120-second grace period; no restart recovery. |
-| Vehicle input and player snapshots | Custom TCP protocol, port 9000 | 15–20 Hz input requests plus an authenticated server-push stream for ordered events and nominal 20 Hz snapshots; server simulation remains simplified. |
+| Vehicle movement input | Custom UDP protocol, port 9000; binding via TCP/TLS 9000 | Target 20 Hz, fixed 74-byte HMAC-SHA-256 datagrams with increasing sequence; four racers verified by loopback harness. |
+| Player snapshots and important events | Custom TCP/TLS protocol, port 9000 | Authenticated stream, ordered event frames and nominal 20 Hz snapshots; server simulation remains simplified. |
 | Chat | Custom TCP protocol, port 9000 | In-memory send/poll; not pushed asynchronously. |
 | Solo vehicle simulation | Local Unity physics | Does not require the server for movement. |
 | Checkpoint/finish gates, winner reward, spectating and reconnect | SOURCE PRESENT; LIVE TEST NOT VERIFIED | Gate checks and winner reward are server-side; spectate/reconnect are in-memory for a 120-second grace period. Timer/elimination authority and live-match evidence remain incomplete. |
@@ -48,5 +49,6 @@ The canonical consolidated report is
    then observe two GUI clients in a real match.
 5. Record only observed results and sanitized evidence in `docs/evidence/`.
 
-Any future datagram transport is a design possibility only and is outside the
-current implementation and test claims.
+UDP broadcast discovery is still a future possibility. The UDP movement input
+channel is implemented and loopback-tested; GUI, Internet and impairment tests
+remain outside current claims.

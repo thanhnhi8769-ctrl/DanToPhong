@@ -1,0 +1,10 @@
+AWS read-only status check
+Observed: 2026-11-27 20:05 +07
+Command: .\scripts\aws-test-helper.ps1 -Action Status
+Region: us-east-1
+Credentials: read-only status queries succeeded; no credential material recorded.
+EC2: stopped (t3.micro); health checks not applicable while stopped.
+RDS: stopped; PubliclyAccessible=True.
+Security groups: no 0.0.0.0/0 or ::/0 ingress detected for TCP 9000 or 1433.
+Elastic IP: associated with an RDS network interface; address and identifiers omitted.
+No AWS resources or rules were changed. Internet test was not run because EC2/RDS are stopped and no mutation was authorized.

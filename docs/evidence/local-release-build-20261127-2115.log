@@ -1,0 +1,54 @@
+  AnimaProxima.RacingPack -> D:\DanToPhong\DanToPhong\Temp\bin\Debug\AnimaProxima.RacingPack.dll
+  AnimaProxima.RacingPack.Editor -> D:\DanToPhong\DanToPhong\Temp\bin\Debug\AnimaProxima.RacingPack.Editor.dll
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(11,62): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(25,58): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(38,28): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(39,22): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(41,19): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\gameManager.cs(217,43): warning CS0649: Field 'GameManager.GocCam.pos' is never assigned to, and will always have its default value [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\gameManager.cs(217,106): warning CS0649: Field 'GameManager.GocCam.time' is never assigned to, and will always have its default value 0 [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+  Assembly-CSharp -> D:\DanToPhong\DanToPhong\Temp\bin\Debug\Assembly-CSharp.dll
+  Assembly-CSharp-Editor -> D:\DanToPhong\DanToPhong\Temp\bin\Debug\Assembly-CSharp-Editor.dll
+
+Build succeeded.
+
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(11,62): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(25,58): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(38,28): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(39,22): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\CertificatePinValidator.cs(41,19): warning CS8632: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\gameManager.cs(217,43): warning CS0649: Field 'GameManager.GocCam.pos' is never assigned to, and will always have its default value [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+D:\DanToPhong\DanToPhong\Assets\script\gameManager.cs(217,106): warning CS0649: Field 'GameManager.GocCam.time' is never assigned to, and will always have its default value 0 [D:\DanToPhong\DanToPhong\Assembly-CSharp.csproj]
+    7 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:05.38
+  DanToPhong.Protocol -> D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.dll
+  DanToPhong.Server -> D:\DanToPhong\DanToPhong\UI\DanToPhong.Server\bin\Release\net10.0\DanToPhong.Server.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:03.20
+  DanToPhong.Protocol -> D:\DanToPhong\DanToPhong\UI\DanToPhong.Protocol\bin\Release\net10.0\DanToPhong.Protocol.dll
+D:\DanToPhong\DanToPhong\UI\UI\GuidelinesDialog.Designer.cs(8,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\LoginForm.Designer.cs(8,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\PopupNoticeForm.Designer.cs(8,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\RegisterForm.Designer.cs(5,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\ForgotPasswordForm.Designer.cs(5,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\Main.Designer.cs(9,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+  UI -> D:\DanToPhong\DanToPhong\UI\UI\bin\Release\net10.0-windows\UI.dll
+
+Build succeeded.
+
+D:\DanToPhong\DanToPhong\UI\UI\GuidelinesDialog.Designer.cs(8,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\LoginForm.Designer.cs(8,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\PopupNoticeForm.Designer.cs(8,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\RegisterForm.Designer.cs(5,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\ForgotPasswordForm.Designer.cs(5,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+D:\DanToPhong\DanToPhong\UI\UI\Main.Designer.cs(9,49): warning CS8669: The annotation for nullable reference types should only be used in code within a '#nullable' annotations context. Auto-generated code requires an explicit '#nullable' directive in source. [D:\DanToPhong\DanToPhong\UI\UI\UI.csproj]
+    6 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.98

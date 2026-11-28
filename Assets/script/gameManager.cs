@@ -589,7 +589,13 @@ public class GameManager : MonoBehaviour
                 button.onClick.AddListener(RestartGame);
                 KichHoatClickChoNut(button);
             }
-            else if (key.Contains("menu") || key.Contains("quit") || key.Contains("exit") || key.Contains("lobby"))
+            else if (key.Contains("lobby"))
+            {
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(VePhongChung);
+                KichHoatClickChoNut(button);
+            }
+            else if (key.Contains("menu") || key.Contains("quit") || key.Contains("exit"))
             {
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(QuitGame);
@@ -2033,6 +2039,7 @@ public class GameManager : MonoBehaviour
 
         daCoNguoiThang = true;
         string name = string.IsNullOrWhiteSpace(winnerUsername) ? "ANOTHER PLAYER" : winnerUsername.ToUpperInvariant();
+        MatchHistorySystem.LuuKetQuaTran(false, 0);
         HienKetQuaThua(name + " WON THE RACE!", true);
     }
 
@@ -2043,7 +2050,7 @@ public class GameManager : MonoBehaviour
             XuLyBanThanBiLoaiNoiBo();
     }
 
-    private void XuLyThang(bool thangVoiLyDoConLaiCuoiCung)
+    private async void XuLyThang(bool thangVoiLyDoConLaiCuoiCung)
     {
         if (!daBatDauDua || ketThucGame || winGame || daBiLoai || daCoNguoiThang) return;
 
@@ -2051,8 +2058,8 @@ public class GameManager : MonoBehaviour
         winGame = true;
         ketThucGame = true;
 
-        int xuNhan = cheDoNhieuNguoi ? 0 : thuongChoiSolo;
-        if (!cheDoNhieuNguoi && !daNhanThuongTranNay && xuNhan > 0)
+        int xuNhan = cheDoNhieuNguoi ? 50 : (LauncherArgs.HasLauncher ? 10 : thuongChoiSolo);
+        if (!cheDoNhieuNguoi && !LauncherArgs.HasLauncher && !daNhanThuongTranNay && xuNhan > 0)
         {
             daNhanThuongTranNay = true;
             PlayerInventory.AddCoins(xuNhan);
@@ -2062,14 +2069,18 @@ public class GameManager : MonoBehaviour
         if (!nhacBiTat && hieuUngSource != null && amThanhWin != null)
             hieuUngSource.PlayOneShot(amThanhWin);
 
-        MatchHistorySystem.LuuKetQuaTran(true, xuNhan);
+        int xuDaXacNhan = xuNhan;
+        if (LauncherArgs.HasLauncher)
+            xuDaXacNhan = await MatchHistorySystem.LuuKetQuaTranAsync(xuNhan);
+        else
+            MatchHistorySystem.LuuKetQuaTran(true, xuNhan);
 
         string loiChucPhuDe;
         if (!cheDoNhieuNguoi) loiChucPhuDe = "YOU CROSSED THE FINISH LINE!";
         else if (thangVoiLyDoConLaiCuoiCung) loiChucPhuDe = "YOU ARE THE LAST RACER STANDING!";
         else loiChucPhuDe = "YOU REACHED THE FINISH LINE FIRST!";
 
-        HienBangKetQuaCuoi(true, xuNhan, loiChucPhuDe);
+        HienBangKetQuaCuoi(true, xuDaXacNhan, loiChucPhuDe);
     }
 
     private void XuLyBanThanBiLoai()
@@ -2597,13 +2608,13 @@ public class GameManager : MonoBehaviour
 
         LeaveTcpRoom();
 
-        SceneManager.LoadScene("menu");
+        SceneManager.LoadScene(SceneNames.Menu);
     }
     [Header("Về phòng chờ (Solo & Nhiều người)")]
     [Tooltip("Tên scene phòng chờ / sảnh chọn xe & map")]
-    public string tenScenePhongCho = "SelectScene";
+    public string tenScenePhongCho = SceneNames.Select;
     [Tooltip("Tên scene lobby cho chế độ nhiều người.")]
-    public string tenSceneLobbyNhieuNguoi = "LobbyScene";
+    public string tenSceneLobbyNhieuNguoi = SceneNames.Lobby;
     public string chuNutVeLobbyNhieuNguoi = "BACK TO LOBBY";
 
     private bool dangVePhongChung = false;
@@ -2612,7 +2623,7 @@ public class GameManager : MonoBehaviour
     /// Hàm chung: chạy được cả khi chơi 1 mình lẫn khi chơi nhiều người cùng phòng.
     /// Trả người chơi về lobby và rời phòng TCP hiện tại.
     /// </summary>
-    public void VePhongChung()
+    public async void VePhongChung()
     {
         if (dangVePhongChung) return;
         dangVePhongChung = true;
@@ -2633,7 +2644,23 @@ public class GameManager : MonoBehaviour
         coViTriLucThua = false;
         if (!string.IsNullOrWhiteSpace(LauncherArgs.Room))
         {
-            LeaveTcpRoom();
+            try
+            {
+                Resp response = await ServerClient.CallAsync(new Req { command = "ROOM_RETURN" });
+                if (response == null || !response.success)
+                {
+                    Debug.LogWarning("[GameManager] Could not return to the room lobby: " +
+                        (response != null ? response.message : "The server connection is unavailable."));
+                    dangVePhongChung = false;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[GameManager] Could not return to the room lobby: " + ex.GetType().Name);
+                dangVePhongChung = false;
+                return;
+            }
 
             string sceneLobby = tenSceneLobbyNhieuNguoi;
             if (string.IsNullOrEmpty(sceneLobby) || !Application.CanStreamedLevelBeLoaded(sceneLobby))
@@ -2746,7 +2773,7 @@ public class GameManager : MonoBehaviour
 
         LeaveTcpRoom();
 
-        SceneManager.LoadScene("menu");
+        SceneManager.LoadScene(SceneNames.Menu);
     }
 
     private static void LeaveTcpRoom()

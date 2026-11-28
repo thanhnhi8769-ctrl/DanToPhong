@@ -212,7 +212,7 @@ public class MultiplayerAllInOne : MonoBehaviour
 
     private void ToggleMic()
     {
-        ThemTinNhanHeThong("Voice chat is not available in this TCP build.");
+        ThemTinNhanHeThong("Microphone voice chat is disabled in this build. Audio is not captured or sent; use text chat instead.");
     }
 
     private void CapNhatNutMic()

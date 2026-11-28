@@ -13,6 +13,8 @@ namespace DanToPhong.Server
         public int? AuthenticatedUserId { get; set; }
         public string? AuthenticatedUsername { get; set; }
         public string? AuthToken { get; set; }
+        public string? UdpSessionId { get; set; }
+        public byte[]? UdpKey { get; set; }
         public DateTime ConnectedAt { get; } = DateTime.Now;
         public SemaphoreSlim SendLock { get; } = new(1, 1);
         public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

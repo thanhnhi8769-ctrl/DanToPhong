@@ -42,6 +42,7 @@ namespace UI.Services
             string token,
             string host,
             int port,
+            int udpPort,
             bool useTls,
             string certificateThumbprintSha256,
             string mode,
@@ -61,7 +62,8 @@ namespace UI.Services
 
             string safeUser = string.IsNullOrWhiteSpace(username) ? "player1" : username.Trim();
             string safeMode = string.IsNullOrWhiteSpace(mode) ? "single" : mode.Trim();
-            if (string.IsNullOrWhiteSpace(host) || port is < 1 or > 65535 || string.IsNullOrWhiteSpace(token))
+            if (string.IsNullOrWhiteSpace(host) || port is < 1 or > 65535 ||
+                udpPort is < 1 or > 65535 || string.IsNullOrWhiteSpace(token))
             {
                 MessageBox.Show("Thiếu host, port hoặc token hợp lệ từ phiên đăng nhập.", "Lỗi cấu hình kết nối",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -78,8 +80,10 @@ namespace UI.Services
             psi.ArgumentList.Add("--user"); psi.ArgumentList.Add(safeUser);
             psi.Environment["DANTOPHONG_SESSION_TOKEN"] = token;
             psi.Environment["DANTOPHONG_SERVER_CERT_SHA256"] = certificateThumbprintSha256;
+            psi.Environment["DANTOPHONG_UDP_PORT"] = udpPort.ToString();
             psi.ArgumentList.Add("--host"); psi.ArgumentList.Add(host);
             psi.ArgumentList.Add("--port"); psi.ArgumentList.Add(port.ToString());
+            psi.ArgumentList.Add("--udp-port"); psi.ArgumentList.Add(udpPort.ToString());
             psi.ArgumentList.Add("--tls");
             psi.ArgumentList.Add(useTls ? "true" : "false");
             psi.ArgumentList.Add("--mode"); psi.ArgumentList.Add(safeMode);

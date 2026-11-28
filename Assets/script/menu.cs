@@ -7,8 +7,8 @@ public class MenuController : MonoBehaviour
 {
     [Header("Tên Scene")]
     [Tooltip("Nút Play dẫn tới Lobby (chọn xe/map sẽ làm trong Lobby sau khi vào phòng)")]
-    public string tenSceneLobby = "LobbyScene";
-    public string tenSceneShop = "ShopScene";
+    public string tenSceneLobby = SceneNames.Lobby;
+    public string tenSceneShop = SceneNames.Shop;
 
     [Header("Xác nhận thoát (tùy chọn)")]
     [Tooltip("Gán panel xác nhận nếu muốn ESC hỏi trước khi thoát. Để trống thì ESC thoát luôn.")]

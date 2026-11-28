@@ -38,12 +38,44 @@ public class ServerHeartbeat : MonoBehaviour
 // Chủ phòng báo trạng thái phòng lên server (mỗi khi đổi, và 8s/lần để giữ phòng còn sống).
 public class RoomReporter : MonoBehaviour
 {
+    private const float ReportIntervalSeconds = 1f;
+    private float nextReportAt;
+    private bool reportPending;
+
+    private async void Update()
+    {
+        if (reportPending || Time.unscaledTime < nextReportAt ||
+            !ServerClient.Ready || string.IsNullOrWhiteSpace(LauncherArgs.Room))
+            return;
+
+        nextReportAt = Time.unscaledTime + ReportIntervalSeconds;
+        reportPending = true;
+        try
+        {
+            Resp response = await ServerClient.CallAsync(new Req
+            {
+                command = "ROOM_SCENE",
+                sceneName = SceneManager.GetActiveScene().name,
+                isReady = SelectManager.RoomSelectionConfirmed
+            });
+            if (response == null || !response.success)
+                Debug.LogWarning("[RoomReporter] Scene readiness was not accepted by the server.");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning("[RoomReporter] " + ex.GetType().Name);
+        }
+        finally
+        {
+            reportPending = false;
+        }
+    }
 }
 
 // Nhận lời mời + làm mới kho/xu bằng 1 lệnh LAYTRANGTHAI. Tần suất hỏi tùy theo người chơi đang làm gì.
 public class InviteListener : MonoBehaviour
 {
-    public string sceneLobby = "LobbyScene";
+    public string sceneLobby = SceneNames.Lobby;
 
     private const float POLL_NGOAI_PHONG = 4f;    // đang ở menu: cần thấy lời mời nhanh
     private const float POLL_TRONG_PHONG = 10f;   // đang chờ trong phòng
@@ -68,7 +100,7 @@ public class InviteListener : MonoBehaviour
     // Vào scene Lobby thì tự dựng ô "mời bạn bằng ID"
     private void OnSceneLoaded(Scene s, LoadSceneMode m)
     {
-        if (s.name.ToLower().Contains("lobby") && FindFirstObjectByType<LobbyInviteUI>() == null)
+        if (s.name == SceneNames.Lobby && FindFirstObjectByType<LobbyInviteUI>() == null)
             new GameObject("LobbyInviteUI").AddComponent<LobbyInviteUI>();
 
         nextPoll = 0f;   // đổi scene: hỏi lại ngay để xu/kho cập nhật
